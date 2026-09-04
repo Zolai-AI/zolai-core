@@ -12,3 +12,4 @@ artifacts/
 .venv/
 *.jsonl
 !kaggle_dataset/*.json
+*.pem
