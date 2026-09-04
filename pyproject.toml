@@ -8,7 +8,7 @@ version = "2.0.0"
 description = "Unified Zolai language toolkit — crawl, clean, analyze, train, translate"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "Apache-2.0"}
+license = {text = "MIT"}
 authors = [
     {name = "Peter", email = "peterpausianlian@gmail.com"},
 ]
@@ -16,7 +16,7 @@ keywords = ["zolai", "tedim", "chin", "language", "nlp", "llm", "translation"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: Apache Software License",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
