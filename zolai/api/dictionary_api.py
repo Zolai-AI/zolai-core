@@ -33,7 +33,7 @@ en_index: dict[str, dict] = {}   # english.lower() → record
 
 def load_dictionary() -> None:
     global records, zo_index, en_index
-    records = [json.loads(l) for l in open(DICT_PATH, encoding="utf-8")]
+    records = [json.loads(line) for line in open(DICT_PATH, encoding="utf-8")]
     zo_index = {r["zolai"].lower(): r for r in records}
     en_index = {r["english"].lower(): r for r in records}
 
@@ -77,13 +77,15 @@ def _fuzzy_search(query: str, direction: str, limit: int) -> list[dict]:
         for key, rec in zo_index.items():
             if key != q and key.startswith(q) and rec not in results:
                 results.append(rec)
-                if len(results) >= limit: break
+                if len(results) >= limit:
+                    break
         # Substring match
         if len(results) < limit:
             for key, rec in zo_index.items():
                 if q in key and rec not in results:
                     results.append(rec)
-                    if len(results) >= limit: break
+                    if len(results) >= limit:
+                        break
 
     if direction in ("en-zo", "both"):
         if q in en_index and en_index[q] not in results:
@@ -91,12 +93,14 @@ def _fuzzy_search(query: str, direction: str, limit: int) -> list[dict]:
         for key, rec in en_index.items():
             if key != q and key.startswith(q) and rec not in results:
                 results.append(rec)
-                if len(results) >= limit: break
+                if len(results) >= limit:
+                    break
         if len(results) < limit:
             for key, rec in en_index.items():
                 if q in key and rec not in results:
                     results.append(rec)
-                    if len(results) >= limit: break
+                    if len(results) >= limit:
+                        break
 
     return results[:limit]
 

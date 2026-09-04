@@ -91,9 +91,8 @@ def dedup(
 ):
     """🔄 Deduplicate cleaned data."""
     _setup_logging(verbose)
-    from ..cleaner.pipeline import CleanPipeline
+    from ..cleaner.pipeline import CleanPipeline  # noqa: F401 — ensure loaded
 
-    pipe = CleanPipeline()
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
         task = progress.add_task("Deduplicating...", total=None)
         # Use deduper.exact_dedup via run_full_pipeline stats, or standalone dedup_corpus

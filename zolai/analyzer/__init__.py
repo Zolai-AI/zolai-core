@@ -1,13 +1,14 @@
 """Zolai language analyzer — corpus stats, grammar, dictionary, Bible tools."""
 import json
 import logging
-import re
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 from ..config import Paths
-from ..shared.utils import ZolaiRecord, read_jsonl, zolai_density
+from ..shared.utils import ZolaiRecord as ZolaiRecord  # noqa: F401 — re-export
+from ..shared.utils import read_jsonl
+from ..shared.utils import zolai_density as zolai_density  # noqa: F401 — re-export
 
 log = logging.getLogger(__name__)
 

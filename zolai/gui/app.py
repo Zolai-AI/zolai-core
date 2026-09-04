@@ -4,22 +4,22 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
-import logging
-import threading
-import time
+import logging  # noqa: E402 — must follow gi.require_version
+import threading  # noqa: E402
+import time  # noqa: E402
 
-from gi.repository import Gdk, Gio, GLib, Gtk
+from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
 
-from ..analyzer.corpus import CorpusAnalyzer
-from ..cleaner.pipeline import CleanPipeline
-from ..crawler.engine import CrawlEngine
-from ..dictionary.manager import DictionaryManager
-from ..ingest import ingest_pdfs, ingest_text_files
-from ..manager import corpus_status
-from ..manager import dedup_corpus as do_dedup
-from ..manager import filter_zolai as do_filter
-from ..manager import unify as do_unify
-from ..trainer.dataset import DatasetBuilder
+from ..analyzer.corpus import CorpusAnalyzer  # noqa: E402
+from ..cleaner.pipeline import CleanPipeline  # noqa: E402
+from ..crawler.engine import CrawlEngine  # noqa: E402
+from ..dictionary.manager import DictionaryManager  # noqa: E402
+from ..ingest import ingest_pdfs, ingest_text_files  # noqa: E402
+from ..manager import corpus_status  # noqa: E402
+from ..manager import dedup_corpus as do_dedup  # noqa: E402
+from ..manager import filter_zolai as do_filter  # noqa: E402
+from ..manager import unify as do_unify  # noqa: E402
+from ..trainer.dataset import DatasetBuilder  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -276,7 +276,10 @@ class ZolaiWindow(Gtk.ApplicationWindow):
         def run():
             self.crawl_log.append(f"[{time.strftime('%H:%M:%S')}] Starting crawl: {seed}")
             results = engine.crawl_seed(seed)
-            GLib.idle_add(lambda: self.crawl_log.append(f"[{time.strftime('%H:%M:%S')}] ✓ Crawled {len(results)} pages"))
+            ts = time.strftime('%H:%M:%S')
+            GLib.idle_add(lambda: self.crawl_log.append(
+                f"[{ts}] ✓ Crawled {len(results)} pages"
+            ))
             return results
 
         self._run_threaded(run)
@@ -533,7 +536,9 @@ class ZolaiWindow(Gtk.ApplicationWindow):
             if "error" in result:
                 GLib.idle_add(lambda: self.manager_log.append(f"✗ {result['error']}"))
             else:
-                GLib.idle_add(lambda: self.manager_log.append(f"✓ Scanned {result['scanned']:,} → {result['written']:,} unique"))
+                GLib.idle_add(lambda: self.manager_log.append(
+                    f"✓ Scanned {result['scanned']:,} → {result['written']:,} unique"
+                ))
                 GLib.idle_add(lambda: self.manager_log.append(f"  → {result['path']}"))
             return result
         self._run_threaded(run)
@@ -545,7 +550,9 @@ class ZolaiWindow(Gtk.ApplicationWindow):
             if "error" in result:
                 GLib.idle_add(lambda: self.manager_log.append(f"✗ {result['error']}"))
             else:
-                GLib.idle_add(lambda: self.manager_log.append(f"✓ Scanned {result['scanned']:,} → {result['kept']:,} Zolai lines"))
+                GLib.idle_add(lambda: self.manager_log.append(
+                    f"✓ Scanned {result['scanned']:,} → {result['kept']:,} Zolai lines"
+                ))
                 GLib.idle_add(lambda: self.manager_log.append(f"  → {result['path']}"))
             return result
         self._run_threaded(run)
@@ -605,7 +612,6 @@ class ZolaiWindow(Gtk.ApplicationWindow):
             zolai = entry.get('zolai', '')
             english = entry.get('english', '')
             source = entry.get('source', '')
-            example = entry.get('example', '')
             line = f"📖 {zolai} → {english} [{source}]"
             usage = entry.get('usage_hint', '')
             syns = entry.get('synonyms', [])
