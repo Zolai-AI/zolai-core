@@ -3,11 +3,12 @@
 Kaggle T4x2 optimized training (30h limit)
 """
 import json
-import torch
 from pathlib import Path
-from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
-from peft import get_peft_model, LoraConfig, TaskType
+
+import torch
 from datasets import Dataset
+from peft import LoraConfig, TaskType, get_peft_model
+from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 
 # Kaggle paths
 TRAIN_FILE = Path("/kaggle/input/zolai-dataset/llm_train.jsonl")
@@ -121,7 +122,7 @@ print("\nSaving model...")
 model.save_pretrained(OUTPUT_DIR / "final_model")
 tokenizer.save_pretrained(OUTPUT_DIR / "final_model")
 
-print(f"\n✅ Training complete!")
+print("\n✅ Training complete!")
 print(f"Model: {OUTPUT_DIR}/final_model")
-print(f"Samples trained: 500K")
-print(f"Time: ~30 hours on T4x2")
+print("Samples trained: 500K")
+print("Time: ~30 hours on T4x2")

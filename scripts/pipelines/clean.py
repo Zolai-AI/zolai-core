@@ -5,11 +5,9 @@ from __future__ import annotations
 
 import json
 import re
-import sys
-from pathlib import Path
-from datetime import datetime
 from dataclasses import dataclass
-from typing import Iterator
+from datetime import datetime
+from pathlib import Path
 
 # Configuration
 ROOT = Path(__file__).resolve().parent.parent

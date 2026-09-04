@@ -1,8 +1,9 @@
-import sys
 import json
 import sqlite3
+import sys
+from typing import Dict, List
+
 import requests
-from typing import List, Dict
 from transformers import pipeline
 
 # Configuration
@@ -36,7 +37,7 @@ def save_to_kg(triples: List[Dict]):
     """Inserts triples into KgNode and KgEdge tables."""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    
+
     for t in triples:
         # Ensure nodes exist
         for label in [t['s'], t['o']]:
@@ -44,13 +45,13 @@ def save_to_kg(triples: List[Dict]):
                 "INSERT OR IGNORE INTO kg_node (id, iri, label, kind) VALUES (?, ?, ?, ?)",
                 (label, f"zolai:{label}", label, "Entity")
             )
-        
+
         # Insert Edge
         cur.execute(
             "INSERT OR IGNORE INTO kg_edge (fromId, toId, predicate, sourceKey) VALUES (?, ?, ?, ?)",
             (t['s'], t['o'], t['p'], "extraction_pipeline")
         )
-    
+
     conn.commit()
     conn.close()
 
@@ -58,11 +59,11 @@ def process_text(text: str):
     print(f"Processing: {text[:50]}...")
     ner_results = ner_pipeline(text)
     print(f"Extracted {len(ner_results)} entities.")
-    
+
     relationships = get_relationships(text, ner_results)
     if isinstance(relationships, str):
         relationships = json.loads(relationships)
-        
+
     save_to_kg(relationships)
     print(f"Saved {len(relationships)} triples to {DB_PATH}.")
 

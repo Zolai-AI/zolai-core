@@ -7,9 +7,11 @@ Usage:
     python scripts/gemini_webapi_setup.py
     python scripts/gemini_webapi_setup.py --zvs "Ka pasian in ram a piangsak hi."
 """
-import asyncio
 import argparse
+import asyncio
+
 from gemini_webapi import GeminiClient
+
 
 async def test_basic(client: GeminiClient):
     response = await client.generate_content("Say 'Zolai AI ready' in one line.")

@@ -2,9 +2,8 @@
 """Test script for Zolai chat functionality."""
 
 import json
-import sys
-import urllib.request
 import urllib.error
+import urllib.request
 
 MODEL = "qwen3-coder:480b-cloud"
 URL = "http://localhost:11434"
@@ -58,7 +57,7 @@ def test_chat():
 
     # Test 1: Greeting
     response = chat("Hello")
-    print(f"Q: Hello")
+    print("Q: Hello")
     print(f"A: {response}")
 
     # Check if response contains Zolai greeting
@@ -69,7 +68,7 @@ def test_chat():
 
     # Test 2: Thank you
     response = chat("Thank you")
-    print(f"\nQ: Thank you")
+    print("\nQ: Thank you")
     print(f"A: {response}")
 
     # Check if response contains Zolai thank you
@@ -80,7 +79,7 @@ def test_chat():
 
     # Test 3: Grammar question
     response = chat("What is the word order in Zolai?")
-    print(f"\nQ: What is the word order in Zolai?")
+    print("\nQ: What is the word order in Zolai?")
     print(f"A: {response}")
 
     # Check if response mentions OSV

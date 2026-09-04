@@ -17,7 +17,9 @@ Notebook: notebooks/zolai-llm-fine-tuning-on-t4x2.ipynb
 # =========================
 # 1. INSTALL
 # =========================
-import subprocess, sys
+import subprocess
+import sys
+
 subprocess.run([sys.executable, "-m", "pip", "install", "-q",
     "transformers", "peft", "datasets", "accelerate",
     "bitsandbytes", "kaggle", "huggingface_hub", "--upgrade"], check=True)
@@ -61,7 +63,9 @@ print(f"Resume:  {RESUME_ADAPTER or 'None (fresh start)'}")
 # =========================
 # 4. LOAD DATASET
 # =========================
-import json, glob
+import glob
+import json
+
 import torch
 from datasets import Dataset
 
@@ -101,8 +105,8 @@ print(f"Train: {len(train_dataset):,} | Val: {len(val_dataset):,}")
 # =========================
 # 5. MODEL + TOKENIZER
 # =========================
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
-from peft import get_peft_model, PeftModel, LoraConfig, TaskType
+from peft import LoraConfig, PeftModel, TaskType, get_peft_model
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
@@ -146,7 +150,9 @@ print(f"GPU 0: {(total-free)/1e9:.1f}GB used / {total/1e9:.1f}GB total")
 # 6. TRAIN
 # =========================
 import datetime
+
 from transformers import DataCollatorForLanguageModeling, Trainer, TrainingArguments
+
 
 def tokenize(examples):
     return tokenizer(examples["text"], truncation=True, max_length=MAX_LENGTH)
@@ -206,6 +212,7 @@ for l in trainer.state.log_history:
 # 7. SAVE + UPLOAD
 # =========================
 import shutil
+
 from huggingface_hub import HfApi, create_repo
 
 ADAPTER_OUT = "./zolai_adapter"

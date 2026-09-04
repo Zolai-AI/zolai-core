@@ -5,7 +5,7 @@ INPUT_FILE = Path("data/training/validation_local_wiki.jsonl")
 
 corrections = {
     "ram": "gam",
-    "lo leh": "kei", 
+    "lo leh": "kei",
     "pathian": "pasian",
     "fapa": "tapa",
     "bawipa": "kumpipa",
@@ -19,7 +19,7 @@ with open(INPUT_FILE, "r") as f:
         if not rec.get("valid"):
             reason = rec.get("reason", "")
             text = rec.get("text", "")
-            
+
             for wrong, correct in corrections.items():
                 if f"invalid_pattern:{wrong}" in reason and len(examples[wrong]) < 3:
                     examples[wrong].append(text)

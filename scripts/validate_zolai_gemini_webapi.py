@@ -55,20 +55,20 @@ async def validate_with_gemini():
         print(f"❌ Failed to connect: {e}")
         print("Make sure cookies.json is in project root with valid cookies")
         return
-    
+
     results = {
         "timestamp": str(Path.cwd()),
         "loan_words": {},
         "translations": {},
     }
-    
+
     # Validate loan words
     print("🔍 Validating loan words...\n")
     for i, (word, explanation) in enumerate(LOAN_WORDS.items()):
         try:
             prompt = f"Is this Zolai explanation for '{word}' accurate? {explanation}\nProvide brief feedback."
             response = await client.generate_content(
-                prompt, 
+                prompt,
                 system_prompt=SYSTEM_PROMPT,
                 temperature=0.3,
                 top_p=0.8
@@ -81,7 +81,7 @@ async def validate_with_gemini():
         except Exception as e:
             print(f"❌ {word}: {str(e)}")
             results["loan_words"][word] = f"Error: {str(e)}"
-    
+
     # Validate translations
     print("\n🔍 Validating translations...\n")
     for i, (story, translation) in enumerate(TRANSLATIONS.items()):
@@ -101,14 +101,14 @@ async def validate_with_gemini():
         except Exception as e:
             print(f"❌ {story}: {str(e)}")
             results["translations"][story] = f"Error: {str(e)}"
-    
+
     # Save results
     output_file = Path("/home/peter/Documents/Projects/zolai/GEMINI_WEBAPI_VALIDATION_RESULTS.json")
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
-    
+
     print(f"\n✅ Results saved to {output_file}")
-    
+
     await client.close()
 
 if __name__ == "__main__":

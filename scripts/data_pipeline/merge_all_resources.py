@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from collections import Counter
 
 DATA = Path("data/training")
 CURRENT_FILE = DATA / "master_train_production_complete.jsonl"
@@ -122,6 +121,6 @@ log(f"Total records: {len(current_records):,}")
 log(f"Output: {OUTPUT_FILE}")
 log(f"{'='*80}")
 
-print(f"\n✅ Merged all resources!")
+print("\n✅ Merged all resources!")
 print(f"Total: {len(current_records):,} records")
 print(f"Output: {OUTPUT_FILE}")

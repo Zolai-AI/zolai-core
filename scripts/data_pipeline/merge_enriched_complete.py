@@ -34,17 +34,17 @@ with open(VALIDATED_FILE, "r") as f_in, open(OUTPUT_FILE, "w") as f_out:
         try:
             rec = json.loads(line)
             text = rec.get("text", "")
-            
+
             # Merge enriched fields
             if text in enriched_map:
                 enriched = enriched_map[text]
                 rec["source_type"] = enriched.get("source_type")
                 rec["pos"] = enriched.get("pos")
                 matched += 1
-            
+
             f_out.write(json.dumps(rec, ensure_ascii=False) + "\n")
             count += 1
-            
+
             if (i + 1) % 500000 == 0:
                 log(f"[{i+1}] Processed... Matched: {matched}")
         except:

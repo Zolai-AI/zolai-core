@@ -15,7 +15,7 @@ invalid_records = []
 with open(INPUT_FILE, "r") as f:
     for i, line in enumerate(f):
         rec = json.loads(line)
-        if rec.get("valid") == False:
+        if not rec.get("valid"):
             invalid_records.append((i, rec))
 
 print(f"\n{'='*80}")
@@ -51,13 +51,13 @@ if choice == "4":
     print(f"\n{'='*80}")
     print("EXAMPLES BY REASON")
     print(f"{'='*80}\n")
-    
+
     for reason in sorted(by_reason.keys(), key=lambda x: len(by_reason[x]), reverse=True)[:5]:
         print(f"\n{reason} ({len(by_reason[reason])} records):")
         for idx, rec in by_reason[reason][:2]:
             text = rec.get("text", "")[:80]
             print(f"  • {text}")
-    
+
     print(f"\n{'='*80}\n")
     choice = input("Now choose (1-3): ").strip()
 
@@ -79,14 +79,14 @@ if choice == "1":
 
 elif choice == "2":
     print("\n✓ Fixing pathian → pasian (if Zolai), removing others...")
-    
+
     # Zolai markers to detect if text is Zolai
     ZOLAI_MARKERS = {"pasian", "leitung", "khuavak", "tua", "in", "a", "leh", "kei", "gam", "tapa"}
-    
+
     for idx, rec in invalid_records:
         text = rec.get("text", "").lower()
         reason = rec.get("reason", "")
-        
+
         if "missing_text" in reason:
             removed.append(rec)
             decisions.append({"index": idx, "action": "remove", "reason": "missing_text"})
@@ -118,7 +118,7 @@ all_records = []
 with open(INPUT_FILE, "r") as f:
     for i, line in enumerate(f):
         rec = json.loads(line)
-        if rec.get("valid") == True:
+        if rec.get("valid"):
             all_records.append(rec)
 
 # Add approved records
@@ -134,7 +134,7 @@ with open(DECISIONS_FILE, "w") as f:
         f.write(json.dumps(d, ensure_ascii=False) + "\n")
 
 print(f"\n{'='*80}")
-print(f"RESULTS")
+print("RESULTS")
 print(f"{'='*80}")
 print(f"Approved: {len(approved)}")
 print(f"Removed: {len(removed)}")

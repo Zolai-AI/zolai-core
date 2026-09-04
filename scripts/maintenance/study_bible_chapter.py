@@ -10,9 +10,11 @@ Usage:
   python scripts/maintenance/study_bible_chapter.py --list
 """
 
-import json, re, argparse
+import argparse
+import json
+import re
+from collections import Counter, defaultdict
 from pathlib import Path
-from collections import defaultdict, Counter
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "data/parallel"

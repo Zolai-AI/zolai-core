@@ -120,8 +120,8 @@ print(f"Train: {len(train_dataset):,} | Val: {len(val_dataset):,}")
 # =========================
 # 5. MODEL + TOKENIZER
 # =========================
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 from peft import LoraConfig, PeftModel, get_peft_model
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
@@ -175,7 +175,7 @@ val_dataset = val_dataset.map(tokenize, batched=True, remove_columns=["text"])
 # =========================
 # 7. TRAIN
 # =========================
-from transformers import TrainingArguments, Trainer
+from transformers import Trainer, TrainingArguments
 
 args = TrainingArguments(
     output_dir="/kaggle/working/out",

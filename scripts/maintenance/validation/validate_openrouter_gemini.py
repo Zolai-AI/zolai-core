@@ -6,8 +6,8 @@ Run: python3 validate_openrouter_gemini.py
 import json
 import os
 from pathlib import Path
+
 import requests
-from datetime import datetime
 from dotenv import load_dotenv
 
 # Load .env file
@@ -50,19 +50,19 @@ log(f"Sample size: {SAMPLE_SIZE}\n")
 def call_openrouter(prompt, model_idx=0):
     """Call OpenRouter with model rotation"""
     model = MODELS[model_idx % len(MODELS)]
-    
+
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "HTTP-Referer": "https://zolai.local",
         "X-Title": "Zolai Validation",
     }
-    
+
     data = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": MAX_TOKENS,
     }
-    
+
     try:
         response = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
@@ -72,13 +72,13 @@ def call_openrouter(prompt, model_idx=0):
         )
         response.raise_for_status()
         result = response.json()
-        
+
         if "choices" in result and result["choices"]:
             return result["choices"][0]["message"]["content"], model
         else:
             return None, model
-            
-    except Exception as e:
+
+    except Exception:
         return None, model
 
 stats = {
@@ -97,24 +97,24 @@ try:
         for i, line in enumerate(f):
             if i >= SAMPLE_SIZE:
                 break
-            
+
             rec = json.loads(line)
             text = rec.get("text", "")[:100]
             dialect = rec.get("dialect", "")
             level = rec.get("language_level", "")
-            
+
             log(f"[{i+1}/{SAMPLE_SIZE}] {text}...")
-            
+
             prompt = f"""Validate Zolai sentence:
 Text: {text}
 Dialect: {dialect}
 Level: {level}
 
 JSON only: {{"valid": true/false, "dialect_ok": true/false, "level_ok": true/false, "confidence": 0-1, "remark": "text"}}"""
-            
+
             # Call with model rotation
             response, model = call_openrouter(prompt, i)
-            
+
             if response:
                 import re
                 json_match = re.search(r'\{.*\}', response, re.DOTALL)
@@ -124,11 +124,11 @@ JSON only: {{"valid": true/false, "dialect_ok": true/false, "level_ok": true/fal
                     validation = {"valid": None, "confidence": 0, "remark": "Parse error"}
             else:
                 validation = {"valid": None, "confidence": 0, "remark": "API error"}
-            
+
             # Stats
             stats["total"] += 1
             stats["models_used"][model] = stats["models_used"].get(model, 0) + 1
-            
+
             if validation.get("valid"):
                 stats["valid"] += 1
             if validation.get("dialect_ok"):
@@ -136,12 +136,12 @@ JSON only: {{"valid": true/false, "dialect_ok": true/false, "level_ok": true/fal
             if validation.get("level_ok"):
                 stats["level_ok"] += 1
             stats["avg_conf"] += validation.get("confidence", 0)
-            
+
             conf = validation.get("confidence", 0)
             remark = validation.get("remark", "")
             log(f"  Model: {model} | Valid: {validation.get('valid')} | Conf: {conf:.2f}")
             log(f"  Remark: {remark}\n")
-            
+
             results.append({
                 "index": i,
                 "text": text,
@@ -163,7 +163,7 @@ log(f"Valid: {stats['valid']}/{stats['total']} ({100*stats['valid']/stats['total
 log(f"Dialect OK: {stats['dialect_ok']}/{stats['total']} ({100*stats['dialect_ok']/stats['total']:.0f}%)")
 log(f"Level OK: {stats['level_ok']}/{stats['total']} ({100*stats['level_ok']/stats['total']:.0f}%)")
 log(f"Avg Confidence: {stats['avg_conf']:.2f}")
-log(f"\nModels used:")
+log("\nModels used:")
 for model, count in stats["models_used"].items():
     log(f"  • {model}: {count} calls")
 log("="*80 + "\n")
@@ -173,6 +173,6 @@ with open(OUTPUT_FILE, "w") as f:
     for r in results:
         f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
-print(f"\n✅ Done!")
+print("\n✅ Done!")
 print(f"Results: {OUTPUT_FILE}")
 print(f"Log: {LOG_FILE}")

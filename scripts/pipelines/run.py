@@ -3,12 +3,10 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from dataclasses import dataclass
-from typing import Optional
+from pathlib import Path
 
-from . import collect, clean, deduplicate, align, export
+from . import clean, deduplicate, export
 
 
 @dataclass

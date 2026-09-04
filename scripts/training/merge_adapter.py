@@ -14,8 +14,8 @@ def main() -> int:
     args = p.parse_args()
 
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
     from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)

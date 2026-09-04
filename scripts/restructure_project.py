@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import shutil
 import sys
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 
 ROOT = Path(".")
 NEW_STRUCTURE = {
@@ -13,19 +13,19 @@ NEW_STRUCTURE = {
         "linguistics", "biblical", "concepts", "decisions", "patterns",
         "examples", "references"
     ],
-    
+
     # Code that implements wiki (Priority 2)
     "src/zolai": ["core", "services", "models", "utils", "api"],
-    
+
     # Scripts that extract/update wiki (Priority 3)
     "scripts": ["crawlers", "data_pipeline", "training", "maintenance", "deploy"],
-    
+
     # Data that feeds wiki (Priority 4)
     "data": ["master/sources", "master/combined", "master/archive", "processed", "raw", "history"],
-    
+
     # Tests validate wiki (Priority 5)
     "tests": ["unit", "integration", "fixtures"],
-    
+
     # Everything else
     "models": ["checkpoints", "lora", "configs"],
     "config": [],
@@ -153,51 +153,51 @@ agents:
   linguistic-specialist:
     description: Linguistic analysis and validation
     path: definitions/linguistic-specialist.yaml
-  
+
   zolai-learner:
     description: Language learning tutor
     path: definitions/zolai-learner.yaml
-  
+
   zomi-data:
     description: Dataset management
     path: definitions/zomi-data.yaml
-  
+
   zomi-dictionary-builder:
     description: Dictionary construction
     path: definitions/zomi-dictionary-builder.yaml
-  
+
   zomi-synthesizer:
     description: Instruction synthesis
     path: definitions/zomi-synthesizer.yaml
-  
+
   zomi-evaluator:
     description: Quality evaluation
     path: definitions/zomi-evaluator.yaml
-  
+
   zomi-wiki-manager:
     description: Wiki maintenance
     path: definitions/zomi-wiki-manager.yaml
-  
+
   zomi-cleaner-bot:
     description: Data cleaning
     path: definitions/zomi-cleaner-bot.yaml
-  
+
   zomi-crawler-bot:
     description: Web crawling
     path: definitions/zomi-crawler-bot.yaml
-  
+
   zomi-trainer-bot:
     description: Training pipeline
     path: definitions/zomi-trainer-bot.yaml
-  
+
   zomi-philosopher:
     description: Linguistic reasoning
     path: definitions/zomi-philosopher.yaml
-  
+
   zomi-server-ops:
     description: Server operations
     path: definitions/zomi-server-ops.yaml
-  
+
   zomi-ops-monitor:
     description: Operations monitoring
     path: definitions/zomi-ops-monitor.yaml
@@ -214,31 +214,31 @@ skills:
   data-cleaner:
     description: Data cleaning and validation
     path: definitions/data-cleaner.yaml
-  
+
   data-collector:
     description: Data collection
     path: definitions/data-collector.yaml
-  
+
   grammar-checker:
     description: Grammar validation
     path: definitions/grammar-checker.yaml
-  
+
   model-trainer:
     description: Model training
     path: definitions/model-trainer.yaml
-  
+
   model-evaluator:
     description: Model evaluation
     path: definitions/model-evaluator.yaml
-  
+
   web-crawler:
     description: Web crawling
     path: definitions/web-crawler.yaml
-  
+
   rag-builder:
     description: RAG system building
     path: definitions/rag-builder.yaml
-  
+
   pipeline-orchestrator:
     description: Pipeline orchestration
     path: definitions/pipeline-orchestrator.yaml

@@ -2,8 +2,12 @@
 """
 Validate full dataset - Handles rate limits, uses free models
 """
-import json, os, requests, time
+import json
+import os
+import time
 from pathlib import Path
+
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -41,12 +45,12 @@ with open(INPUT_FILE, "r") as f:
             text = rec.get("text", "")[:60]
             dialect = rec.get("dialect", "")
             level = rec.get("language_level", "")
-            
+
             if (i + 1) % 500 == 0:
                 log(f"[{i+1}] Processing... Valid: {stats['valid']}/{stats['total']}")
-            
+
             prompt = f"Is this valid Zolai? '{text}' Reply: yes/no"
-            
+
             try:
                 resp = requests.post(
                     "https://openrouter.ai/api/v1/chat/completions",
@@ -54,7 +58,7 @@ with open(INPUT_FILE, "r") as f:
                     json={"model": best_model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 50},
                     timeout=10
                 )
-                
+
                 if resp.status_code == 200:
                     content = resp.json()["choices"][0]["message"]["content"]
                     valid = "yes" in content.lower()
@@ -72,9 +76,9 @@ with open(INPUT_FILE, "r") as f:
             except Exception as e:
                 results.append({"index": i, "text": text, "error": str(e)[:50]})
                 stats["errors"] += 1
-            
+
             stats["total"] += 1
-            
+
         except:
             pass
 

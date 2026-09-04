@@ -4,19 +4,20 @@ Zolai Data Ingestion Pipeline v2
 Orchestrates collection, cleaning, and linguistic scoring (ZVS v9).
 """
 
-import sys
-import os
-import json
-import re
 import argparse
-from pathlib import Path
+import json
+import os
+import re
+import sys
 from datetime import datetime
 
 # Add project root to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from pipelines.clean import CleanConfig, ZolaiCleaner
+
 from scripts.test_grammar_rules import ZolaiGrammarAuditor
-from pipelines.clean import ZolaiCleaner, CleanConfig
+
 
 class IngestionPipelineV2:
     def __init__(self, register="general"):
@@ -43,10 +44,10 @@ class IngestionPipelineV2:
     def process_text(self, text, source_info=None):
         # 1. Basic Cleaning
         cleaned_text = self.cleaner._clean_text(text)
-        
+
         # 2. Advanced Standardizer (Apply fixes automatically)
         refactored_text = self.auto_refactor(cleaned_text)
-        
+
         # 3. Linguistic Scoring (On the refactored text)
         score = self.auditor.score(refactored_text, self.register)
         errors = self.auditor.audit(refactored_text, self.register)
@@ -68,10 +69,10 @@ class IngestionPipelineV2:
             for line_num, line in enumerate(f, 1):
                 line = line.strip()
                 if not line: continue
-                
+
                 text = ""
                 source_meta = str(input_path)
-                
+
                 if is_jsonl:
                     try:
                         data = json.loads(line)
@@ -81,7 +82,7 @@ class IngestionPipelineV2:
                         continue
                 else:
                     text = line
-                
+
                 if text:
                     processed = self.process_text(text, source_meta)
                     results.append(processed)
@@ -89,7 +90,7 @@ class IngestionPipelineV2:
         with open(output_path, 'w', encoding='utf-8') as f:
             for r in results:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
-        
+
         return len(results)
 
 def main():
@@ -98,9 +99,9 @@ def main():
     parser.add_argument("-o", "--output", required=True, help="Output JSONL file")
     parser.add_argument("--register", choices=["formal", "informal", "general"], default="general")
     parser.add_argument("--jsonl", action="store_true", help="Treat input as JSONL")
-    
+
     args = parser.parse_args()
-    
+
     pipeline = IngestionPipelineV2(register=args.register)
     print(f"Ingesting {args.input}...")
     count = pipeline.ingest_file(args.input, args.output, args.jsonl)

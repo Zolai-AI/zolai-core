@@ -25,7 +25,7 @@ class ZolaiGrammarAuditor:
         }
         self.forbidden_dialect = {
             "pasian": "pasian", "ram": "gam", "tapa": "tapa", "topa": "topa",
-            "kumpipa": "kumpipa", "tua": "tua", "tua": "tua", "suah": "chuak",
+            "kumpipa": "kumpipa", "tua": "tua", "suah": "chuak",
             "zalenna": "suahtakna", "nunnak": "nuntakna"
         }
 

@@ -6,7 +6,9 @@ Clean dict_master_v1.jsonl:
 3. Shorten long examples to max 12 words
 4. Filter noisy English-sentence examples
 """
-import json, re, random
+import json
+import random
+import re
 from pathlib import Path
 
 MASTER = "data/dictionary/processed/dict_master_v1.jsonl"

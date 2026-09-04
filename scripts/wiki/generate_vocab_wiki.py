@@ -10,9 +10,10 @@ Outputs:
   data/exports/dict_master_export.tsv           — TSV alternative
 """
 
-import json, csv, re
-from pathlib import Path
+import csv
+import json
 from collections import defaultdict
+from pathlib import Path
 
 MASTER = "data/dictionary/processed/dict_master_v1.jsonl"
 
@@ -310,7 +311,7 @@ After importing dict_master_export.csv to Google Sheets:
 ```
 """
     Path("wiki/vocabulary/master_prompts.md").write_text(content, encoding="utf-8")
-    print(f"  Master prompts → wiki/vocabulary/master_prompts.md")
+    print("  Master prompts → wiki/vocabulary/master_prompts.md")
 
 
 def export_sheets(entries):

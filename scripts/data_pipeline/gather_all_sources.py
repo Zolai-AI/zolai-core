@@ -15,7 +15,9 @@ Unified output schema:
 }
 """
 
-import json, re, os
+import json
+import os
+import re
 from pathlib import Path
 
 ROOT    = Path(__file__).resolve().parents[2]
@@ -428,6 +430,7 @@ print(f"Skipped : {skipped:,}")
 print(f"Output  : {OUT}")
 
 from collections import Counter
+
 sources = Counter()
 types   = Counter()
 dialects = Counter()
@@ -453,5 +456,6 @@ for k, v in dialects.most_common():
     print(f"  {v:>10,}  {k}")
 
 import subprocess
+
 sz = subprocess.check_output(["du", "-sh", str(OUT)]).decode().split()[0]
 print(f"\nFile size: {sz}")

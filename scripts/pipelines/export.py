@@ -5,10 +5,8 @@ from __future__ import annotations
 
 import csv
 import json
-import sys
-from pathlib import Path
 from dataclasses import dataclass
-from typing import Iterator
+from pathlib import Path
 
 # Configuration
 ROOT = Path(__file__).resolve().parent.parent

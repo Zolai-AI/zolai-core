@@ -14,13 +14,13 @@ all_records = []
 with open(INPUT_FILE, "r") as f:
     for line in f:
         rec = json.loads(line)
-        if rec.get("valid") == True:
+        if rec.get("valid"):
             all_records.append(rec)
-        elif rec.get("valid") == False:
+        elif not rec.get("valid"):
             reason = rec.get("reason", "")
-            
+
             # Keep all context-appropriate records
-            if any(x in reason for x in ["invalid_pattern:ram", "invalid_pattern:pathian", 
+            if any(x in reason for x in ["invalid_pattern:ram", "invalid_pattern:pathian",
                                           "invalid_pattern:fapa", "invalid_pattern:bawipa",
                                           "invalid_pattern:lo leh"]):
                 # These are legitimate Zolai words/contexts
@@ -39,7 +39,7 @@ with open(OUTPUT_FILE, "w") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 print(f"\n{'='*80}")
-print(f"FINAL APPROVAL - CONTEXT-AWARE")
+print("FINAL APPROVAL - CONTEXT-AWARE")
 print(f"{'='*80}")
 print(f"Total valid records: {len(all_records)}")
 print(f"Output: {OUTPUT_FILE}")
@@ -47,6 +47,7 @@ print(f"{'='*80}\n")
 
 # Extract clean dataset
 import subprocess
+
 subprocess.run(f"jq -r 'select(.valid == true)' {OUTPUT_FILE} > {DATA}/master_train_production.jsonl", shell=True)
 
 print(f"✅ Production dataset: {DATA}/master_train_production.jsonl")

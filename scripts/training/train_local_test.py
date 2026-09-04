@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """Local training test - mimics Kaggle notebook"""
 
-import os
 import json
+import os
+
 import torch
 from datasets import Dataset
-from transformers import AutoTokenizer, AutoModelForCausalLM, DataCollatorForLanguageModeling, Trainer, TrainingArguments
-from peft import get_peft_model, LoraConfig, TaskType
+from peft import LoraConfig, TaskType, get_peft_model
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    DataCollatorForLanguageModeling,
+    Trainer,
+    TrainingArguments,
+)
 
 os.environ['HF_TOKEN'] = os.environ.get('HF_TOKEN', '')
 

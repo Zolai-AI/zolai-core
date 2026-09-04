@@ -20,11 +20,11 @@ with open(SOURCE_FILE, "r") as f_in, open(OUTPUT_FILE, "w") as f_out:
     for i, line in enumerate(f_in):
         try:
             rec = json.loads(line)
-            
+
             # Keep all fields
             f_out.write(json.dumps(rec, ensure_ascii=False) + "\n")
             count += 1
-            
+
             if (i + 1) % 500000 == 0:
                 log(f"[{i+1}] Processed...")
         except:

@@ -1,4 +1,5 @@
 import uvicorn
+
 from zolai.api.tools import app
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 import json
-from pathlib import Path
 from collections import Counter
+from pathlib import Path
 
 DATA = Path("data/training")
 INPUT_FILE = DATA / "master_train_production_complete.jsonl"
@@ -26,13 +26,13 @@ with open(INPUT_FILE, "r") as f:
     for i, line in enumerate(f):
         try:
             rec = json.loads(line)
-            
+
             # Extract source from original data
             text = rec.get("text", "")
             source_type = rec.get("source_type", "unknown")
             level = rec.get("level", "unknown")
             pos = rec.get("pos", "unknown")
-            
+
             # Detect source by content patterns
             if "Pasian" in text or "bible" in text.lower():
                 source = "Bible"
@@ -44,16 +44,16 @@ with open(INPUT_FILE, "r") as f:
                 source = "Parallel"
             else:
                 source = "Corpus"
-            
+
             sources[source] += 1
-            
+
             if source not in source_details:
                 source_details[source] = {"count": 0, "levels": Counter(), "pos": Counter()}
-            
+
             source_details[source]["count"] += 1
             source_details[source]["levels"][level] += 1
             source_details[source]["pos"][pos] += 1
-            
+
             if (i + 1) % 500000 == 0:
                 log(f"[{i+1}] Analyzed...")
         except:
@@ -72,11 +72,11 @@ log("DETAILED COVERAGE BY SOURCE\n")
 for source in sorted(sources.keys()):
     details = source_details[source]
     log(f"\n{source} ({details['count']:,} records)")
-    log(f"  Language Levels:")
+    log("  Language Levels:")
     for level, count in details["levels"].most_common():
         pct = 100 * count / details["count"]
         log(f"    {level}: {count:,} ({pct:.1f}%)")
-    log(f"  POS Distribution:")
+    log("  POS Distribution:")
     for pos, count in details["pos"].most_common():
         pct = 100 * count / details["count"]
         log(f"    {pos}: {count:,} ({pct:.1f}%)")

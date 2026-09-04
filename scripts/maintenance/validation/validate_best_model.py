@@ -2,8 +2,11 @@
 """
 Validate with best available model - Tests all providers and picks best
 """
-import json, os, requests
+import json
+import os
 from pathlib import Path
+
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -49,9 +52,9 @@ for provider, model, key in TEST_MODELS:
     if not key:
         log(f"⊘ {provider}/{model}: No API key")
         continue
-    
+
     print(f"Testing {provider}/{model}...", end=" ", flush=True)
-    
+
     try:
         if provider == "openrouter":
             resp = requests.post(
@@ -75,7 +78,7 @@ for provider, model, key in TEST_MODELS:
                 },
                 timeout=5
             )
-        
+
         if resp.status_code == 200:
             score = 1.0
             model_scores[f"{provider}/{model}"] = score
@@ -107,22 +110,22 @@ log(f"Total records to validate: {total_lines}\n")
 
 with open(INPUT_FILE, "r") as f:
     for i, line in enumerate(f):
-        
+
         rec = json.loads(line)
         text = rec.get("text", "")[:80]
         dialect = rec.get("dialect", "")
         level = rec.get("language_level", "")
-        
+
         if (i + 1) % 1000 == 0 or i == 0:
             log(f"[{i+1}/{total_lines}] {text}...")
-        
+
         prompt = f"""Validate Zolai sentence:
 Text: {text}
 Dialect: {dialect}
 Level: {level}
 
 JSON: {{"valid": true/false, "dialect_ok": true/false, "level_ok": true/false, "confidence": 0-1, "remark": "text"}}"""
-        
+
         try:
             if provider == "openrouter":
                 resp = requests.post(
@@ -138,7 +141,7 @@ JSON: {{"valid": true/false, "dialect_ok": true/false, "level_ok": true/false, "
                     json={"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 500},
                     timeout=10
                 )
-            
+
             if resp.status_code == 200:
                 content = resp.json()["choices"][0]["message"]["content"]
                 import re
@@ -148,14 +151,14 @@ JSON: {{"valid": true/false, "dialect_ok": true/false, "level_ok": true/false, "
                     log(f"  ✓ Valid: {validation.get('valid')} | Conf: {validation.get('confidence', 0):.2f}")
                 else:
                     validation = {"valid": None, "confidence": 0}
-                    log(f"  ✗ Parse error")
+                    log("  ✗ Parse error")
             else:
                 validation = {"valid": None, "confidence": 0}
                 log(f"  ✗ HTTP {resp.status_code}")
         except Exception as e:
             validation = {"valid": None, "confidence": 0}
             log(f"  ✗ {str(e)[:40]}")
-        
+
         results.append({
             "index": i,
             "text": text,
@@ -171,7 +174,7 @@ with open(OUTPUT_FILE, "w") as f:
         f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 log(f"\n{'='*80}")
-log(f"✅ Validation complete!")
+log("✅ Validation complete!")
 log(f"Results: {OUTPUT_FILE}")
 log(f"Log: {LOG_FILE}")
 log(f"{'='*80}")

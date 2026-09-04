@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
-import json, os, requests
+import json
+import os
 from pathlib import Path
+
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -20,13 +23,13 @@ with open(INPUT_FILE, "r") as f:
     for i, line in enumerate(f):
         if i >= 5:
             break
-        
+
         rec = json.loads(line)
         text = rec.get("text", "")[:60]
         model = MODELS[i % len(MODELS)]
-        
+
         print(f"[{i+1}/5] {text}... ({model})")
-        
+
         try:
             resp = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
@@ -38,7 +41,7 @@ with open(INPUT_FILE, "r") as f:
                 },
                 timeout=10
             )
-            
+
             if resp.status_code == 200:
                 content = resp.json()["choices"][0]["message"]["content"]
                 valid = "valid" in content.lower()

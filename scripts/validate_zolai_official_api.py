@@ -2,9 +2,10 @@
 """Validate Zolai translations using official Google Generative AI API."""
 
 import json
-from pathlib import Path
-import google.generativeai as genai
 import os
+from pathlib import Path
+
+import google.generativeai as genai
 from dotenv import load_dotenv
 
 # Load .env
@@ -25,23 +26,23 @@ TRANSLATIONS = {
 def validate_with_official_api():
     """Validate using official Google Generative AI API."""
     api_key = os.getenv("GEMINI_API_KEY")
-    
+
     if not api_key:
         print("❌ GEMINI_API_KEY not found in .env")
         return
-    
+
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel("gemini-2.0-flash")
-    
+
     print("✅ Connected to Google Generative AI API\n")
     print("🔍 Validating translations...\n")
-    
+
     results = {"translations": {}}
-    
+
     for i, (story, translation) in enumerate(TRANSLATIONS.items()):
         try:
             prompt = f"{SYSTEM_PROMPT}\n\nValidate this Zolai translation:\n\n{translation}\n\nProvide brief feedback on grammar, vocabulary, and naturalness."
-            
+
             response = model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
@@ -50,19 +51,19 @@ def validate_with_official_api():
                     max_output_tokens=200
                 )
             )
-            
+
             results["translations"][story] = response.text
             print(f"✅ {story}")
             print(f"   {response.text[:100]}...\n")
         except Exception as e:
             print(f"❌ {story}: {str(e)}\n")
             results["translations"][story] = f"Error: {str(e)}"
-    
+
     # Save results
     output_file = Path("/home/peter/Documents/Projects/zolai/GEMINI_OFFICIAL_API_RESULTS.json")
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
-    
+
     print(f"✅ Results saved to {output_file}")
 
 if __name__ == "__main__":

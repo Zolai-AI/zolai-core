@@ -6,9 +6,11 @@ Enrich dict_master_v1.jsonl by scanning all Bible parallel files:
 - Add simple short example: shortest verse containing the word
 """
 
-import json, re, glob
+import glob
+import json
+import re
+from collections import Counter, defaultdict
 from pathlib import Path
-from collections import defaultdict, Counter
 
 BIBLE_DIRS = [
     "data/corpus/bible/markdown/Parallel_Corpus/TDB77",

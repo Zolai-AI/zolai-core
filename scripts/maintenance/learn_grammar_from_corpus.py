@@ -13,9 +13,11 @@ Usage:
   python scripts/maintenance/learn_grammar_from_corpus.py --search "love"
 """
 
-import json, re, argparse
-from pathlib import Path
+import argparse
+import json
+import re
 from collections import defaultdict
+from pathlib import Path
 
 ROOT   = Path(__file__).resolve().parents[2]
 DATA   = ROOT / "data"

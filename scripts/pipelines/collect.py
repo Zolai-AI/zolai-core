@@ -5,10 +5,9 @@ from __future__ import annotations
 
 import json
 import re
-import sys
-from pathlib import Path
-from datetime import datetime
 from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
 from typing import Iterator
 
 # Configuration

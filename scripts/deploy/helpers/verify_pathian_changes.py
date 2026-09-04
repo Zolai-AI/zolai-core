@@ -14,14 +14,14 @@ with open(INPUT_FILE, "r") as f:
     for line in f:
         rec = json.loads(line)
         text = rec.get("text", "")
-        
+
         if "Pathian" in text or "pathian" in text:
             count += 1
             text_lower = text.lower()
-            
+
             # Check if Zolai context
             has_zolai = any(marker in text_lower for marker in ZOLAI_MARKERS)
-            
+
             if has_zolai:
                 zolai_context += 1
                 if count <= 5:
@@ -40,6 +40,6 @@ print(f"Non-Zolai context: {len(non_zolai)} ({100*len(non_zolai)/count:.1f}%)")
 print(f"{'='*80}")
 
 if non_zolai:
-    print(f"\nNon-Zolai examples:")
+    print("\nNon-Zolai examples:")
     for ex in non_zolai[:3]:
         print(f"  • {ex}")

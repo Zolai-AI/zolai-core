@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Quick audit - sample-based analysis"""
 import json
-from pathlib import Path
-from collections import Counter
 import random
+from collections import Counter
+from pathlib import Path
 
 DATA = Path("data/training")
 INPUT_FILE = DATA / "master_train_production.jsonl"
@@ -45,17 +45,17 @@ with open(INPUT_FILE, "r") as f:
     for i, line in enumerate(f):
         if i not in sample_indices:
             continue
-        
+
         try:
             rec = json.loads(line)
             text = rec.get("text", "")
-            
+
             stats["dialect"][rec.get("dialect", "unknown")] += 1
             stats["level"][rec.get("language_level", "unknown")] += 1
             stats["source"][rec.get("source_type", "unknown")] += 1
             stats["pos"][rec.get("pos", "unknown")] += 1
             stats["text_len"].append(len(text))
-            
+
             if not text:
                 stats["issues"]["empty"] += 1
             if len(text) < 5:
@@ -91,12 +91,12 @@ for p, c in stats["pos"].most_common():
 
 if stats["text_len"]:
     avg_len = sum(stats["text_len"]) / len(stats["text_len"])
-    log(f"\nText Length:")
+    log("\nText Length:")
     log(f"  Min: {min(stats['text_len'])}")
     log(f"  Max: {max(stats['text_len'])}")
     log(f"  Avg: {avg_len:.0f}")
 
-log(f"\nQuality Issues:")
+log("\nQuality Issues:")
 if stats["issues"]:
     for issue, count in stats["issues"].most_common():
         log(f"  {issue}: {count}")

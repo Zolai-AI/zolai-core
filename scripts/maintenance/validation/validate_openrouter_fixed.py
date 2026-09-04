@@ -5,6 +5,7 @@ Validate with OpenRouter - Fixed version
 import json
 import os
 from pathlib import Path
+
 import requests
 from dotenv import load_dotenv
 
@@ -35,17 +36,17 @@ with open(INPUT_FILE, "r") as f:
     for i, line in enumerate(f):
         if i >= 10:
             break
-        
+
         rec = json.loads(line)
         text = rec.get("text", "")[:80]
         dialect = rec.get("dialect", "")
         level = rec.get("language_level", "")
-        
+
         model = MODELS[i % len(MODELS)]
         log(f"[{i+1}/10] {text}... ({model})")
-        
+
         prompt = f"Validate: '{text}' Dialect:{dialect} Level:{level}. JSON: {{\"valid\":true/false,\"confidence\":0-1}}"
-        
+
         try:
             resp = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
@@ -53,7 +54,7 @@ with open(INPUT_FILE, "r") as f:
                 json={"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 500},
                 timeout=10
             )
-            
+
             if resp.status_code == 200:
                 data = resp.json()
                 if "choices" in data and data["choices"]:
@@ -66,20 +67,20 @@ with open(INPUT_FILE, "r") as f:
                         log(f"  ✓ Valid: {validation.get('valid')} | Conf: {validation.get('confidence', 0):.2f}\n")
                     else:
                         validation = {"valid": None, "confidence": 0}
-                        log(f"  ✗ Parse error\n")
+                        log("  ✗ Parse error\n")
                 else:
                     validation = {"valid": None, "confidence": 0}
-                    log(f"  ✗ No response\n")
+                    log("  ✗ No response\n")
             else:
                 validation = {"valid": None, "confidence": 0}
                 log(f"  ✗ HTTP {resp.status_code}\n")
         except Exception as e:
             validation = {"valid": None, "confidence": 0}
             log(f"  ✗ Error: {str(e)[:50]}\n")
-        
+
         stats["total"] += 1
         stats["models"][model] = stats["models"].get(model, 0) + 1
-        
+
         results.append({"index": i, "text": text, "dialect": dialect, "level": level, "model": model, "validation": validation})
 
 # Save

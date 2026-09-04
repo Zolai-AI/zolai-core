@@ -3,11 +3,12 @@
 Fine-tune Qwen/Llama on Zolai dataset using LoRA
 """
 import json
-import torch
 from pathlib import Path
-from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments, Trainer
-from peft import get_peft_model, LoraConfig, TaskType
+
+import torch
 from datasets import Dataset
+from peft import LoraConfig, TaskType, get_peft_model
+from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 
 # Config
 MODEL_NAME = "Qwen/Qwen-7B-Chat"  # or "meta-llama/Llama-2-7b-chat"
@@ -100,5 +101,5 @@ trainer.train()
 model.save_pretrained(OUTPUT_DIR / "final_model")
 tokenizer.save_pretrained(OUTPUT_DIR / "final_model")
 
-print(f"\n✅ Training complete!")
+print("\n✅ Training complete!")
 print(f"Model saved to: {OUTPUT_DIR}/final_model")

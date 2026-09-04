@@ -3,8 +3,8 @@
 Comprehensive audit and pattern analysis of entire dataset
 """
 import json
-from pathlib import Path
 from collections import Counter, defaultdict
+from pathlib import Path
 
 DATA = Path("data/training")
 INPUT_FILE = DATA / "master_train_production.jsonl"
@@ -57,31 +57,31 @@ with open(INPUT_FILE, "r") as f:
         try:
             rec = json.loads(line)
             text = rec.get("text", "")
-            
+
             if not text:
                 stats["issues"]["empty_text"] += 1
                 continue
-            
+
             # Basic stats
             stats["total"] += 1
             stats["by_dialect"][rec.get("dialect", "unknown")] += 1
             stats["by_level"][rec.get("language_level", "unknown")] += 1
             stats["by_source"][rec.get("source_type", "unknown")] += 1
             stats["by_pos"][rec.get("pos", "unknown")] += 1
-            
+
             # Text length
             text_len = len(text)
             text_lengths.append(text_len)
             stats["text_length"]["min"] = min(stats["text_length"]["min"], text_len)
             stats["text_length"]["max"] = max(stats["text_length"]["max"], text_len)
-            
+
             # Pattern detection
             text_lower = text.lower()
             for pattern_name, pattern in ZOLAI_PATTERNS.items():
                 import re
                 if re.search(pattern, text_lower):
                     stats["patterns"][pattern_name] += 1
-            
+
             # Quality checks
             if len(text) < 5:
                 stats["issues"]["too_short"] += 1
@@ -91,7 +91,7 @@ with open(INPUT_FILE, "r") as f:
                 stats["issues"]["too_many_newlines"] += 1
             if any(ord(c) < 32 and c not in '\n\t\r' for c in text):
                 stats["issues"]["control_chars"] += 1
-            
+
             # Sample audit record
             if i % 100000 == 0:
                 audit_records.append({
@@ -103,11 +103,11 @@ with open(INPUT_FILE, "r") as f:
                     "pos": rec.get("pos"),
                     "patterns": [p for p, pat in ZOLAI_PATTERNS.items() if re.search(pat, text_lower)]
                 })
-            
+
             if (i + 1) % 500000 == 0:
                 log(f"[{i+1}] Processed...")
-        
-        except Exception as e:
+
+        except Exception:
             stats["issues"]["parse_error"] += 1
 
 # Calculate averages
@@ -122,22 +122,22 @@ log(f"{'='*80}\n")
 log(f"Total records: {stats['total']:,}")
 log(f"Text length: min={stats['text_length']['min']}, max={stats['text_length']['max']}, avg={stats['text_length']['avg']:.0f}")
 
-log(f"\nBy Dialect:")
+log("\nBy Dialect:")
 for dialect, count in stats["by_dialect"].most_common():
     pct = 100 * count / stats["total"]
     log(f"  {dialect}: {count:,} ({pct:.1f}%)")
 
-log(f"\nBy Language Level:")
+log("\nBy Language Level:")
 for level, count in stats["by_level"].most_common():
     pct = 100 * count / stats["total"]
     log(f"  {level}: {count:,} ({pct:.1f}%)")
 
-log(f"\nBy Source Type:")
+log("\nBy Source Type:")
 for source, count in stats["by_source"].most_common():
     pct = 100 * count / stats["total"]
     log(f"  {source}: {count:,} ({pct:.1f}%)")
 
-log(f"\nBy POS:")
+log("\nBy POS:")
 for pos, count in stats["by_pos"].most_common():
     pct = 100 * count / stats["total"]
     log(f"  {pos}: {count:,} ({pct:.1f}%)")
@@ -195,5 +195,5 @@ log(f"Audit complete. Report: {REPORT_FILE}")
 log(f"Audit records: {AUDIT_FILE}")
 log(f"{'='*80}\n")
 
-print(f"\n✅ Audit complete!")
+print("\n✅ Audit complete!")
 print(f"Report: {REPORT_FILE}")

@@ -5,9 +5,8 @@ Generates training-ready formats and statistics
 Run: python3 prepare_for_training.py
 """
 import json
-from pathlib import Path
 from collections import Counter
-import hashlib
+from pathlib import Path
 
 DATA = Path(__file__).parent / "data"
 TRAIN_FILE = DATA / "training/master_train_complete.jsonl"
@@ -44,19 +43,19 @@ try:
         for i, line in enumerate(f):
             rec = json.loads(line)
             stats["total_records"] += 1
-            
+
             # Extract text
-            text = (rec.get("text") or rec.get("output") or 
+            text = (rec.get("text") or rec.get("output") or
                    rec.get("zolai") or rec.get("headword") or "")
             text = str(text).strip()
-            
+
             # Stats
             text_len = len(text)
             stats["total_chars"] += text_len
             stats["total_tokens_est"] += len(text.split())
             stats["min_length"] = min(stats["min_length"], text_len)
             stats["max_length"] = max(stats["max_length"], text_len)
-            
+
             # Format
             if "instruction" in rec:
                 stats["format_types"]["instruction"] += 1
@@ -66,15 +65,15 @@ try:
                 stats["format_types"]["dictionary"] += 1
             elif "zolai" in rec:
                 stats["format_types"]["parallel"] += 1
-            
+
             # Source
             source = rec.get("source", "unknown")
             stats["sources"][source] += 1
-            
+
             # Sample
             if i < 5:
                 sample_records.append(rec)
-            
+
             if (i + 1) % 100000 == 0:
                 log(f"  Analyzed: {i+1:,} records")
 
@@ -94,13 +93,13 @@ for fmt, count in stats["format_types"].most_common():
     pct = 100 * count / stats["total_records"]
     log(f"  • {fmt:15} {count:>10,} ({pct:5.1f}%)")
 
-log(f"\nTop 10 sources:")
+log("\nTop 10 sources:")
 for source, count in stats["sources"].most_common(10):
     pct = 100 * count / stats["total_records"]
     log(f"  • {source:30} {count:>10,} ({pct:5.1f}%)")
 
 # Stage 2: Create training manifest
-log(f"\n[2/3] CREATING TRAINING MANIFEST...\n")
+log("\n[2/3] CREATING TRAINING MANIFEST...\n")
 
 manifest = {
     "dataset_name": "Zolai Master Dataset - Complete",
@@ -143,7 +142,7 @@ with open(manifest_file, "w") as f:
 log(f"✓ Created: {manifest_file.name}")
 
 # Stage 3: Sample records
-log(f"\n[3/3] SAMPLE RECORDS...\n")
+log("\n[3/3] SAMPLE RECORDS...\n")
 
 sample_file = DATA / "training/sample_records.jsonl"
 with open(sample_file, "w") as f:
@@ -156,14 +155,14 @@ log(f"✓ Created: {sample_file.name} (5 sample records)")
 log("\n" + "="*80)
 log("✅ TRAINING PREPARATION COMPLETE")
 log("="*80)
-log(f"\nGenerated files:")
-log(f"  • training_manifest.json - Dataset metadata & recommendations")
-log(f"  • sample_records.jsonl - 5 sample records for inspection")
-log(f"\nReady to train! Next steps:")
-log(f"  1. Review: cat data/training/training_manifest.json")
-log(f"  2. Inspect samples: head -5 data/training/sample_records.jsonl")
-log(f"  3. Start training with master_train_complete.jsonl")
+log("\nGenerated files:")
+log("  • training_manifest.json - Dataset metadata & recommendations")
+log("  • sample_records.jsonl - 5 sample records for inspection")
+log("\nReady to train! Next steps:")
+log("  1. Review: cat data/training/training_manifest.json")
+log("  2. Inspect samples: head -5 data/training/sample_records.jsonl")
+log("  3. Start training with master_train_complete.jsonl")
 log("="*80 + "\n")
 
-print(f"\n✅ Preparation complete!")
-print(f"Log: data/training/prepare_training.log")
+print("\n✅ Preparation complete!")
+print("Log: data/training/prepare_training.log")

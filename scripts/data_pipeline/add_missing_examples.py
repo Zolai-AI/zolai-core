@@ -7,9 +7,10 @@ Sources (in priority order):
 Picks shortest clear sentence (5-15 words) containing the word.
 """
 
-import json, re, glob
+import glob
+import json
+import re
 from pathlib import Path
-from collections import defaultdict
 
 MASTER  = "data/dictionary/processed/dict_master_v1.jsonl"
 CORPUS  = "data/corpus/corpus_unified_v1.jsonl"

@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import typer
 from rich.console import Console
 
@@ -14,7 +11,6 @@ app = typer.Typer(help="Zolai CLI commands")
 def serve(host: str = "0.0.0.0", port: int = 8000) -> None:
     """Start the Zolai API server."""
     import uvicorn
-
     from main import app as fastapi_app
 
     console.print(f"[green]Starting server on {host}:{port}[/green]")

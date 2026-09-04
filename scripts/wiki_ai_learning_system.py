@@ -1,11 +1,12 @@
 from __future__ import annotations
-import json
-import sqlite3
-from pathlib import Path
-from datetime import datetime
+
 import hashlib
-import sys
+import json
 import re
+import sqlite3
+import sys
+from datetime import datetime
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WIKI_DIR = PROJECT_ROOT / "wiki"
@@ -70,12 +71,12 @@ def init_db() -> sqlite3.Connection:
 def extract_wiki_concepts() -> dict:
     """Extract concepts from wiki files"""
     concepts = {}
-    
+
     for md_file in WIKI_DIR.glob("**/*.md"):
         try:
             with open(md_file, encoding="utf-8") as f:
                 content = f.read()
-                
+
                 # Extract headers as concepts
                 headers = re.findall(r'^#+\s+(.+)$', content, re.MULTILINE)
                 for header in headers:
@@ -86,7 +87,7 @@ def extract_wiki_concepts() -> dict:
                         "source_file": str(md_file.relative_to(PROJECT_ROOT)),
                         "confidence": 0.85
                     }
-                
+
                 # Extract definition patterns
                 definitions = re.findall(r'(?:^|\n)(?:Definition|Concept|Meaning):\s*(.+?)(?:\n|$)', content, re.IGNORECASE)
                 for defn in definitions:
@@ -100,18 +101,18 @@ def extract_wiki_concepts() -> dict:
                     }
         except:
             pass
-    
+
     return concepts
 
 def extract_grammar_rules() -> dict:
     """Extract grammar rules from wiki"""
     rules = {}
-    
+
     for md_file in WIKI_DIR.glob("**/linguistics/**/*.md"):
         try:
             with open(md_file, encoding="utf-8") as f:
                 content = f.read()
-                
+
                 # Extract rule patterns
                 rule_patterns = re.findall(r'(?:Rule|Pattern|Structure):\s*(.+?)(?:\n|$)', content, re.IGNORECASE)
                 for pattern in rule_patterns:
@@ -125,18 +126,18 @@ def extract_grammar_rules() -> dict:
                     }
         except:
             pass
-    
+
     return rules
 
 def extract_vocabulary() -> dict:
     """Extract vocabulary from wiki"""
     vocab = {}
-    
+
     for md_file in WIKI_DIR.glob("**/vocabulary/**/*.md"):
         try:
             with open(md_file, encoding="utf-8") as f:
                 content = f.read()
-                
+
                 # Extract word entries
                 word_entries = re.findall(r'(?:^|\n)\*\*(.+?)\*\*:\s*(.+?)(?:\n|$)', content)
                 for word, definition in word_entries:
@@ -150,32 +151,32 @@ def extract_vocabulary() -> dict:
                     }
         except:
             pass
-    
+
     return vocab
 
 def merge_wiki_learning(conn: sqlite3.Connection, concepts: dict, rules: dict, vocab: dict) -> tuple[int, int, int]:
     """Merge wiki learning into database"""
     cursor = conn.cursor()
     now = datetime.now().isoformat()
-    
+
     concepts_added = 0
     rules_added = 0
     vocab_added = 0
-    
+
     # Add concepts
     for concept_id, data in concepts.items():
         try:
             cursor.execute("""
-                INSERT OR IGNORE INTO wiki_concepts 
+                INSERT OR IGNORE INTO wiki_concepts
                 (id, concept, category, definition, confidence, source_file, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (concept_id, data.get("concept", ""), data.get("category", ""), 
+            """, (concept_id, data.get("concept", ""), data.get("category", ""),
                   data.get("definition", ""), data.get("confidence", 0.75),
                   data.get("source_file", ""), now))
             concepts_added += 1
         except:
             pass
-    
+
     # Add grammar rules
     for rule_id, data in rules.items():
         try:
@@ -189,7 +190,7 @@ def merge_wiki_learning(conn: sqlite3.Connection, concepts: dict, rules: dict, v
             rules_added += 1
         except:
             pass
-    
+
     # Add vocabulary
     for vocab_id, data in vocab.items():
         try:
@@ -203,14 +204,14 @@ def merge_wiki_learning(conn: sqlite3.Connection, concepts: dict, rules: dict, v
             vocab_added += 1
         except:
             pass
-    
+
     conn.commit()
     return concepts_added, rules_added, vocab_added
 
 def export_wiki_structure(conn: sqlite3.Connection) -> None:
     """Export wiki structure as AI-readable format"""
     cursor = conn.cursor()
-    
+
     # Export concepts
     with open(EXPORT_DIR / "wiki_concepts.jsonl", "w", encoding="utf-8") as f:
         cursor.execute("SELECT concept, category, definition, confidence FROM wiki_concepts ORDER BY confidence DESC")
@@ -221,7 +222,7 @@ def export_wiki_structure(conn: sqlite3.Connection) -> None:
                 "definition": definition,
                 "confidence": confidence
             }, ensure_ascii=False) + "\n")
-    
+
     # Export grammar rules
     with open(EXPORT_DIR / "grammar_rules.jsonl", "w", encoding="utf-8") as f:
         cursor.execute("SELECT rule_name, pattern, category, confidence FROM grammar_rules ORDER BY confidence DESC")
@@ -232,7 +233,7 @@ def export_wiki_structure(conn: sqlite3.Connection) -> None:
                 "category": category,
                 "confidence": confidence
             }, ensure_ascii=False) + "\n")
-    
+
     # Export vocabulary
     with open(EXPORT_DIR / "wiki_vocabulary.jsonl", "w", encoding="utf-8") as f:
         cursor.execute("SELECT word, definition, domain, confidence FROM vocabulary_entries ORDER BY confidence DESC")
@@ -257,37 +258,37 @@ def get_stats(conn: sqlite3.Connection) -> dict:
 
 def main() -> int:
     log_msg("=== WIKI AI LEARNING SYSTEM ===\n")
-    
+
     conn = init_db()
-    
+
     log_msg("=== EXTRACTING WIKI KNOWLEDGE ===")
     concepts = extract_wiki_concepts()
     rules = extract_grammar_rules()
     vocab = extract_vocabulary()
-    
+
     log_msg(f"  Concepts found: {len(concepts)}")
     log_msg(f"  Grammar rules found: {len(rules)}")
     log_msg(f"  Vocabulary entries found: {len(vocab)}")
-    
+
     log_msg("\n=== LEARNING WIKI STRUCTURE ===")
     concepts_added, rules_added, vocab_added = merge_wiki_learning(conn, concepts, rules, vocab)
-    
+
     log_msg(f"  Concepts learned: {concepts_added}")
     log_msg(f"  Grammar rules learned: {rules_added}")
     log_msg(f"  Vocabulary learned: {vocab_added}")
-    
+
     stats = get_stats(conn)
-    log_msg(f"\n=== WIKI LEARNING STATS ===")
+    log_msg("\n=== WIKI LEARNING STATS ===")
     log_msg(f"  Total concepts: {stats['concepts']}")
     log_msg(f"  Total grammar rules: {stats['rules']}")
     log_msg(f"  Total vocabulary: {stats['vocabulary']}")
-    
+
     log_msg("\n=== EXPORTING WIKI STRUCTURE ===")
     export_wiki_structure(conn)
     log_msg(f"  Exported to {EXPORT_DIR}")
-    
+
     conn.close()
-    
+
     log_msg("\n✅ Wiki AI learning complete")
     return 0
 

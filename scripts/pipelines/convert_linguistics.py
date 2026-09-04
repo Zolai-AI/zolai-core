@@ -4,11 +4,9 @@
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterator
-
 
 ROOT = Path(__file__).resolve().parents[2]
 LING = Path("/path/to/zolai/Documents/Linguistics/Zolai")
@@ -30,7 +28,7 @@ def convert_json_bible(json_path: Path, source_name: str) -> Iterator[VerseEntry
     with open(json_path, encoding="utf-8") as f:
         data = json.load(f)
 
-    language = data.get("language", "zolai")
+    data.get("language", "zolai")
 
     # Handle book structure: books -> book_id -> chapter -> verse -> text
     books = data.get("book", {})

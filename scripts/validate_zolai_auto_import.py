@@ -26,30 +26,30 @@ TRANSLATIONS = {
 async def validate_with_cookies():
     """Validate using cookies.json."""
     cookies_file = Path("/home/peter/Documents/Projects/zolai/cookies.json")
-    
+
     if not cookies_file.exists():
         print("❌ cookies.json not found in project root")
         print("Please export fresh cookies from https://gemini.google.com")
         return
-    
+
     try:
         cookies = json.loads(cookies_file.read_text())
         psid = cookies.get("__Secure-1PSID")
         psidts = cookies.get("__Secure-1PSIDTS")
-        
+
         if not psid or not psidts:
             print("❌ Missing __Secure-1PSID or __Secure-1PSIDTS in cookies.json")
             return
-        
+
         print("🔍 Connecting with cookies from cookies.json...")
         client = GeminiClient(psid, psidts)
         print("✅ Connected to Gemini Web API\n")
     except Exception as e:
         print(f"❌ Failed to connect: {e}")
         return
-    
+
     results = {"translations": {}}
-    
+
     print("🔍 Validating translations...\n")
     for i, (story, translation) in enumerate(TRANSLATIONS.items()):
         try:
@@ -62,18 +62,18 @@ async def validate_with_cookies():
             results["translations"][story] = response.text
             print(f"✅ {story}")
             print(f"   {response.text[:100]}...\n")
-            
+
             if i < len(TRANSLATIONS) - 1:
                 await asyncio.sleep(2)
         except Exception as e:
             print(f"❌ {story}: {str(e)}\n")
             results["translations"][story] = f"Error: {str(e)}"
-    
+
     # Save results
     output_file = Path("/home/peter/Documents/Projects/zolai/GEMINI_VALIDATION_RESULTS.json")
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
-    
+
     print(f"✅ Results saved to {output_file}")
     await client.close()
 

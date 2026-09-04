@@ -67,7 +67,6 @@ def migrate():
 
     with open(JSONL_PATH, 'r', encoding='utf-8') as f:
         batch_size = 1000
-        current_batch = []
 
         for i, line in enumerate(f):
             try:
