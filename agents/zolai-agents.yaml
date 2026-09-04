@@ -17,7 +17,7 @@ teams:
   language:
     name: Language Team
     description: "Linguistics, grammar, dialect, culture, and knowledge"
-    agents: [linguistic-specialist, learner, philosopher, wiki-manager, grammar-checker, dialect-classifier, cultural-content]
+    agents: [linguistic-specialist, learner, philosopher, wiki-manager, grammar-checker, dialect-classifier, cultural-content, rag-assistant]
 
   education:
     name: Education Team
@@ -189,6 +189,13 @@ agents:
     notes: |
       Zongeina = Zo culture/customs. Zola = Zo songs. Zo-an = Zo food. Zolam = Zo dance.
       Reference: wiki/glossary/zo_compound_words.md
+
+  rag-assistant:
+    name: Zolai RAG Assistant
+    dir: agents/zolai-rag-assistant/
+    team: language
+    trigger: ["ask", "question", "what is", "how do you", "grammar", "vocabulary", "culture", "knowledge"]
+    output: null
 
   # ── Education ─────────────────────────────────────────────────────────────────
   lesson-tutor:
