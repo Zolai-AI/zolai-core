@@ -20,3 +20,6 @@ kaggle_dataset/
 playwright-report/
 test-results/
 *.pem
+
+# Orchestra session-claims runtime artifact
+.pcore-claims/
