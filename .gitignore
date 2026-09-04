@@ -1,0 +1,14 @@
+# Zolai — local artifacts / secrets
+.env
+.env.*
+*.env.gemini
+__pycache__/
+*.pyc
+node_modules/
+.next/
+target/
+data/
+artifacts/
+.venv/
+*.jsonl
+!kaggle_dataset/*.json
