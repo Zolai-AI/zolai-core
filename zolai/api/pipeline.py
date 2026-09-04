@@ -248,8 +248,9 @@ class TranslateRequest(BaseModel):
 @router.post("/translate")
 async def translate(req: TranslateRequest):
     """Translate via gemini-server /api/generate."""
-    import httpx
     import os
+
+    import httpx
 
     direction_label = "Zolai (Tedim) to English" if req.direction == "zo-en" else "English to Zolai (Tedim)"
     system_prompt = (

@@ -1,9 +1,10 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-import sqlite3
 import json
 import os
+import sqlite3
 from typing import List, Optional
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
 from zolai.api.prediction_api import router as prediction_router  # noqa: E402
 
@@ -47,14 +48,18 @@ async def verify_grammar(payload: GrammarQuery):
         is_valid = False
         feedback.append("Invalid plurality: 'uhhi' should not be used with first-person inclusive 'i' (we).")
         suggestions.append("Use 'i [verb] hi' instead.")
-    
+
     if "lo leh" in sentence:
         is_valid = False
         feedback.append("Use 'kei' for conditionals.")
-        suggestions.append(f"Replace 'lo leh' with 'kei leh'.")
-    
+        suggestions.append("Replace 'lo leh' with 'kei leh'.")
+
     if is_valid:
-        return GrammarResponse(is_valid=True, feedback="Sentence appears to follow Tedim Zolai Standard.", suggestions=[])
+        return GrammarResponse(
+            is_valid=True,
+            feedback="Sentence appears to follow Tedim Zolai Standard.",
+            suggestions=[],
+        )
     else:
         return GrammarResponse(is_valid=False, feedback="; ".join(feedback), suggestions=suggestions)
 
@@ -63,7 +68,7 @@ async def search_dictionary(payload: SearchQuery):
     conn = get_db_connection()
     c = conn.cursor()
     query = payload.query.lower().strip()
-    
+
     results = []
 
     # 1. Exact Match
@@ -74,16 +79,17 @@ async def search_dictionary(payload: SearchQuery):
     # 2. Translation Match
     if not results:
         c.execute('''
-            SELECT entries.raw_json FROM translations 
-            JOIN entries ON translations.entry_id = entries.id 
+            SELECT entries.raw_json FROM translations
+            JOIN entries ON translations.entry_id = entries.id
             WHERE translations.translation = ?
         ''', (query,))
         for row in c.fetchall():
             res = json.loads(row[0])
-            if res not in results: results.append(res)
+            if res not in results:
+                results.append(res)
 
     conn.close()
-    
+
     # Map raw_json to Pydantic model
     formatted_results = [
         SearchResult(
@@ -94,7 +100,7 @@ async def search_dictionary(payload: SearchQuery):
             explanations=r.get("explanations", [])
         ) for r in results
     ]
-    
+
     return formatted_results
 
 app.include_router(prediction_router)

@@ -1,7 +1,7 @@
-import typer
-import httpx
 import os
-from typing import Optional
+
+import httpx
+import typer
 
 app = typer.Typer()
 
@@ -14,7 +14,7 @@ def status():
     try:
         r = httpx.get(f"{ZOLAI_API_URL}/openapi.json")
         typer.echo(f"Zolai API: {'Online' if r.status_code == 200 else 'Offline'}")
-    except:
+    except Exception:
         typer.echo("Zolai API: Offline")
 
 @app.command()
@@ -26,7 +26,7 @@ def audit(file_path: str):
 
     content = open(file_path, "r").read()
     typer.echo(f"Auditing {file_path}...")
-    
+
     try:
         r = httpx.post(f"{ZOLAI_API_URL}/verify-grammar", json={"sentence": content})
         if r.status_code == 200:
@@ -46,15 +46,15 @@ def audit(file_path: str):
 def improve(task: str):
     """Improve the project using AI agents."""
     typer.echo(f"Reasoning about task: {task}...")
-    
+
     try:
         # We send the request to the Gemini Server (8000) for reasoning.
         # Assuming the Gemini Server has a /api/generate endpoint that accepts a prompt.
         r = httpx.post(
-            f"{GEMINI_SERVER_URL}/api/generate", 
+            f"{GEMINI_SERVER_URL}/api/generate",
             json={"prompt": f"Act as a Zolai AI Agent. Improve the project based on this task: {task}"}
         )
-        
+
         if r.status_code == 200:
             result = r.json()
             typer.echo("--- Improvement Plan ---")

@@ -4,10 +4,10 @@ import logging
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, Tuple
+from typing import Optional
 
 from ..config import Paths
-from ..shared.utils import ZolaiRecord, read_jsonl, write_jsonl
+from ..shared.utils import read_jsonl, write_jsonl
 
 log = logging.getLogger(__name__)
 

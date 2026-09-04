@@ -13,12 +13,12 @@ def setup_logger(
     level: int = logging.INFO,
 ) -> logging.Logger:
     """Set up logger with file and console handlers.
-    
+
     Args:
         name: Logger name (usually __name__)
         component: Component name (cli, api, training, crawlers, etc.)
         level: Logging level
-    
+
     Returns:
         Configured logger instance
     """

@@ -173,7 +173,6 @@ def zolai_density(text: str) -> float:
     tokens = _WORD_RE.findall(text.lower())
     if not tokens:
         return 0.0
-    kw_hits = sum(1 for t in tokens if t in _ZOLAI_FUNCTION_SET)
     strong = sum(1 for t in tokens if any(pat in t for pat in STRONG_TOKENS))
     medium = sum(1 for t in tokens if t in MEDIUM_TOKENS)
     weak = sum(1 for t in tokens if t in WEAK_TOKENS)
@@ -193,7 +192,6 @@ def is_zolai(text: str, threshold: float = 0.012) -> bool:
     bl_count = sum(1 for t in tokens if t in _DANISH_BLACKLIST)
     if bl_count >= 3:
         return False
-    strong_count = sum(1 for t in tokens if any(pat in t for pat in STRONG_TOKENS))
     distinct_strong = set()
     for t in tokens:
         for pat in STRONG_TOKENS:

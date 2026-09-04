@@ -1,14 +1,11 @@
 """Zolai web crawler — discover, fetch, and extract Zolai text from the web."""
 import hashlib
-import json
 import logging
-import os
 import re
 import sqlite3
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, List, Optional
 
 import httpx
 from bs4 import BeautifulSoup

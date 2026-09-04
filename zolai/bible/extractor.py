@@ -196,8 +196,6 @@ class BibleExtractor:
             return verses
 
         for book_div in body.findall('div'):
-            book_id = book_div.get('id', '')
-            book_code = book_id.replace('b.', '') if book_id.startswith('b.') else book_id
             for ch_div in book_div.findall('div'):
                 for seg in ch_div.findall('seg'):
                     seg_id = seg.get('id', '')
