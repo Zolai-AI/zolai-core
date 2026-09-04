@@ -42,3 +42,16 @@ ZVS 2018 orthography, SOV order, ergative `-in`. All language output must comply
 ## Contribute
 
 See `CONNECT.md` for how `zolai-core` relates to the other `zolai-ai` repos.
+
+---
+
+## Part of the Zolai-AI org
+
+This repo is a component of the **Zolai-AI** organization — see the
+[org profile](https://github.com/Zolai-AI) for the full ecosystem and
+[`.github/CONTRIBUTING.md`](https://github.com/Zolai-AI/.github/blob/main/community/CONTRIBUTING.md) to contribute.
+
+---
+
+*Zolai AI · preserving Tedim Zolai (ZVS 2018) with a RAG-first bilingual toolkit for the Zomi people.*
+
