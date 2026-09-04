@@ -4,14 +4,12 @@ All tests use small in-memory tables — no file I/O required.
 """
 from __future__ import annotations
 
-import pytest
-
 from zolai.knowledge.ngram import (
+    _levenshtein,
     load_ngram_tables,
     predict_completion,
     predict_next,
     suggest_corrections,
-    _levenshtein,
 )
 
 # --- Small deterministic tables for testing ---

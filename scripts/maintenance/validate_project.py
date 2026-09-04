@@ -2,7 +2,6 @@
 """Validate Zolai project structure and dependencies."""
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 
@@ -19,7 +18,7 @@ def check_structure() -> bool:
         "pyproject.toml": "Project config",
         "requirements.txt": "Dependencies",
     }
-    
+
     print("📁 Checking project structure...")
     all_ok = True
     for path, desc in required.items():
@@ -28,7 +27,7 @@ def check_structure() -> bool:
         status = "✓" if exists else "✗"
         print(f"  {status} {path:30} ({desc})")
         all_ok = all_ok and exists
-    
+
     return all_ok
 
 
@@ -36,12 +35,12 @@ def check_imports() -> bool:
     """Verify package imports."""
     print("\n📦 Checking package imports...")
     try:
-        from zolai.utils import get_device, stream_jsonl, batch_stream_jsonl
+        from zolai.utils import batch_stream_jsonl, get_device, stream_jsonl
         print("  ✓ zolai.utils (device, data_loader)")
-        
+
         from zolai.cli.main import main as cli_main
         print("  ✓ zolai.cli")
-        
+
         return True
     except ImportError as e:
         print(f"  ✗ Import failed: {e}")
@@ -72,7 +71,7 @@ def check_data() -> bool:
         "data/raw/": "Raw data",
         "data/history/": "Crawl logs",
     }
-    
+
     all_ok = True
     for path, desc in data_dirs.items():
         full_path = root / path
@@ -80,7 +79,7 @@ def check_data() -> bool:
         status = "✓" if exists else "✗"
         print(f"  {status} {path:30} ({desc})")
         all_ok = all_ok and exists
-    
+
     return all_ok
 
 
@@ -98,7 +97,7 @@ def check_scripts() -> bool:
         "scripts/dev/": "Dev/test files",
         "scripts/ui/": "UI & menu",
     }
-    
+
     all_ok = True
     for path, desc in script_dirs.items():
         full_path = root / path
@@ -106,7 +105,7 @@ def check_scripts() -> bool:
         status = "✓" if exists else "✗"
         print(f"  {status} {path:30} ({desc})")
         all_ok = all_ok and exists
-    
+
     return all_ok
 
 
@@ -114,22 +113,23 @@ def check_system() -> bool:
     """Check system specs."""
     print("\n💻 Checking system specs...")
     import os
+
     import torch
-    
+
     cpu_count = os.cpu_count() or 1
     print(f"  ✓ CPU cores: {cpu_count}")
-    
+
     try:
         import psutil
         ram_gb = psutil.virtual_memory().total / (1024**3)
         print(f"  ✓ RAM: {ram_gb:.1f}GB")
     except ImportError:
         print("  ⚠ psutil not installed (optional)")
-    
+
     cuda_available = torch.cuda.is_available()
     gpu_status = "✓ GPU available" if cuda_available else "⚠ CPU-only (expected)"
     print(f"  {gpu_status}")
-    
+
     return True
 
 
@@ -138,7 +138,7 @@ def main() -> int:
     print("=" * 60)
     print("  ZOLAI PROJECT VALIDATION")
     print("=" * 60)
-    
+
     checks = [
         ("Structure", check_structure),
         ("Imports", check_imports),
@@ -147,7 +147,7 @@ def main() -> int:
         ("Scripts", check_scripts),
         ("System", check_system),
     ]
-    
+
     results = {}
     for name, check_fn in checks:
         try:
@@ -155,18 +155,18 @@ def main() -> int:
         except Exception as e:
             print(f"\n✗ {name} check failed: {e}")
             results[name] = False
-    
+
     print("\n" + "=" * 60)
     print("  SUMMARY")
     print("=" * 60)
-    
+
     for name, passed in results.items():
         status = "✓ PASS" if passed else "✗ FAIL"
         print(f"  {status:10} {name}")
-    
+
     all_passed = all(results.values())
     print("=" * 60)
-    
+
     if all_passed:
         print("\n✅ All checks passed! Project is ready.")
         return 0

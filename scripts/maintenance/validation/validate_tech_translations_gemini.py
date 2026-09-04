@@ -13,7 +13,7 @@ except ImportError:
     subprocess.run(["pip", "install", "gemini_webapi"], check=True)
     from gemini_webapi import GeminiClient
 
-SYSTEM_PROMPT = """You are a Tedim Zolai (Chin) linguistics expert. 
+SYSTEM_PROMPT = """You are a Tedim Zolai (Chin) linguistics expert.
 Provide accurate Zolai meanings and translations for technical terms.
 Use only pure Zolai words or loan words with clear explanations.
 Follow Zolai Standard."""
@@ -39,15 +39,15 @@ TRANSLATIONS = {
 async def validate_with_gemini():
     """Validate translations using Gemini Web API."""
     client = GeminiClient()
-    
+
     results = {
         "loan_words": {},
         "translations": {},
         "timestamp": str(Path.cwd())
     }
-    
+
     print("🔍 Validating loan words with Gemini...\n")
-    
+
     for word, question in LOAN_WORDS.items():
         try:
             response = await client.generate_content(
@@ -59,9 +59,9 @@ async def validate_with_gemini():
         except Exception as e:
             print(f"❌ {word}: {str(e)}")
             results["loan_words"][word] = f"Error: {str(e)}"
-    
+
     print("\n🔍 Validating translations with Gemini...\n")
-    
+
     for story, translation in TRANSLATIONS.items():
         try:
             question = f"Is this Zolai translation accurate and natural? '{translation}' Provide feedback on grammar, word choice, and meaning."
@@ -74,12 +74,12 @@ async def validate_with_gemini():
         except Exception as e:
             print(f"❌ {story}: {str(e)}")
             results["translations"][story] = f"Error: {str(e)}"
-    
+
     # Save results
     output_file = Path("/home/peter/Documents/Projects/zolai/GEMINI_VALIDATION_RESULTS.json")
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
-    
+
     print(f"\n✅ Results saved to {output_file}")
     return results
 

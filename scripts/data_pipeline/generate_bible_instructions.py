@@ -6,7 +6,6 @@ Sources: Tedim2010 (ZVS), TDB77, TBR17
 """
 import json
 from pathlib import Path
-from collections import defaultdict
 
 SOURCES = [
     ("data/parallel/bible_parallel_tedim2010_kjv.jsonl", "Tedim2010"),
@@ -22,6 +21,7 @@ MISSING = {
 }
 
 import re
+
 
 def parse_markdown_pairs(path, book):
     """Extract (zo, en, ref) from a parallel markdown file."""

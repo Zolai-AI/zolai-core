@@ -31,22 +31,22 @@ CORRECTIONS = {
 def fix_record(rec):
     """Fix invalid record"""
     text = rec.get("text", "").strip()
-    
+
     # Skip if no text
     if not text:
         return None
-    
+
     # Skip if too long
     if len(text) > 50000:
         return None
-    
+
     # Skip if too short
     if len(text) < 5:
         return None
-    
+
     # Remove control characters
     text = ''.join(c for c in text if ord(c) >= 32 or c in '\n\t\r')
-    
+
     # Fix dialect words
     text_lower = text.lower()
     for wrong, correct in CORRECTIONS.items():
@@ -55,7 +55,7 @@ def fix_record(rec):
             text = text.replace(wrong, correct)
             text = text.replace(wrong.capitalize(), correct.capitalize())
             text = text.replace(wrong.upper(), correct.upper())
-    
+
     # Update record
     rec["text"] = text
     return rec
@@ -70,9 +70,9 @@ with open(INPUT_FILE, "r") as f:
     for i, line in enumerate(f):
         try:
             rec = json.loads(line)
-            
+
             # Only process invalid records
-            if rec.get("valid") == False:
+            if not rec.get("valid"):
                 fixed = fix_record(rec)
                 if fixed:
                     fixed["valid"] = True
@@ -84,9 +84,9 @@ with open(INPUT_FILE, "r") as f:
             else:
                 # Keep valid records as-is
                 fixed_records.append(rec)
-            
+
             stats["total"] += 1
-            
+
             if (i + 1) % 100000 == 0:
                 log(f"[{i+1}] Fixed: {stats['fixed']}, Skipped: {stats['skipped']}")
         except:

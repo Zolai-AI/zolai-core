@@ -5,9 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sys
 from pathlib import Path
-from typing import Iterator
 
 # Configuration
 ROOT = Path(__file__).resolve().parent.parent

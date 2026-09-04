@@ -1,13 +1,12 @@
 import os
 import re
-import glob
-import sys
+
 
 def process_file(filepath):
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             content = f.read()
-    except Exception as e:
+    except Exception:
         return False
 
     original_content = content
@@ -23,38 +22,38 @@ def process_file(filepath):
     # Replace "ZVS Standard" -> "Zolai Standard"
     # Replace "ZVS standard" -> "Zolai Standard"
     # Replace "ZVS Tedim standard" -> "Zolai Standard"
-    
+
     # Let's do some specific replacements first
     content = re.sub(r'\bZVS Tedim standard\b', 'Zolai Standard', content, flags=re.IGNORECASE)
     content = re.sub(r'\bZVS v9 standard\b', 'Zolai Standard', content, flags=re.IGNORECASE)
     content = re.sub(r'\bZVS 2018 standard\b', 'Zolai Standard', content, flags=re.IGNORECASE)
     content = re.sub(r'\bZVS v9\b', 'Zolai Standard', content, flags=re.IGNORECASE)
-    
+
     # "ZVS 2018" not followed by Bible, translation, version
     content = re.sub(r'\bZVS 2018\b(?!\s+(Bible|translation|version|corpus))', 'Zolai Standard', content)
-    
+
     # "ZVS Standard" or "ZVS standard"
     content = re.sub(r'\bZVS Standard\b', 'Zolai Standard', content)
     content = re.sub(r'\bZVS standard\b', 'Zolai Standard', content)
-    
+
     # "ZVS dialect" -> "Zolai Standard dialect"
     content = re.sub(r'\bZVS dialect\b', 'Zolai Standard dialect', content, flags=re.IGNORECASE)
-    
+
     # "ZVS compliant" -> "Zolai Standard compliant"
     content = re.sub(r'\bZVS compliant\b', 'Zolai Standard compliant', content, flags=re.IGNORECASE)
-    
+
     # "ZVS grammar" -> "Zolai Standard grammar"
     content = re.sub(r'\bZVS grammar\b', 'Zolai Standard grammar', content, flags=re.IGNORECASE)
-    
+
     # "ZVS rules" -> "Zolai Standard rules"
     content = re.sub(r'\bZVS rules\b', 'Zolai Standard rules', content, flags=re.IGNORECASE)
-    
+
     # "ZVS word order" -> "Zolai Standard word order"
     content = re.sub(r'\bZVS word order\b', 'Zolai Standard word order', content, flags=re.IGNORECASE)
-    
+
     # "ZVS negation" -> "Zolai Standard negation"
     content = re.sub(r'\bZVS negation\b', 'Zolai Standard negation', content, flags=re.IGNORECASE)
-    
+
     # "ZVS correct spelling" -> "Zolai Standard correct spelling"
     content = re.sub(r'\bZVS correct spelling\b', 'Zolai Standard correct spelling', content, flags=re.IGNORECASE)
 
@@ -83,7 +82,7 @@ def process_file(filepath):
 
 def main():
     modified_files = []
-    
+
     # We will walk the directory and process all .md files
     for root, dirs, files in os.walk('.'):
         # skip .git and other hidden dirs or node_modules
@@ -94,7 +93,7 @@ def main():
                 filepath = os.path.join(root, file)
                 if process_file(filepath):
                     modified_files.append(filepath)
-                    
+
     print(f"Modified {len(modified_files)} files:")
     for f in modified_files:
         print(f" - {f}")

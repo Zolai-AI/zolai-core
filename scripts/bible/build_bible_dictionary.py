@@ -16,9 +16,11 @@ Strategy — corpus-driven, no hardcoded pairs:
 7. Zolai Standard corrections: TDB77-only words that have a Tedim2010 equivalent
 """
 
-import json, re, glob
+import glob
+import json
+import re
+from collections import Counter, defaultdict
 from pathlib import Path
-from collections import defaultdict, Counter
 
 DIALECT = "tedim"
 SOURCE  = "Bible-Parallel-Corpus"
@@ -34,7 +36,6 @@ DIALECT_CORRECTIONS = {
     "topa":       "topa",
     "kumpipa": "pasian",
     "tua":           "tua",
-    "tua":          "tua",
 }
 
 # Zolai Standard negation usage notes (corpus-verified)
@@ -221,8 +222,8 @@ def infer_relations(zo_en, zo_zo, zo_neg, book_count, total_verses):
 
     # Filter: words appearing in >50% of all verses are too common to be "related"
     # They co-occur with everything — not meaningful
-    high_freq_threshold = total_verses * 0.50
-    high_freq = {w for w, books in book_count.items()
+    total_verses * 0.50
+    {w for w, books in book_count.items()
                  if sum(1 for _ in books) > 0  # placeholder — use zo_zo total
                 }
     # Better: use raw co-occurrence count as proxy for frequency

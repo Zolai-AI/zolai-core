@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-import sqlite3
 import json
+import sqlite3
+
 import requests
+from rdflib import Namespace
 from transformers import pipeline
-from rdflib import Graph, URIRef, Literal, Namespace
 
 # Configuration
 DB_PATH = "zolai.db"
@@ -28,14 +29,14 @@ def extract_entities(text):
 def extract_relationships(text, entities):
     if len(entities) < 2:
         return []
-    
+
     prompt = f"Text: {text}\nEntities: {', '.join([e['label'] for e in entities])}\nExtract relationships as RDF triples in ZSP protocol [Subject] --[Predicate]--> [Object]. Use Zolai predicates."
-    
+
     payload = {
         "model": "gemini-pro",
         "messages": [{"role": "user", "content": prompt}]
     }
-    
+
     try:
         response = requests.post(GEMINI_SERVER_URL, json=payload)
         raw_triples = response.json()["choices"][0]["message"]["content"]
@@ -55,24 +56,24 @@ def extract_relationships(text, entities):
 def save_to_db(entities, relationships):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    
+
     # Insert Nodes
     for ent in entities:
         cur.execute("""
-            INSERT OR IGNORE INTO kg_node (id, iri, kind, label, properties) 
+            INSERT OR IGNORE INTO kg_node (id, iri, kind, label, properties)
             VALUES (?, ?, ?, ?, ?)
         """, (ent["iri"], ent["iri"], ent["kind"], ent["label"], json.dumps({})))
-    
+
     # Insert Edges
     for s, p, o in relationships:
         # Map labels back to IRIs (simplified)
         s_iri = f"zolai:ent:{s.lower().replace(' ', '_')}"
         o_iri = f"zolai:ent:{o.lower().replace(' ', '_')}"
         cur.execute("""
-            INSERT OR IGNORE INTO kg_edge (id, fromId, toId, predicate, sourceKey) 
+            INSERT OR IGNORE INTO kg_edge (id, fromId, toId, predicate, sourceKey)
             VALUES (?, ?, ?, ?, 'extraction-pipeline')
         """, (f"{s_iri}-{p}-{o_iri}", s_iri, o_iri, p))
-    
+
     conn.commit()
     conn.close()
 

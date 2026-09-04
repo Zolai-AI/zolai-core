@@ -1,12 +1,13 @@
 from __future__ import annotations
-import json
-import sqlite3
-from pathlib import Path
-from datetime import datetime
+
 import hashlib
-import sys
+import json
 import re
+import sqlite3
+import sys
 from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data" / "processed" / "rebuild_v5"
@@ -79,7 +80,7 @@ def load_dictionary() -> dict:
     """Load existing dictionary for context lookup"""
     dictionary = {}
     v7_en = PROJECT_ROOT / "data" / "processed" / "rebuild_v1" / "final_en_zo_dictionary_v7.jsonl"
-    
+
     if v7_en.exists():
         with open(v7_en, encoding="utf-8") as f:
             for line in f:
@@ -92,7 +93,7 @@ def load_dictionary() -> dict:
                         dictionary[zo] = en
                 except:
                     pass
-    
+
     log_msg(f"Loaded {len(dictionary)} dictionary entries for context")
     return dictionary
 
@@ -106,23 +107,23 @@ def learn_from_zo_text(conn: sqlite3.Connection, text: str, source: str, cycle: 
     """Learn from Zolai text by extracting patterns and finding context"""
     cursor = conn.cursor()
     learned = 0
-    
+
     patterns = extract_zo_patterns(text)
     pattern_freq = defaultdict(int)
-    
+
     for pattern in patterns:
         pattern_freq[pattern] += 1
-    
+
     for pattern, freq in pattern_freq.items():
         # Check if pattern exists in dictionary
         if pattern in dictionary:
             en_meaning = dictionary[pattern]
-            
+
             # Create entry
             entry_id = hashlib.md5(f"{en_meaning}:{pattern}".encode()).hexdigest()
             cursor.execute("SELECT id, confidence FROM entries WHERE id = ?", (entry_id,))
             result = cursor.fetchone()
-            
+
             if result:
                 # Update with learning
                 old_conf = result[1]
@@ -163,21 +164,21 @@ def learn_from_zo_text(conn: sqlite3.Connection, text: str, source: str, cycle: 
                 text[:100],
                 datetime.now().isoformat()
             ))
-    
+
     conn.commit()
     return learned
 
 def extract_zomidictionary(conn: sqlite3.Connection, cycle: int, dictionary: dict) -> int:
     """Extract from ZomiDictionary with flexible parsing"""
     zomi_file = PROJECT_ROOT / "data" / "raw" / "zomidictionary_export.jsonl"
-    
+
     if not zomi_file.exists():
         log_msg(f"[Cycle {cycle}] ZomiDictionary not found")
         return 0
-    
+
     cursor = conn.cursor()
     learned = 0
-    
+
     try:
         with open(zomi_file, encoding="utf-8") as f:
             for line in f:
@@ -185,7 +186,7 @@ def extract_zomidictionary(conn: sqlite3.Connection, cycle: int, dictionary: dic
                     entry = json.loads(line)
                     zo = entry.get("zolai", "").strip().lower()
                     en = entry.get("english", "").strip().lower()
-                    
+
                     if zo and en and len(zo) > 1 and len(en) > 1:
                         entry_id = hashlib.md5(f"{en}:{zo}".encode()).hexdigest()
                         cursor.execute("""
@@ -208,21 +209,21 @@ def extract_zomidictionary(conn: sqlite3.Connection, cycle: int, dictionary: dic
         conn.commit()
     except Exception as e:
         log_msg(f"[Cycle {cycle}] Error reading ZomiDictionary: {e}")
-    
+
     log_msg(f"[Cycle {cycle}] Learned {learned} from ZomiDictionary")
     return learned
 
 def extract_bible_texts(conn: sqlite3.Connection, cycle: int, dictionary: dict) -> int:
     """Extract from Bible texts by learning Zolai patterns"""
     bible_dir = PROJECT_ROOT / "data" / "master" / "sources"
-    
+
     if not bible_dir.exists():
         log_msg(f"[Cycle {cycle}] Bible directory not found")
         return 0
-    
+
     bible_files = list(bible_dir.glob("bible_tb77*.jsonl"))[:3]  # Sample
     learned = 0
-    
+
     for bible_file in bible_files:
         try:
             with open(bible_file, encoding="utf-8") as f:
@@ -236,20 +237,20 @@ def extract_bible_texts(conn: sqlite3.Connection, cycle: int, dictionary: dict) 
                         pass
         except Exception as e:
             log_msg(f"[Cycle {cycle}] Error reading {bible_file.name}: {e}")
-    
+
     log_msg(f"[Cycle {cycle}] Learned {learned} from Bible texts")
     return learned
 
 def extract_resources(conn: sqlite3.Connection, cycle: int, dictionary: dict) -> int:
     """Extract from all available resources"""
     learned = 0
-    
+
     # ZomiDictionary
     learned += extract_zomidictionary(conn, cycle, dictionary)
-    
+
     # Bible texts
     learned += extract_bible_texts(conn, cycle, dictionary)
-    
+
     # Other JSONL files
     raw_dir = PROJECT_ROOT / "data" / "raw"
     if raw_dir.exists():
@@ -270,19 +271,19 @@ def extract_resources(conn: sqlite3.Connection, cycle: int, dictionary: dict) ->
                             pass
             except:
                 pass
-    
+
     return learned
 
 def calculate_metrics(conn: sqlite3.Connection, cycle: int, source: str, found: int, learned: int) -> dict:
     """Calculate learning metrics"""
     cursor = conn.cursor()
-    
+
     cursor.execute("SELECT COUNT(*) FROM entries")
     total = cursor.fetchone()[0]
-    
+
     cursor.execute("SELECT AVG(confidence) FROM entries")
     avg_conf = cursor.fetchone()[0] or 0
-    
+
     metrics = {
         "cycle": cycle,
         "source": source,
@@ -292,7 +293,7 @@ def calculate_metrics(conn: sqlite3.Connection, cycle: int, source: str, found: 
         "avg_confidence": avg_conf,
         "timestamp": datetime.now().isoformat()
     }
-    
+
     # Save metrics
     cursor.execute("""
         INSERT INTO learning_metrics (id, cycle, source, entries_found, entries_learned, avg_confidence, timestamp)
@@ -307,51 +308,51 @@ def calculate_metrics(conn: sqlite3.Connection, cycle: int, source: str, found: 
         datetime.now().isoformat()
     ))
     conn.commit()
-    
+
     log_msg(f"[Cycle {cycle}] Metrics: {total} total, {learned} learned, avg conf: {avg_conf:.2f}")
     return metrics
 
 def main() -> int:
     log_msg("=== INTELLIGENT LEARNING DICTIONARY V5 ===")
-    
+
     conn = init_db()
     dictionary = load_dictionary()
     checkpoint = load_checkpoint()
-    
+
     log_msg(f"Resuming from cycle {checkpoint['cycle']}, source: {checkpoint['source']}")
-    
+
     # Run learning cycles
     for cycle in range(checkpoint["cycle"], 4):
         log_msg(f"\n=== CYCLE {cycle} ===")
-        
+
         # Extract and learn from all resources
         learned = extract_resources(conn, cycle, dictionary)
-        
+
         # Calculate metrics
-        metrics = calculate_metrics(conn, cycle, "all_sources", 0, learned)
-        
+        calculate_metrics(conn, cycle, "all_sources", 0, learned)
+
         # Save checkpoint
         save_checkpoint(cycle + 1, "", 0)
-        
+
         log_msg(f"[Cycle {cycle}] Complete - learned {learned} entries\n")
-    
+
     # Final stats
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM entries")
     total = cursor.fetchone()[0]
-    
+
     cursor.execute("SELECT AVG(confidence) FROM entries")
     avg_conf = cursor.fetchone()[0] or 0
-    
+
     cursor.execute("SELECT COUNT(*) FROM zo_patterns")
     patterns = cursor.fetchone()[0]
-    
-    log_msg(f"\n=== FINAL RESULTS ===")
+
+    log_msg("\n=== FINAL RESULTS ===")
     log_msg(f"Total entries: {total}")
     log_msg(f"Zolai patterns discovered: {patterns}")
     log_msg(f"Avg confidence: {avg_conf:.2f}")
     log_msg(f"Database: {DB_PATH}")
-    
+
     conn.close()
     log_msg("✅ Intelligent learning complete")
     return 0

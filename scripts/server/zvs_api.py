@@ -1,6 +1,7 @@
-import sqlite3
 import json
 import re
+import sqlite3
+
 
 class ZVSTranslator:
     def __init__(self, db_path="data/dictionary/db/zvs_master_dictionary.db"):
@@ -10,12 +11,12 @@ class ZVSTranslator:
         """Applies linguistic constraints like Inclusive 'i', stem logic, and culinary rules."""
         # Rule: Inclusive 'i' + [verb] + hi (no uh hi)
         text = re.sub(r'\bi\s+(.*?)\s+uh hi\b', r'i \1 hi', text)
-        
+
         # Culinery Rules
         if register == "conversational":
             text = text.replace("thip", "thak") # Force spicy standard
             text = text.replace("thau", "sathau") if "huan" in text or "kan" in text else text
-            
+
         return text
 
     def get_zvs_translation(self, query, register="conversational"):
@@ -24,7 +25,7 @@ class ZVSTranslator:
         cursor.execute("SELECT raw_json FROM entries WHERE headword = ? OR translations LIKE ? LIMIT 1", (query, f"%{query}%"))
         row = cursor.fetchone()
         conn.close()
-        
+
         if row:
             data = json.loads(row[0])
             example = data.get("example", "Example not found.")

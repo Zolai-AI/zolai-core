@@ -58,7 +58,7 @@ log(f"\n{'='*80}")
 log("✅ Training splits created!")
 log(f"{'='*80}")
 
-print(f"\n✅ Created training splits!")
+print("\n✅ Created training splits!")
 print(f"Train: {len(train_records):,}")
 print(f"Val:   {len(val_records):,}")
 print(f"Test:  {len(test_records):,}")

@@ -9,9 +9,11 @@ Outputs a structured learning record per verse with:
   - Running dictionary updated after each book
 """
 
-import json, re, glob
+import glob
+import json
+import re
+from collections import Counter, defaultdict
 from pathlib import Path
-from collections import defaultdict, Counter
 
 # Canonical Bible book order (66 books)
 BOOK_ORDER = [

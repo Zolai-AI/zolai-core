@@ -6,8 +6,8 @@ Agents: 5 specialists discuss each sentence in multiple rounds.
 """
 import asyncio
 import json
-import random
 import os
+import random
 from pathlib import Path
 
 try:

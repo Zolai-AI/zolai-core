@@ -45,7 +45,6 @@ def parse_parallel_file(path: Path) -> list[dict]:
         return []
 
     # Detect current chapter
-    chapter = 1
     entries = []
     # Split into verse blocks by **ch:v** markers
     blocks = re.split(r'\*\*(\d+:\d+)\*\*', text)

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Upload to Kaggle using API"""
-import os
 import json
 from pathlib import Path
+
 from kaggle.api.kaggle_api_extended import KaggleApi
 
 # Initialize API

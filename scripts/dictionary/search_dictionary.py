@@ -25,8 +25,8 @@ def search(query):
     # 2. Exact Translation Match (English -> Zolai)
     if not results:
         c.execute('''
-            SELECT entries.raw_json FROM translations 
-            JOIN entries ON translations.entry_id = entries.id 
+            SELECT entries.raw_json FROM translations
+            JOIN entries ON translations.entry_id = entries.id
             WHERE translations.translation = ?
         ''', (query,))
         for row in c.fetchall():
@@ -36,8 +36,8 @@ def search(query):
     # 3. Stem Match (Zolai Morphological Match)
     if not results:
         c.execute('''
-            SELECT entries.raw_json FROM stems 
-            JOIN entries ON stems.entry_id = entries.id 
+            SELECT entries.raw_json FROM stems
+            JOIN entries ON stems.entry_id = entries.id
             WHERE stems.stem = ?
         ''', (query,))
         for row in c.fetchall():

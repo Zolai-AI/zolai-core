@@ -47,14 +47,14 @@ try:
         for i, line in enumerate(f):
             if i >= 10:  # 10 samples
                 break
-            
+
             rec = json.loads(line)
             text = rec.get("text", "")[:100]
             dialect = rec.get("dialect", "")
             level = rec.get("language_level", "")
-            
+
             log(f"[{i+1}/10] {text}...")
-            
+
             # Simple validation prompt
             prompt = f"""Validate this Zolai sentence:
 Text: {text}
@@ -63,11 +63,11 @@ Claimed Level: {level}
 
 Respond ONLY with JSON (no other text):
 {{"valid": true/false, "dialect_ok": true/false, "level_ok": true/false, "confidence": 0.0-1.0, "remark": "brief comment"}}"""
-            
+
             try:
                 response = model.generate_content(prompt)
                 text_response = response.text.strip()
-                
+
                 # Extract JSON
                 import re
                 json_match = re.search(r'\{.*\}', text_response, re.DOTALL)
@@ -75,10 +75,10 @@ Respond ONLY with JSON (no other text):
                     validation = json.loads(json_match.group())
                 else:
                     validation = {"valid": None, "confidence": 0, "remark": "Parse error"}
-                
+
             except Exception as e:
                 validation = {"valid": None, "confidence": 0, "remark": str(e)[:50]}
-            
+
             # Stats
             stats["total"] += 1
             if validation.get("valid"):
@@ -88,13 +88,13 @@ Respond ONLY with JSON (no other text):
             if validation.get("level_ok"):
                 stats["level_ok"] += 1
             stats["avg_conf"] += validation.get("confidence", 0)
-            
+
             # Log
             conf = validation.get("confidence", 0)
             remark = validation.get("remark", "")
             log(f"  Valid: {validation.get('valid')} | Dialect: {validation.get('dialect_ok')} | Level: {validation.get('level_ok')} | Conf: {conf:.2f}")
             log(f"  Remark: {remark}\n")
-            
+
             # Save
             results.append({
                 "index": i,
@@ -123,6 +123,6 @@ with open(OUTPUT_FILE, "w") as f:
     for r in results:
         f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
-print(f"\n✅ Done!")
+print("\n✅ Done!")
 print(f"Results: {OUTPUT_FILE}")
 print(f"Log: {LOG_FILE}")

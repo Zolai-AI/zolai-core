@@ -4,12 +4,11 @@
 from __future__ import annotations
 
 import json
-import re
 import sys
-from pathlib import Path
-from xml.etree import ElementTree as ET
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterator
+from xml.etree import ElementTree as ET
 
 
 @dataclass
@@ -32,7 +31,6 @@ def parse_usx(file_path: Path) -> Iterator[VerseRef]:
 
     current_book = ""
     current_chapter = 0
-    verse_buffer = ""
     current_verse_num = 0
 
     for elem in root.iter():

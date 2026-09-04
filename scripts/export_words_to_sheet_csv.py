@@ -3,9 +3,8 @@ Export all Zolai single words to a Google Sheets-ready CSV with AI() formulas.
 Source: data/dictionary/wordlists/zo_en_singlewords_v1.jsonl
 Output: data/Zolai_All_Words_Sheet.csv
 """
-import json
 import csv
-import sys
+import json
 
 INPUT = "data/dictionary/wordlists/zo_en_singlewords_v1.jsonl"
 OUTPUT = "data/Zolai_All_Words_Sheet.csv"

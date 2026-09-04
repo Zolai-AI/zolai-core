@@ -3,9 +3,10 @@
 Generate simple, practical examples for core Zolai vocabulary.
 Replaces long Bible verses with short usable sentences.
 """
-import json, re
-from pathlib import Path
+import json
+import re
 from collections import defaultdict
+from pathlib import Path
 
 DATA = Path(str(Path(__file__).resolve().parents[2]) + "/data")
 

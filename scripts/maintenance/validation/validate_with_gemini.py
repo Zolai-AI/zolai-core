@@ -55,7 +55,7 @@ Respond in JSON format:
   "confidence": 0.0-1.0,
   "remarks": "brief comment"
 }}"""
-    
+
     try:
         response = model.generate_content(prompt)
         result = json.loads(response.text)
@@ -86,15 +86,15 @@ try:
         for i, line in enumerate(f):
             if i >= 100:  # Sample 100 records
                 break
-            
+
             rec = json.loads(line)
             text = rec.get("text", "")
             dialect = rec.get("dialect", "")
             level = rec.get("language_level", "")
-            
+
             # Validate with Gemini
             validation = validate_sentence(text, dialect, level)
-            
+
             # Store result
             result = {
                 "index": i,
@@ -104,7 +104,7 @@ try:
                 "validation": validation
             }
             results.append(result)
-            
+
             # Update stats
             stats["total"] += 1
             if validation.get("is_valid_zolai"):
@@ -114,7 +114,7 @@ try:
             if validation.get("level_correct"):
                 stats["level_correct"] += 1
             stats["avg_confidence"] += validation.get("confidence", 0)
-            
+
             if (i + 1) % 10 == 0:
                 log(f"  Validated: {i+1}/100 records")
 
@@ -123,7 +123,7 @@ except Exception as e:
 
 stats["avg_confidence"] /= stats["total"] if stats["total"] > 0 else 1
 
-log(f"\n[2/2] RESULTS...\n")
+log("\n[2/2] RESULTS...\n")
 
 log(f"Total validated: {stats['total']}")
 log(f"Valid Zolai: {stats['valid_zolai']}/{stats['total']} ({100*stats['valid_zolai']/stats['total']:.1f}%)")
@@ -139,7 +139,7 @@ with open(OUTPUT_FILE, "w") as f:
 log(f"Results saved: {OUTPUT_FILE.name}")
 
 # Show sample results
-log(f"\nSample validations (first 5):\n")
+log("\nSample validations (first 5):\n")
 for result in results[:5]:
     log(f"Text: {result['text']}")
     log(f"  Dialect: {result['claimed_dialect']} → {result['validation'].get('dialect_correct')}")
@@ -148,6 +148,6 @@ for result in results[:5]:
     log(f"  Remark: {result['validation'].get('remarks')}\n")
 
 log("="*80)
-print(f"\n✅ Validation complete!")
-print(f"Results: data/training/gemini_validation_results.jsonl")
-print(f"Log: data/training/gemini_validation.log")
+print("\n✅ Validation complete!")
+print("Results: data/training/gemini_validation_results.jsonl")
+print("Log: data/training/gemini_validation.log")

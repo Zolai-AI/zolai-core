@@ -605,7 +605,7 @@ class ZolaiWindow(Gtk.ApplicationWindow):
             zolai = entry.get('zolai', '')
             english = entry.get('english', '')
             source = entry.get('source', '')
-            example = entry.get('example', '')
+            entry.get('example', '')
             line = f"📖 {zolai} → {english} [{source}]"
             usage = entry.get('usage_hint', '')
             syns = entry.get('synonyms', [])

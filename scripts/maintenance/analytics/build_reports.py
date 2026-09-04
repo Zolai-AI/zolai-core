@@ -8,7 +8,6 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 REPORTS_DIR = PROJECT_ROOT / "artifacts" / "reports"
 

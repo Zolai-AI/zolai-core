@@ -1,12 +1,11 @@
 from __future__ import annotations
+
+import hashlib
 import json
 import sqlite3
-from pathlib import Path
-from collections import defaultdict
-from datetime import datetime
-import hashlib
 import sys
-import re
+from datetime import datetime
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data" / "processed" / "rebuild_v4"
@@ -60,7 +59,7 @@ def load_existing() -> dict:
     """Load existing v7 dictionary"""
     en_zo = {}
     v7_en = PROJECT_ROOT / "data" / "processed" / "rebuild_v1" / "final_en_zo_dictionary_v7.jsonl"
-    
+
     if v7_en.exists():
         with open(v7_en, encoding="utf-8") as f:
             for line in f:
@@ -69,7 +68,7 @@ def load_existing() -> dict:
                     en_zo[entry["en"]] = entry
                 except:
                     pass
-    
+
     log_msg(f"Loaded {len(en_zo)} existing entries")
     return en_zo
 
@@ -77,14 +76,14 @@ def extract_bible_deep(cycle: int) -> dict:
     """Deep extraction from Bible with learning"""
     entries = {}
     bible_dir = PROJECT_ROOT / "data" / "master" / "sources"
-    
+
     if not bible_dir.exists():
         log_msg(f"[Cycle {cycle}] Bible directory not found")
         return entries
-    
+
     bible_files = list(bible_dir.glob("bible_*.jsonl"))
     log_msg(f"[Cycle {cycle}] Processing {len(bible_files)} Bible files")
-    
+
     for bible_file in bible_files:
         try:
             with open(bible_file, encoding="utf-8") as f:
@@ -93,7 +92,7 @@ def extract_bible_deep(cycle: int) -> dict:
                         entry = json.loads(line)
                         en = entry.get("en", "").strip().lower()
                         zo = entry.get("zo", "").strip().lower()
-                        
+
                         if en and zo and len(en) > 1 and len(zo) > 1:
                             key = f"{en}:{zo}"
                             if key not in entries:
@@ -114,7 +113,7 @@ def extract_bible_deep(cycle: int) -> dict:
                         pass
         except Exception as e:
             log_msg(f"[Cycle {cycle}] Error in {bible_file.name}: {e}")
-    
+
     log_msg(f"[Cycle {cycle}] Extracted {len(entries)} from Bible")
     log_learning({
         "cycle": cycle,
@@ -127,23 +126,23 @@ def extract_bible_deep(cycle: int) -> dict:
 def extract_tongdot_deep(cycle: int) -> dict:
     """Deep extraction from TongDot"""
     entries = {}
-    
+
     # Try multiple possible locations
     tongdot_files = [
         PROJECT_ROOT / "data" / "master" / "sources" / "tongdot_dictionary.jsonl",
         PROJECT_ROOT / "data" / "raw" / "tongdot_dictionary.jsonl",
     ]
-    
+
     tongdot_file = None
     for f in tongdot_files:
         if f.exists():
             tongdot_file = f
             break
-    
+
     if not tongdot_file:
         log_msg(f"[Cycle {cycle}] TongDot not found")
         return entries
-    
+
     try:
         with open(tongdot_file, encoding="utf-8") as f:
             for line in f:
@@ -151,7 +150,7 @@ def extract_tongdot_deep(cycle: int) -> dict:
                     entry = json.loads(line)
                     zo = entry.get("zo", "").strip().lower()
                     en = entry.get("en", "").strip().lower()
-                    
+
                     if zo and en and len(zo) > 1 and len(en) > 1:
                         key = f"{en}:{zo}"
                         if key not in entries:
@@ -171,7 +170,7 @@ def extract_tongdot_deep(cycle: int) -> dict:
                     pass
     except Exception as e:
         log_msg(f"[Cycle {cycle}] Error reading TongDot: {e}")
-    
+
     log_msg(f"[Cycle {cycle}] Extracted {len(entries)} from TongDot")
     log_learning({
         "cycle": cycle,
@@ -184,22 +183,22 @@ def extract_tongdot_deep(cycle: int) -> dict:
 def extract_rvasia_deep(cycle: int) -> dict:
     """Deep extraction from RVAsia"""
     entries = {}
-    
+
     rvasia_files = [
         PROJECT_ROOT / "data" / "rvasia_tedim.jsonl",
         PROJECT_ROOT / "data" / "master" / "sources" / "rvasia_tedim.jsonl",
     ]
-    
+
     rvasia_file = None
     for f in rvasia_files:
         if f.exists():
             rvasia_file = f
             break
-    
+
     if not rvasia_file:
         log_msg(f"[Cycle {cycle}] RVAsia not found")
         return entries
-    
+
     try:
         with open(rvasia_file, encoding="utf-8") as f:
             for line in f:
@@ -207,7 +206,7 @@ def extract_rvasia_deep(cycle: int) -> dict:
                     entry = json.loads(line)
                     en = entry.get("en", "").strip().lower()
                     zo = entry.get("zo", "").strip().lower()
-                    
+
                     if en and zo and len(en) > 1 and len(zo) > 1:
                         key = f"{en}:{zo}"
                         if key not in entries:
@@ -228,7 +227,7 @@ def extract_rvasia_deep(cycle: int) -> dict:
                     pass
     except Exception as e:
         log_msg(f"[Cycle {cycle}] Error reading RVAsia: {e}")
-    
+
     log_msg(f"[Cycle {cycle}] Extracted {len(entries)} from RVAsia")
     log_learning({
         "cycle": cycle,
@@ -241,22 +240,22 @@ def extract_rvasia_deep(cycle: int) -> dict:
 def extract_zomidictionary_deep(cycle: int) -> dict:
     """Deep extraction from ZomiDictionary"""
     entries = {}
-    
+
     zomi_files = [
         PROJECT_ROOT / "data" / "raw" / "zomidictionary_export.jsonl",
         PROJECT_ROOT / "data" / "raw" / "zomidictionary_app_full.jsonl",
     ]
-    
+
     zomi_file = None
     for f in zomi_files:
         if f.exists():
             zomi_file = f
             break
-    
+
     if not zomi_file:
         log_msg(f"[Cycle {cycle}] ZomiDictionary not found")
         return entries
-    
+
     try:
         with open(zomi_file, encoding="utf-8") as f:
             for line in f:
@@ -264,7 +263,7 @@ def extract_zomidictionary_deep(cycle: int) -> dict:
                     entry = json.loads(line)
                     en = entry.get("en", "").strip().lower()
                     zo = entry.get("zo", "").strip().lower()
-                    
+
                     if en and zo and len(en) > 1 and len(zo) > 1:
                         key = f"{en}:{zo}"
                         if key not in entries:
@@ -284,7 +283,7 @@ def extract_zomidictionary_deep(cycle: int) -> dict:
                     pass
     except Exception as e:
         log_msg(f"[Cycle {cycle}] Error reading ZomiDictionary: {e}")
-    
+
     log_msg(f"[Cycle {cycle}] Extracted {len(entries)} from ZomiDictionary")
     log_learning({
         "cycle": cycle,
@@ -297,22 +296,22 @@ def extract_zomidictionary_deep(cycle: int) -> dict:
 def extract_corpus_deep(cycle: int) -> dict:
     """Deep extraction from master corpus"""
     entries = {}
-    
+
     corpus_files = [
         PROJECT_ROOT / "data" / "master" / "sources" / "zolai_corpus_master.jsonl",
         PROJECT_ROOT / "data" / "master" / "combined" / "sentences.jsonl",
     ]
-    
+
     corpus_file = None
     for f in corpus_files:
         if f.exists():
             corpus_file = f
             break
-    
+
     if not corpus_file:
         log_msg(f"[Cycle {cycle}] Corpus not found")
         return entries
-    
+
     count = 0
     try:
         with open(corpus_file, encoding="utf-8") as f:
@@ -323,7 +322,7 @@ def extract_corpus_deep(cycle: int) -> dict:
                     entry = json.loads(line)
                     en = entry.get("en", "").strip().lower()
                     zo = entry.get("zo", "").strip().lower()
-                    
+
                     if en and zo and len(en) > 1 and len(zo) > 1:
                         key = f"{en}:{zo}"
                         if key not in entries:
@@ -344,7 +343,7 @@ def extract_corpus_deep(cycle: int) -> dict:
                     pass
     except Exception as e:
         log_msg(f"[Cycle {cycle}] Error reading corpus: {e}")
-    
+
     log_msg(f"[Cycle {cycle}] Extracted {len(entries)} from corpus")
     log_learning({
         "cycle": cycle,
@@ -359,16 +358,16 @@ def merge_and_learn(conn: sqlite3.Connection, existing: dict, extracted: dict, c
     cursor = conn.cursor()
     merged = existing.copy()
     new_entries = 0
-    
+
     for key, entry in extracted.items():
         if "en" in entry and "zo" in entry:
             en = entry["en"]
             zo = entry["zo"]
-            
+
             # Check if entry exists
             cursor.execute("SELECT id, confidence FROM entries WHERE en = ? AND zo = ?", (en, zo))
             result = cursor.fetchone()
-            
+
             if result:
                 # Update existing with learning
                 entry_id, old_conf = result
@@ -377,7 +376,7 @@ def merge_and_learn(conn: sqlite3.Connection, existing: dict, extracted: dict, c
                     "UPDATE entries SET confidence = ?, learning_count = learning_count + 1, updated_at = ? WHERE id = ?",
                     (new_conf, datetime.now().isoformat(), entry_id)
                 )
-                
+
                 # Log learning
                 cursor.execute("""
                     INSERT INTO learning_history (id, entry_id, cycle, confidence_before, confidence_after, source, learned_at)
@@ -409,7 +408,7 @@ def merge_and_learn(conn: sqlite3.Connection, existing: dict, extracted: dict, c
                     datetime.now().isoformat()
                 ))
                 new_entries += 1
-    
+
     conn.commit()
     log_msg(f"[Cycle {cycle}] Merged {new_entries} new entries")
     return merged, new_entries
@@ -417,19 +416,19 @@ def merge_and_learn(conn: sqlite3.Connection, existing: dict, extracted: dict, c
 def get_stats(conn: sqlite3.Connection, cycle: int) -> dict:
     """Get current statistics"""
     cursor = conn.cursor()
-    
+
     cursor.execute("SELECT COUNT(*) FROM entries")
     total = cursor.fetchone()[0]
-    
+
     cursor.execute("SELECT AVG(confidence) FROM entries")
     avg_conf = cursor.fetchone()[0] or 0
-    
+
     cursor.execute("SELECT COUNT(*) FROM entries WHERE confidence >= 0.8")
     high_conf = cursor.fetchone()[0]
-    
+
     cursor.execute("SELECT COUNT(*) FROM learning_history WHERE cycle = ?", (cycle,))
     learned_this_cycle = cursor.fetchone()[0]
-    
+
     stats = {
         "cycle": cycle,
         "total_entries": total,
@@ -438,50 +437,50 @@ def get_stats(conn: sqlite3.Connection, cycle: int) -> dict:
         "learned_this_cycle": learned_this_cycle,
         "timestamp": datetime.now().isoformat()
     }
-    
+
     log_msg(f"[Cycle {cycle}] Stats: {total} entries, avg conf: {avg_conf:.2f}, high conf: {high_conf}")
     return stats
 
 def main() -> int:
     log_msg("=== DEEP LEARNING DICTIONARY V4 ===")
-    
+
     conn = init_db()
     existing = load_existing()
-    
+
     # Run multiple learning cycles
     for cycle in range(1, 4):  # 3 cycles of deep learning
         log_msg(f"\n=== CYCLE {cycle} ===")
-        
+
         # Extract from all resources
         bible = extract_bible_deep(cycle)
         tongdot = extract_tongdot_deep(cycle)
         rvasia = extract_rvasia_deep(cycle)
         zomi = extract_zomidictionary_deep(cycle)
         corpus = extract_corpus_deep(cycle)
-        
+
         # Merge all
         all_extracted = {**bible, **tongdot, **rvasia, **zomi, **corpus}
         log_msg(f"[Cycle {cycle}] Total extracted: {len(all_extracted)}")
-        
+
         # Merge and learn
         existing, new = merge_and_learn(conn, existing, all_extracted, cycle)
-        
+
         # Get stats
         stats = get_stats(conn, cycle)
         log_learning(stats)
-        
+
         log_msg(f"[Cycle {cycle}] Complete\n")
-    
+
     # Export final results
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM entries")
     final_count = cursor.fetchone()[0]
-    
-    log_msg(f"\n=== FINAL RESULTS ===")
+
+    log_msg("\n=== FINAL RESULTS ===")
     log_msg(f"Total entries: {final_count}")
-    log_msg(f"Learning cycles: 3")
+    log_msg("Learning cycles: 3")
     log_msg(f"Database: {DB_PATH}")
-    
+
     conn.close()
     log_msg("✅ Deep learning complete")
     return 0

@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Deep-learn from Zolai resources using Groq API."""
 from __future__ import annotations
+
+import json
 import os
-import json, time, re, requests, sys
+import re
+import time
 from pathlib import Path
+
+import requests
 
 GROQ_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"

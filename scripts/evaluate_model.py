@@ -4,8 +4,8 @@ Zolai Model Evaluation Runner
 Usage: python scripts/evaluate_model.py
 """
 import json
-from pathlib import Path
 from collections import Counter
+from pathlib import Path
 
 FORBIDDEN = {"pathian", "ram", "fapa", "bawipa", "cu", "cun", "siangpahrang"}
 

@@ -6,11 +6,11 @@ Priority:
   1. Official Google AI SDK (GEMINI_API_KEY/2/3) — fastest, structured JSON, auto key rotation
   2. gemini_webapi v2.0.0 cookie fallback (GEMINI_PSID + GEMINI_PSIDTS or cookies.json)
 """
+import argparse
 import asyncio
 import json
 import os
 import time
-import argparse
 from pathlib import Path
 from typing import Any
 
@@ -198,7 +198,7 @@ class ZolaiGeminiTool:
             except Exception as e:
                 if not self._sdk:
                     return {"error": str(e), "original": text}
-                print(f"[zolai] Web failed, trying SDK...")
+                print("[zolai] Web failed, trying SDK...")
         # SDK fallback
         try:
             return self._sdk.verify(text)

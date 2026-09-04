@@ -7,9 +7,9 @@ Synthesizes all learning results and updates master wiki files.
 
 import json
 import re
-from pathlib import Path
-from datetime import datetime
 from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
 
 PROJECT_ROOT = Path('/home/peter/Documents/Projects/zolai')
 WIKI_DIR = PROJECT_ROOT / 'wiki'
@@ -20,11 +20,11 @@ class MasterSynthesizer:
         self.findings = defaultdict(list)
         self.errors_fixed = []
         self.new_patterns = []
-        
+
     def load_reports(self):
         """Load all generated reports"""
         print("Loading all learning reports...")
-        
+
         reports = {}
         for report_file in ARTIFACTS_DIR.glob('*_report.json'):
             try:
@@ -33,13 +33,13 @@ class MasterSynthesizer:
                 print(f"✓ Loaded {report_file.name}")
             except Exception as e:
                 print(f"✗ Error loading {report_file.name}: {e}")
-        
+
         return reports
-    
+
     def synthesize_findings(self, reports):
         """Synthesize findings from all reports"""
         print("\nSynthesizing findings...")
-        
+
         synthesis = {
             'timestamp': datetime.now().isoformat(),
             'total_errors_found': 0,
@@ -49,7 +49,7 @@ class MasterSynthesizer:
             'accuracy': 0,
             'by_source': {}
         }
-        
+
         # Process each report
         for report_name, report_data in reports.items():
             if 'wiki_audit' in report_name:
@@ -60,7 +60,7 @@ class MasterSynthesizer:
                     'errors_fixed': report_data.get('total_errors_fixed', 0),
                     'error_types': report_data.get('error_types', {})
                 }
-            
+
             elif 'grammar_extraction' in report_name:
                 synthesis['patterns_extracted'] += report_data.get('verbs_extracted', 0)
                 synthesis['patterns_extracted'] += report_data.get('particles_extracted', 0)
@@ -69,7 +69,7 @@ class MasterSynthesizer:
                     'particles': report_data.get('particles_extracted', 0),
                     'structures': report_data.get('structures_extracted', 0)
                 }
-            
+
             elif 'translation_validation' in report_name:
                 synthesis['translations_validated'] += report_data.get('total_tested', 0)
                 synthesis['accuracy'] = report_data.get('accuracy_percent', 0)
@@ -79,18 +79,18 @@ class MasterSynthesizer:
                     'wrong': report_data.get('total_wrong', 0),
                     'accuracy': report_data.get('accuracy_percent', 0)
                 }
-        
+
         return synthesis
-    
+
     def update_master_files(self, synthesis):
         """Update master wiki files with synthesis"""
         print("\nUpdating master wiki files...")
-        
+
         # Update zolai_system_prompt.txt
         system_prompt_file = WIKI_DIR / 'zolai_system_prompt.txt'
         if system_prompt_file.exists():
             content = system_prompt_file.read_text(encoding='utf-8')
-            
+
             # Add learning summary section
             summary_section = f"""
 
@@ -116,20 +116,20 @@ class MasterSynthesizer:
 - Negation: kei (not lo) for conditionals
 - Plural: never combine uh with i
 """
-            
+
             if 'Learning System Update' not in content:
                 content += summary_section
                 system_prompt_file.write_text(content, encoding='utf-8')
                 print(f"✓ Updated {system_prompt_file.name}")
-        
+
         # Update common_mistakes.md with new entries
         mistakes_file = WIKI_DIR / 'mistakes' / 'common_mistakes.md'
         if mistakes_file.exists():
             content = mistakes_file.read_text(encoding='utf-8')
-            
+
             # Count existing entries
             existing_count = len(re.findall(r'^\d+\.', content, re.MULTILINE))
-            
+
             # Add new entries if not already present
             new_entries = f"""
 
@@ -160,12 +160,12 @@ class MasterSynthesizer:
    - CORRECT: `Tua in kei hong it hi.`
    - Evidence: ZVS 2018 standard
 """
-            
+
             if f'{existing_count + 1}.' not in content:
                 content += new_entries
                 mistakes_file.write_text(content, encoding='utf-8')
                 print(f"✓ Updated {mistakes_file.name} with {5} new entries")
-        
+
         # Create learning summary file
         summary_file = WIKI_DIR / 'LEARNING_SUMMARY_2026_04_22.md'
         summary_content = f"""# Zolai Learning System Summary
@@ -182,7 +182,7 @@ Comprehensive multi-agent learning system ran to audit, correct, and improve the
 
 ### Error Breakdown
 """
-        
+
         if 'wiki_audit' in synthesis['by_source']:
             audit_data = synthesis['by_source']['wiki_audit']
             summary_content += f"""
@@ -193,13 +193,13 @@ Comprehensive multi-agent learning system ran to audit, correct, and improve the
 - Missing directional particles: {audit_data['error_types'].get('missing_hong', 0)}
 - Wrong agreement prefixes: {audit_data['error_types'].get('wrong_agreement', 0)}
 """
-        
+
         summary_content += f"""
 
 ### Grammar Patterns Extracted
 - **Total patterns:** {synthesis['patterns_extracted']}
 """
-        
+
         if 'grammar_extraction' in synthesis['by_source']:
             gram_data = synthesis['by_source']['grammar_extraction']
             summary_content += f"""
@@ -207,13 +207,13 @@ Comprehensive multi-agent learning system ran to audit, correct, and improve the
 - Particles: {gram_data.get('particles', 0)}
 - Structures: {gram_data.get('structures', 0)}
 """
-        
+
         summary_content += f"""
 
 ### Translation Validation
 - **Total tested:** {synthesis['translations_validated']}
 """
-        
+
         if 'translation_validation' in synthesis['by_source']:
             trans_data = synthesis['by_source']['translation_validation']
             summary_content += f"""
@@ -221,8 +221,8 @@ Comprehensive multi-agent learning system ran to audit, correct, and improve the
 - Wrong: {trans_data.get('wrong', 0)}
 - Accuracy: {trans_data.get('accuracy', 0)}%
 """
-        
-        summary_content += f"""
+
+        summary_content += """
 
 ## Key Corrections Made
 
@@ -263,31 +263,31 @@ Comprehensive multi-agent learning system ran to audit, correct, and improve the
 ---
 *Generated by Zolai Multi-Agent Learning System*
 """
-        
+
         summary_file.write_text(summary_content, encoding='utf-8')
         print(f"✓ Created {summary_file.name}")
-        
+
         return True
-    
+
     def run(self):
         """Run full synthesis"""
         print("="*60)
         print("MASTER LEARNING SYNTHESIZER")
         print("="*60)
-        
+
         # Load all reports
         reports = self.load_reports()
-        
+
         # Synthesize findings
         synthesis = self.synthesize_findings(reports)
-        
+
         # Update master files
         self.update_master_files(synthesis)
-        
+
         # Save synthesis report
         synthesis_file = ARTIFACTS_DIR / 'master_synthesis_report.json'
         synthesis_file.write_text(json.dumps(synthesis, indent=2, ensure_ascii=False))
-        
+
         print(f"\n{'='*60}")
         print("SYNTHESIS COMPLETE")
         print(f"{'='*60}")

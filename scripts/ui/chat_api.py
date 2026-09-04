@@ -74,7 +74,7 @@ HTML = (
         const chatContainer = document.getElementById('chat-container');
         const messageInput = document.getElementById('message-input');
         const sendBtn = document.getElementById('send-btn');
-        
+
         function addMessage(content, role) {
             const div = document.createElement('div');
             div.className = 'message ' + role;
@@ -82,7 +82,7 @@ HTML = (
             chatContainer.appendChild(div);
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
-        
+
 async function sendMessage() {
             const content = messageInput.value.trim();
             if (!content) return;
@@ -90,7 +90,7 @@ async function sendMessage() {
             addMessage(content, 'user');
             sendBtn.disabled = true;
             sendBtn.textContent = '...';
-            
+
             try {
                 console.log('Sending:', content);
                 const resp = await fetch('/api/chat', {
@@ -118,7 +118,7 @@ async function sendMessage() {
             sendBtn.disabled = false;
             messageInput.focus();
         }
-        
+
         sendBtn.addEventListener('click', sendMessage);
         messageInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
         addMessage('Hello! I\'m your Zo_Tdm language assistant. Ask me about Zo_Tdm/Tedim language!', 'assistant');

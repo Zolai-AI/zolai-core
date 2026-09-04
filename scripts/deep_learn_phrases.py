@@ -8,11 +8,16 @@ Deep-learn Zolai phrases/compounds/patterns from all resources.
 - Logs provider/model/performance for each extraction
 """
 from __future__ import annotations
+
+import json
 import os
-import json, time, re, requests, sys
-from pathlib import Path
-from dataclasses import dataclass, asdict
+import re
+import time
+from dataclasses import asdict, dataclass
 from datetime import datetime
+from pathlib import Path
+
+import requests
 
 # ── Keys ──────────────────────────────────────────────────────────────────────
 OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "")
@@ -139,10 +144,10 @@ def call_gemini_direct(model: str, text: str, key_idx: int = 0) -> tuple[dict, s
     """Returns (result, model_used)"""
     if key_idx >= len(GEMINI_KEYS):
         raise Exception("All Gemini keys exhausted")
-    
+
     key = GEMINI_KEYS[key_idx]
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
-    
+
     r = requests.post(
         url,
         json={
@@ -151,13 +156,13 @@ def call_gemini_direct(model: str, text: str, key_idx: int = 0) -> tuple[dict, s
         },
         timeout=90
     )
-    
+
     if r.status_code == 429:
         # Try next key
         if key_idx + 1 < len(GEMINI_KEYS):
             return call_gemini_direct(model, text, key_idx + 1)
         raise requests.HTTPError("429", response=r)
-    
+
     r.raise_for_status()
     content = r.json()["candidates"][0]["content"]["parts"][0]["text"]
     return extract_json(content), f"gemini-direct:{model}"
@@ -220,7 +225,7 @@ def score_result(data: dict) -> int:
 def benchmark_models(gemini_models: list[str], or_models: list[str], groq_models: list[str]) -> tuple[str, str, str]:
     """Test models, return (best_gemini, best_or, best_groq)."""
     print("\n── Benchmarking models on Zolai sample ──", flush=True)
-    
+
     best_gemini = ("", 0)
     for model in gemini_models[:2]:
         try:
@@ -234,7 +239,7 @@ def benchmark_models(gemini_models: list[str], or_models: list[str], groq_models
             time.sleep(2)
         except Exception as e:
             print(f"  Gemini Direct {model}: FAIL ({e})", flush=True)
-    
+
     best_or = (or_models[0], 0)
     for model in or_models[:3]:
         try:
@@ -272,7 +277,7 @@ def benchmark_models(gemini_models: list[str], or_models: list[str], groq_models
 def call_api(text: str, gemini_model: str, or_model: str, groq_model: str) -> tuple[dict, str, float]:
     """Returns (result, provider:model, duration_sec)"""
     t0 = time.time()
-    
+
     for attempt in range(3):
         # 1. Try Gemini Direct first (if available)
         if gemini_model:
@@ -283,12 +288,12 @@ def call_api(text: str, gemini_model: str, or_model: str, groq_model: str) -> tu
             except requests.HTTPError as e:
                 code = e.response.status_code if e.response else 0
                 if code == 429:
-                    print(f"    Gemini Direct 429, trying OR...", flush=True)
+                    print("    Gemini Direct 429, trying OR...", flush=True)
                 else:
                     print(f"    Gemini Direct {code}, trying OR...", flush=True)
             except Exception as e:
                 print(f"    Gemini Direct error: {e}, trying OR...", flush=True)
-        
+
         # 2. Try OpenRouter Gemini
         try:
             result, model_used = call_openrouter(or_model, text)
@@ -313,14 +318,14 @@ def call_api(text: str, gemini_model: str, or_model: str, groq_model: str) -> tu
         except requests.HTTPError as e:
             code = e.response.status_code if e.response else 0
             if code == 429:
-                print(f"    Groq 429, wait 30s...", flush=True)
+                print("    Groq 429, wait 30s...", flush=True)
                 time.sleep(30)
                 continue
             print(f"    Groq {code}", flush=True)
         except Exception as e:
             print(f"    Groq error: {e}", flush=True)
         time.sleep(5)
-    
+
     return {}, "failed", time.time() - t0
 
 # ── Save ──────────────────────────────────────────────────────────────────────
@@ -372,12 +377,12 @@ def main():
     print("=" * 70, flush=True)
     print("ZOLAI PHRASE EXTRACTION — 3-Provider Model Testing", flush=True)
     print("=" * 70, flush=True)
-    
+
     print("\n[1/4] Fetching available models...", flush=True)
     gemini_models = get_gemini_direct_models()
     or_models     = get_openrouter_gemini_models()
     groq_models   = get_groq_models()
-    
+
     print(f"  • Gemini Direct: {len(gemini_models)} models", flush=True)
     if gemini_models:
         print(f"    {', '.join(gemini_models[:3])}", flush=True)
@@ -419,13 +424,13 @@ def main():
 
     print(f"\n[4/4] Running {len(tasks)} extraction tasks...", flush=True)
     print("=" * 70, flush=True)
-    
+
     total_stats = {"phrases": 0, "compounds": 0, "patterns": 0, "proverbs": 0}
-    
+
     for i, (path, start, end, out) in enumerate(tasks, 1):
         task_name = f"{path.name}:{start}-{end}"
         print(f"\n[{i}/{len(tasks)}] {task_name}", flush=True)
-        
+
         if not path.exists():
             print(f"    ✗ Not found: {path}", flush=True)
             log_extraction(ExtractionLog(
@@ -439,27 +444,27 @@ def main():
                 error="File not found"
             ))
             continue
-        
+
         text = chunk(path, start, end)
         if len(text.strip()) < 50:
             print("    ⊘ Skipping — empty chunk", flush=True)
             continue
-        
+
         try:
             data, model_used, duration = call_api(text, best_gemini, best_or, best_groq)
             provider = model_used.split(":")[0] if ":" in model_used else "unknown"
             model = model_used.split(":", 1)[1] if ":" in model_used else model_used
-            
+
             ph, co, pa, pr = save(out, data, task_name)
             total = ph + co + pa + pr
-            
+
             total_stats["phrases"] += ph
             total_stats["compounds"] += co
             total_stats["patterns"] += pa
             total_stats["proverbs"] += pr
-            
+
             print(f"    ⚡ Provider: {provider} | Model: {model} | Time: {duration:.1f}s", flush=True)
-            
+
             log_extraction(ExtractionLog(
                 timestamp=datetime.now().isoformat(),
                 task=task_name,
@@ -470,7 +475,7 @@ def main():
                 total_items=total,
                 success=True
             ))
-            
+
         except Exception as e:
             print(f"    ✗ FAILED: {e}", flush=True)
             log_extraction(ExtractionLog(
@@ -483,13 +488,13 @@ def main():
                 success=False,
                 error=str(e)
             ))
-        
+
         time.sleep(2)
 
     print("\n" + "=" * 70, flush=True)
     print("EXTRACTION COMPLETE", flush=True)
     print("=" * 70, flush=True)
-    print(f"Total extracted:", flush=True)
+    print("Total extracted:", flush=True)
     print(f"  • Phrases:   {total_stats['phrases']}", flush=True)
     print(f"  • Compounds: {total_stats['compounds']}", flush=True)
     print(f"  • Patterns:  {total_stats['patterns']}", flush=True)

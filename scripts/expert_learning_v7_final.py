@@ -1,11 +1,12 @@
 from __future__ import annotations
-import json
-import sqlite3
-from pathlib import Path
-from datetime import datetime
+
 import hashlib
-import sys
+import json
 import re
+import sqlite3
+import sys
+from datetime import datetime
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data" / "processed" / "rebuild_v7"
@@ -40,7 +41,7 @@ def init_db() -> sqlite3.Connection:
 def load_all_dicts() -> dict:
     """Load all 4 dictionaries"""
     all_dicts = {"zomidictionary": {}, "tongdot": {}, "wordlist": {}, "bible": {}}
-    
+
     # 1. ZomiDictionary
     for zf in [PROJECT_ROOT / "data" / "dictionary" / "raw" / "zomidictionary_export.jsonl",
                PROJECT_ROOT / "data" / "dictionary" / "raw" / "zomidictionary_app_full.jsonl"]:
@@ -55,7 +56,7 @@ def load_all_dicts() -> dict:
                             all_dicts["zomidictionary"][f"{en}:{zo}"] = 1
                     except:
                         pass
-    
+
     # 2. TongDot
     for tf in [PROJECT_ROOT / "data" / "master" / "sources" / "tongdot_dictionary.jsonl"]:
         if tf.exists():
@@ -69,7 +70,7 @@ def load_all_dicts() -> dict:
                             all_dicts["tongdot"][f"{en}:{zo}"] = 1
                     except:
                         pass
-    
+
     # 3. Wordlists
     for wf in [PROJECT_ROOT / "data" / "raw" / "wordlist_en_zo.jsonl",
                PROJECT_ROOT / "data" / "raw" / "zo_en_wordlist.jsonl",
@@ -85,7 +86,7 @@ def load_all_dicts() -> dict:
                             all_dicts["wordlist"][f"{en}:{zo}"] = 1
                     except:
                         pass
-    
+
     # 4. Bible parallel
     for bf in [PROJECT_ROOT / "data" / "master" / "sources" / "bible_parallel_tbr17.jsonl",
                PROJECT_ROOT / "data" / "master" / "sources" / "bible_parallel_tdb77.jsonl",
@@ -101,47 +102,47 @@ def load_all_dicts() -> dict:
                             all_dicts["bible"][f"{en}:{zo}"] = 1
                     except:
                         pass
-    
+
     for name, d in all_dicts.items():
         log_msg(f"Loaded {len(d)} from {name}")
-    
+
     return all_dicts
 
 def extract_bible_md() -> dict:
     """Extract from Bible MD files"""
     entries = {}
     bible_dir = PROJECT_ROOT / "Cleaned_Bible"
-    
+
     for md_file in bible_dir.glob("**/*.md"):
         try:
             with open(md_file, encoding="utf-8") as f:
                 content = f.read()
                 # Split by verse markers like **1:1**, **1:2**, etc.
                 verses = re.split(r'\*\*\d+:\d+\*\*', content)
-                
+
                 for verse_block in verses[1:]:  # Skip header
                     lines = verse_block.strip().split('\n')
                     en_text = ""
                     zo_text = ""
-                    
+
                     for line in lines:
                         if line.startswith("KJV:"):
                             en_text = line.replace("KJV:", "").strip().lower()
                         elif line.startswith("TDB77:") or line.startswith("Tedim2010:"):
                             zo_text = line.split(":", 1)[1].strip().lower()
-                    
+
                     if en_text and zo_text and len(en_text) > 2 and len(zo_text) > 2:
                         entries[f"{en_text}:{zo_text}"] = 1
         except:
             pass
-    
+
     log_msg(f"Extracted {len(entries)} from Bible MD")
     return entries
 
 def extract_all_jsonl() -> dict:
     """Extract from all JSONL files"""
     entries = {}
-    
+
     # Scan /data/master/sources, /data/raw, /data/processed
     for jsonl_file in list(PROJECT_ROOT.glob("data/master/sources/*.jsonl")) + \
                       list(PROJECT_ROOT.glob("data/dictionary/raw/*.jsonl")) + \
@@ -165,13 +166,13 @@ def extract_all_jsonl() -> dict:
                         pass
         except:
             pass
-    
+
     return entries
 
 def expert_score(key: str, dicts: list[dict]) -> float:
     """Score based on dictionary consensus"""
     found = sum(1 for d in dicts if key in d)
-    
+
     if found >= 3:
         return 0.95
     elif found == 2:
@@ -186,19 +187,19 @@ def merge_cycle(conn: sqlite3.Connection, dicts: list[dict], extracted: dict, cy
     cursor = conn.cursor()
     learned = 0
     now = datetime.now().isoformat()
-    
+
     for key in extracted:
         parts = key.split(":")
         if len(parts) != 2:
             continue
-        
+
         en, zo = parts
         conf = expert_score(key, dicts)
         entry_id = hashlib.md5(key.encode()).hexdigest()
-        
+
         cursor.execute("SELECT id, confidence FROM entries WHERE id = ?", (entry_id,))
         result = cursor.fetchone()
-        
+
         if result:
             old_conf = result[1]
             new_conf = min(0.95, max(old_conf, conf))
@@ -212,7 +213,7 @@ def merge_cycle(conn: sqlite3.Connection, dicts: list[dict], extracted: dict, cy
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (entry_id, en, zo, conf, 1, 1, now, now))
             learned += 1
-    
+
     conn.commit()
     log_msg(f"[Cycle {cycle}] Learned {learned} new entries")
     return learned
@@ -220,24 +221,24 @@ def merge_cycle(conn: sqlite3.Connection, dicts: list[dict], extracted: dict, cy
 def export_results(conn: sqlite3.Connection) -> None:
     """Export to JSONL"""
     cursor = conn.cursor()
-    
+
     with open(EXPORT_DIR / "dictionary_en_zo.jsonl", "w", encoding="utf-8") as f:
         cursor.execute("SELECT en, zo, confidence FROM entries ORDER BY confidence DESC")
         for en, zo, conf in cursor.fetchall():
             f.write(json.dumps({"en": en, "zo": zo, "confidence": conf}, ensure_ascii=False) + "\n")
-    
+
     with open(EXPORT_DIR / "dictionary_zo_en.jsonl", "w", encoding="utf-8") as f:
         cursor.execute("SELECT zo, en, confidence FROM entries ORDER BY confidence DESC")
         for zo, en, conf in cursor.fetchall():
             f.write(json.dumps({"zo": zo, "en": en, "confidence": conf}, ensure_ascii=False) + "\n")
-    
+
     log_msg(f"Exported to {EXPORT_DIR}")
 
 def main() -> int:
     log_msg("=== EXPERT LEARNING V7 FINAL ===\n")
-    
+
     conn = init_db()
-    
+
     # Load all dictionaries
     log_msg("=== LOADING DICTIONARIES ===")
     zomi = load_zomidictionary()
@@ -245,47 +246,47 @@ def main() -> int:
     wordlist = load_wordlists()
     bible = load_bible_parallel()
     dicts = [zomi, tongdot, wordlist, bible]
-    
+
     # Extract sources
     log_msg("\n=== EXTRACTING SOURCES ===")
     bible_md = extract_bible_md()
     all_jsonl = extract_all_jsonl()
-    
+
     # Deep learning cycles
     for cycle in range(1, 6):
         log_msg(f"\n=== CYCLE {cycle} ===")
-        
+
         if cycle == 1:
             extracted = {**bible_md, **all_jsonl}
         else:
             extracted = all_jsonl
-        
+
         log_msg(f"[Cycle {cycle}] Total extracted: {len(extracted)}")
-        learned = merge_cycle(conn, dicts, extracted, cycle)
-    
+        merge_cycle(conn, dicts, extracted, cycle)
+
     # Stats
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM entries")
     total = cursor.fetchone()[0]
-    
+
     cursor.execute("SELECT AVG(confidence) FROM entries")
     avg_conf = cursor.fetchone()[0] or 0
-    
+
     cursor.execute("SELECT COUNT(*) FROM entries WHERE confidence >= 0.9")
     high_conf = cursor.fetchone()[0]
-    
+
     cursor.execute("SELECT COUNT(*) FROM entries WHERE confidence >= 0.85")
     med_conf = cursor.fetchone()[0]
-    
-    log_msg(f"\n=== FINAL RESULTS ===")
+
+    log_msg("\n=== FINAL RESULTS ===")
     log_msg(f"Total entries: {total}")
     log_msg(f"Avg confidence: {avg_conf:.2f}")
     log_msg(f"High confidence (≥0.9): {high_conf}")
     log_msg(f"Medium confidence (≥0.85): {med_conf}")
-    
+
     export_results(conn)
     conn.close()
-    
+
     log_msg("\n✅ Expert learning V7 complete")
     return 0
 

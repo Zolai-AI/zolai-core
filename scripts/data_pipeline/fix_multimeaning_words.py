@@ -3,7 +3,7 @@
 Fix apostrophe-prefix noise entries and multi-meaning words.
 Also adds correct contextual meanings based on corpus evidence.
 """
-import json, re
+import json
 from pathlib import Path
 
 MASTER = "data/dictionary/processed/dict_master_v1.jsonl"

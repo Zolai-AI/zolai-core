@@ -5,7 +5,11 @@ Read-only audit. Prints a worker/summary report. Never edits data.
 Usage: python scripts/reconcile_wiki_dictionary.py
 """
 from __future__ import annotations
-import json, re, sys, pathlib
+
+import json
+import pathlib
+import re
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DICT = ROOT / "data/dictionary/processed/dict_master_v2.json"
@@ -71,7 +75,7 @@ def reconcile_wordlists(dict_keys: set) -> None:
     print(f"  Wordlist clean single tokens matching dictionary: {in_dict} ({in_dict/max(rows_total,1)*100:.1f}%)")
     print(f"  Wordlist-only clean tokens (missing from dictionary): {len(missing)}")
     # sample the biggest gap class: show a few 'common' ones (not proper nouns)
-    sample = sorted(missing)[: 0]
+    sorted(missing)[: 0]
     top = [k for k in sorted(missing) if len(k) >= 3 and k not in {
         "aaron","moses","ton","gal","tol","topa","sang","khual","nu","pa"}][:15]
     if top:

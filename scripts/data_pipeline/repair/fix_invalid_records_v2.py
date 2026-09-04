@@ -26,22 +26,22 @@ STRICT_CORRECTIONS = {
 def fix_record(rec):
     """Fix only clear errors"""
     text = rec.get("text", "").strip()
-    
+
     # Skip if no text
     if not text:
         return None
-    
+
     # Skip if too long
     if len(text) > 50000:
         return None
-    
+
     # Skip if too short
     if len(text) < 5:
         return None
-    
+
     # Remove control characters only
     text = ''.join(c for c in text if ord(c) >= 32 or c in '\n\t\r')
-    
+
     # Only fix "lo leh" in clear negation contexts (not in Bible names/proper nouns)
     if "lo leh" in text.lower():
         # Check if it's in a conditional context (not a proper noun)
@@ -49,7 +49,7 @@ def fix_record(rec):
             text = text.replace("lo leh", "kei")
             text = text.replace("Lo leh", "Kei")
             text = text.replace("LO LEH", "KEI")
-    
+
     # Update record
     rec["text"] = text
     return rec
@@ -64,14 +64,14 @@ with open(INPUT_FILE, "r") as f:
     for i, line in enumerate(f):
         try:
             rec = json.loads(line)
-            
+
             # Only process invalid records
-            if rec.get("valid") == False:
+            if not rec.get("valid"):
                 # Check if it's a Bible/proper noun context
                 reason = rec.get("reason", "")
-                
+
                 # Keep Bible names and proper nouns as-is
-                if any(x in reason for x in ["invalid_pattern:ram", "invalid_pattern:pathian", 
+                if any(x in reason for x in ["invalid_pattern:ram", "invalid_pattern:pathian",
                                               "invalid_pattern:fapa", "invalid_pattern:bawipa"]):
                     # These are likely proper nouns or context-appropriate
                     rec["valid"] = True
@@ -91,9 +91,9 @@ with open(INPUT_FILE, "r") as f:
             else:
                 # Keep valid records as-is
                 fixed_records.append(rec)
-            
+
             stats["total"] += 1
-            
+
             if (i + 1) % 100000 == 0:
                 log(f"[{i+1}] Fixed: {stats['fixed']}, Kept: {stats['kept']}, Skipped: {stats['skipped']}")
         except:
@@ -113,7 +113,7 @@ log(f"Valid now: {stats['total'] - stats['skipped']}")
 log(f"Output: {OUTPUT_FILE}")
 log(f"{'='*80}")
 
-print(f"\n✅ Done!")
+print("\n✅ Done!")
 print(f"Fixed: {stats['fixed']} (clear errors)")
 print(f"Kept: {stats['kept']} (context-appropriate)")
 print(f"Valid: {stats['total'] - stats['skipped']}")

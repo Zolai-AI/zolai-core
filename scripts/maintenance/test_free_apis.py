@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Test free AI APIs for Zolai data processing."""
 
+
 import requests
-import json
-import time
 
 # Test prompt in Zolai
 TEST_PROMPT = """Translate this Zolai sentence to English:
@@ -21,13 +20,13 @@ def test_uncloseai():
             "messages": [{"role": "user", "content": TEST_PROMPT}],
             "max_tokens": 100
         }
-        
+
         response = requests.post(url, headers=headers, json=data, timeout=30)
         print(f"Status: {response.status_code}")
-        
+
         if response.status_code == 200:
             result = response.json()
-            print(f"✓ SUCCESS")
+            print("✓ SUCCESS")
             print(f"Response: {result.get('choices', [{}])[0].get('message', {}).get('content', 'N/A')}")
             return True
         else:
@@ -48,13 +47,13 @@ def test_g4f():
             "model": "gpt-4o-mini",
             "messages": [{"role": "user", "content": TEST_PROMPT}]
         }
-        
+
         response = requests.post(url, headers=headers, json=data, timeout=30)
         print(f"Status: {response.status_code}")
-        
+
         if response.status_code == 200:
             result = response.json()
-            print(f"✓ SUCCESS")
+            print("✓ SUCCESS")
             print(f"Response: {result.get('choices', [{}])[0].get('message', {}).get('content', 'N/A')}")
             return True
         else:
@@ -71,39 +70,39 @@ def test_ollama_local():
     try:
         # Check if Ollama is running
         response = requests.get("http://localhost:11434/api/tags", timeout=5)
-        
+
         if response.status_code == 200:
             models = response.json().get('models', [])
-            print(f"✓ Ollama is running")
+            print("✓ Ollama is running")
             print(f"Available models: {[m['name'] for m in models]}")
-            
+
             if models:
                 # Test with first available model
                 model_name = models[0]['name']
                 print(f"\nTesting with model: {model_name}")
-                
+
                 url = "http://localhost:11434/api/generate"
                 data = {
                     "model": model_name,
                     "prompt": TEST_PROMPT,
                     "stream": False
                 }
-                
+
                 response = requests.post(url, json=data, timeout=60)
                 if response.status_code == 200:
                     result = response.json()
-                    print(f"✓ SUCCESS")
+                    print("✓ SUCCESS")
                     print(f"Response: {result.get('response', 'N/A')[:200]}")
                     return True
             else:
                 print("⚠ No models installed. Run: ollama pull qwen2.5:7b")
                 return False
         else:
-            print(f"✗ Ollama not running. Install from ollama.com")
+            print("✗ Ollama not running. Install from ollama.com")
             return False
-            
+
     except requests.exceptions.ConnectionError:
-        print(f"✗ Ollama not running. Start with: ollama serve")
+        print("✗ Ollama not running. Start with: ollama serve")
         return False
     except Exception as e:
         print(f"✗ ERROR: {e}")
@@ -122,18 +121,18 @@ def test_ollama_free_api():
 def main():
     print("Testing Free AI APIs for Zolai Project")
     print("=" * 50)
-    
+
     results = {
         "UncloseAI": test_uncloseai(),
         "G4F": test_g4f(),
         "Ollama (local)": test_ollama_local(),
         "OllamaFreeAPI": test_ollama_free_api()
     }
-    
+
     print("\n" + "=" * 50)
     print("SUMMARY")
     print("=" * 50)
-    
+
     for service, status in results.items():
         if status is True:
             print(f"✓ {service}: WORKING")
@@ -141,18 +140,18 @@ def main():
             print(f"✗ {service}: FAILED")
         else:
             print(f"⚠ {service}: NEEDS SETUP")
-    
+
     print("\n" + "=" * 50)
     print("RECOMMENDATIONS FOR ZOLAI:")
     print("=" * 50)
-    
+
     working = [k for k, v in results.items() if v is True]
-    
+
     if working:
-        print(f"\n✓ Use these for bulk processing:")
+        print("\n✓ Use these for bulk processing:")
         for service in working:
             print(f"  - {service}")
-    
+
     print("\n💡 Best setup for Zolai:")
     print("  1. Install Ollama locally (ollama.com)")
     print("  2. Pull Qwen 2.5 Coder: ollama pull qwen2.5-coder:7b")

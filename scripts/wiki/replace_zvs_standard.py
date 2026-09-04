@@ -1,6 +1,6 @@
-import os
 import re
 from pathlib import Path
+
 
 def replace_zvs(content):
     # Order matters: longest/most specific first
@@ -14,30 +14,30 @@ def replace_zvs(content):
         # Clean up any "Zolai Standard Standard" that might have been created
         (r'Zolai Standard Standard', 'Zolai Standard'),
     ]
-    
+
     new_content = content
     for pattern, replacement in replacements:
         new_content = re.sub(pattern, replacement, new_content)
-    
+
     return new_content
 
 def main():
     root = Path('.')
     extensions = {'.md', '.txt', '.py', '.ts', '.tsx', '.json', '.tsv', '.jsonl'}
-    
+
     # Files to skip (like this script itself)
     skip_files = {'replace_zvs_standard.py'}
-    
+
     for path in root.rglob('*'):
         if path.is_file() and path.suffix in extensions and path.name not in skip_files:
             if '.cursor' in str(path) or 'node_modules' in str(path) or '.git' in str(path):
                 continue
-            
+
             try:
                 print(f"Processing {path}...")
                 content = path.read_text(encoding='utf-8')
                 new_content = replace_zvs(content)
-                
+
                 if new_content != content:
                     path.write_text(new_content, encoding='utf-8')
                     print(f"  Updated {path}")

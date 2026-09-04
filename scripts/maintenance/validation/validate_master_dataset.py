@@ -4,8 +4,8 @@ Validate Master Dataset - Stream check for training quality
 Run: python3 validate_master_dataset.py
 """
 import json
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
 
 DATA = Path(__file__).parent / "data"
 TRAIN_FILE = DATA / "training/master_train_complete.jsonl"
@@ -45,12 +45,12 @@ try:
         for i, line in enumerate(f):
             if i >= SAMPLE_SIZE:
                 break
-            
+
             stats["total"] += 1
-            
+
             try:
                 rec = json.loads(line)
-                
+
                 # Detect format type
                 if "instruction" in rec:
                     stats["format_types"]["instruction"] += 1
@@ -67,9 +67,9 @@ try:
                 else:
                     stats["format_types"]["unknown"] += 1
                     text = ""
-                
+
                 text = str(text).strip()
-                
+
                 # Validate
                 if not text:
                     stats["missing_text"] += 1
@@ -82,13 +82,13 @@ try:
                     stats["invalid"] += 1
                 else:
                     stats["valid"] += 1
-                
+
             except json.JSONDecodeError:
                 stats["invalid_json"] += 1
                 stats["invalid"] += 1
-            except Exception as e:
+            except Exception:
                 stats["invalid"] += 1
-            
+
             if (i + 1) % 1000 == 0:
                 pct = (i + 1) / SAMPLE_SIZE * 100
                 log(f"  Processed: {i+1:,} records ({pct:.1f}%)")
@@ -96,7 +96,7 @@ try:
 except Exception as e:
     log(f"ERROR: {e}")
 
-log(f"\n[2/2] ANALYSIS...\n")
+log("\n[2/2] ANALYSIS...\n")
 
 # Calculate percentages
 valid_pct = 100 * stats["valid"] / stats["total"] if stats["total"] > 0 else 0
@@ -130,5 +130,5 @@ else:
 
 log("="*80 + "\n")
 
-print(f"\n✅ Validation complete!")
-print(f"Log: data/training/validate_master.log")
+print("\n✅ Validation complete!")
+print("Log: data/training/validate_master.log")

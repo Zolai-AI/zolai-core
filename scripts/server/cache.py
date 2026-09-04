@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import diskcache
+
 from config.machine import MACHINE_CONFIG
 
 # Initialize disk cache

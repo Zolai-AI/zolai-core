@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Zolai project interactive menu — run from project root."""
 from __future__ import annotations
-import subprocess, sys
+
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).parent

@@ -10,9 +10,12 @@ All-in-one pipeline:
 7. Update wiki memory files
 """
 
-import json, re, shutil
+import json
+import re
+import shutil
+from collections import Counter, defaultdict
 from pathlib import Path
-from collections import defaultdict, Counter
+
 
 # ── 1. Copy NAH ────────────────────────────────────────────────────────────────
 def fix_nah():
@@ -336,7 +339,7 @@ def main():
 
     # 6. CEFR stats
     cefr_counts = Counter(e.get("cefr","?") for e in master.values())
-    print(f"\n── CEFR distribution ──")
+    print("\n── CEFR distribution ──")
     for level in ["A1","A2","B1","B2","C1","C2"]:
         print(f"  {level}: {cefr_counts.get(level,0)}")
 
