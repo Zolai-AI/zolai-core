@@ -55,3 +55,11 @@ This repo is a component of the **Zolai-AI** organization — see the
 
 *Zolai AI · preserving Tedim Zolai (ZVS 2018) with a RAG-first bilingual toolkit for the Zomi people.*
 
+
+
+---
+
+## Org context
+
+Full project ecosystem, architecture, design, status & plans: **[Zolai AI Project Brain](https://github.com/Zolai-AI/.github/blob/main/docs/ZOLAI_AI_PROJECT_BRAIN.md)**.
+Part of the [Zolai-AI](https://github.com/Zolai-AI) org.
