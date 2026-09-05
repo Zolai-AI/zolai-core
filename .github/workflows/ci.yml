@@ -28,6 +28,9 @@ jobs:
       - name: Test
         run: pytest tests/ -q
 
+      - name: Eval offline regression gate
+        run: python -m zolai.eval.cli --set smoke --baseline report/eval-baseline.json --gate
+
       - name: ZVS validate core library
         run: pytest tests/test_zvs_integration.py -v
 

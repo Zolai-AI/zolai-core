@@ -1,0 +1,6 @@
+{
+  "zvs_compliance_rate": 0.95,
+  "translation_bleu": 0.50,
+  "translation_chrf": 0.60,
+  "qa_term_recall": 0.85
+}

@@ -2,6 +2,15 @@
 """
 Zolai Model Evaluation Runner
 Usage: python scripts/evaluate_model.py
+
+DEPRECATED: This script is preserved for reference only. Prefer the offline
+evaluation package::
+
+    zolai-eval --set smoke --json
+    zolai evaluate --set smoke --baseline report/eval-baseline.json --gate
+
+It is replaced by ``zolai.eval`` (dependency-free ZVS / translation / QA
+metrics with a regression-gated baseline). No further development here.
 """
 import json
 from collections import Counter
