@@ -8,6 +8,7 @@ node_modules/
 .next/
 target/
 data/
+!scripts/data/
 artifacts/
 .venv/
 *.jsonl
