@@ -15,9 +15,11 @@ import json
 import re
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-OCR_ROOT = ROOT / "data" / "corpus" / "ocr"
-ART = ROOT / "artifacts" / "kg"
+from ..config import config
+
+ROOT = config.paths.root
+OCR_ROOT = config.paths.data / "corpus" / "ocr"
+ART = config.paths.data_knowledge
 
 _CHUNK = re.compile(r".+?(?=\n\s*#|\Z)", re.S)
 

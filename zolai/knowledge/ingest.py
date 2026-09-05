@@ -9,8 +9,11 @@ import json
 import re
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-ART = ROOT / "artifacts" / "kg"
+from ..config import config
+
+ROOT = config.paths.root
+ART = config.paths.data_knowledge
+WIKI_ROOT = config.paths.root.parent / "zolai-wiki"
 
 
 def enum_list(items: list, limit: int) -> "list[tuple[int, object]]":
@@ -46,14 +49,20 @@ def _chunk_by_headings(text: str, max_chars: int = 1200, min_chars: int = 60) ->
 
 
 def iter_sources():
-    """Yield (relpath, kind) for wiki MD/TXT files (skip dot dirs)."""
-    for p in sorted((ROOT / "wiki").rglob("*")):
+    """Yield (abs_path, kind) for wiki MD/TXT files (skip dot dirs).
+
+    Looks for the zolai-wiki sibling repo at ``WIKI_ROOT``.
+    """
+    wiki = WIKI_ROOT
+    if not wiki.exists():
+        return
+    for p in sorted(wiki.rglob("*")):
         if not p.is_file():
             continue
         if any(part.startswith(".") for part in p.parts):
             continue
         if p.suffix.lower() in {".md", ".txt"}:
-            yield p.relative_to(ROOT).as_posix(), "wiki"
+            yield p, "wiki"
 
 
 def embed_texts(model, texts: list[str], batch_size: int = 64) -> list[list[float]]:
@@ -65,7 +74,7 @@ def index_wiki(
     out_dir=ART, limit: int = 0, max_chunks: int = 200,
     model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
 ) -> Path:
-    """Chunk + embed wiki sources into <out_dir>/knowledge/index.jsonl.
+    """Chunk + embed wiki sources into <out_dir>/knowledge_vectors.jsonl.
 
     limit>0 caps the number of wiki files (for fast smoke runs). Returns the path.
     """
@@ -78,44 +87,78 @@ def index_wiki(
     if limit:
         srcs = srcs[:limit]
 
-    out_path = out_dir / "knowledge_index.jsonl"
+    out_path = out_dir / "knowledge_vectors.jsonl"
     n_records = 0
+
+    # Load existing index for incremental indexing
+    existing_ids: set[str] = set()
+    existing_rows: list[dict] = []
+    if out_path.exists():
+        with out_path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        row = json.loads(line)
+                        existing_rows.append(row)
+                        existing_ids.add(row.get("id", ""))
+                    except json.JSONDecodeError:
+                        continue
+
+    new_rows: list[dict] = []
     with out_path.open("w", encoding="utf-8") as f:
-        for relpath, kind in srcs:
-            p = ROOT / relpath
+        # Write existing rows back
+        for r in existing_rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+        for abs_path, kind in srcs:
+            relpath = abs_path.relative_to(WIKI_ROOT).as_posix()
             try:
-                text = p.read_text(encoding="utf-8", errors="replace")
+                text = abs_path.read_text(encoding="utf-8", errors="replace")
             except Exception as e:
                 print(f"  ! skip {relpath}: {e}")
                 continue
-            for i, chunk in enum_list(_chunk_by_headings(text), max_chunks):
+            for i, chunk in enumerate(_chunk_by_headings(text)):
+                chunk_id = f"wiki/{relpath}#c{i}"
+                if chunk_id in existing_ids:
+                    continue  # skip already-indexed chunks
                 rec = {
-                    "id": f"{relpath}#c{i}",
+                    "id": chunk_id,
                     "text": chunk,
                     "metadata": {
-                        "source": relpath,
+                        "source": f"wiki/{relpath}",
                         "source_type": kind,
                         "heading": "",
                         "chunk_type": "wiki",
                     },
                 }
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                new_rows.append(rec)
                 n_records += 1
 
-    # now embed and write a second pass producing vector rows
-    rows = [json.loads(_line) for _line in out_path.open(encoding="utf-8")]
-    texts = [r["text"] for r in rows]
-    embs = embed_texts(model, texts)
-    vec_path = out_dir / "knowledge_vectors.jsonl"
-    with vec_path.open("w", encoding="utf-8") as f:
-        for r, e in zip(rows, embs):
-            r["embedding"] = e
-            r["embeddingModel"] = model_name
-            r["embeddingDim"] = len(e)
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    print(f"wg: indexed {len(rows)} chunks ({len(texts)} texts) from {len(srcs)} sources")
-    print(f"wg: vectors -> {vec_path}")
-    return vec_path
+    # Embed only new rows
+    if new_rows:
+        texts = [r["text"] for r in new_rows]
+        embs = embed_texts(model, texts)
+        vec_path = out_dir / "knowledge_vectors.jsonl"
+        with vec_path.open("a", encoding="utf-8") as f:
+            for r, e in zip(new_rows, embs):
+                r["embedding"] = e
+                r["embeddingModel"] = model_name
+                r["embeddingDim"] = len(e)
+                # Overwrite: rewrite full file with embeddings
+        # Rewrite full file with embeddings on new rows
+        rows = [json.loads(_line) for _line in vec_path.open(encoding="utf-8")]
+        with vec_path.open("w", encoding="utf-8") as f:
+            for r in rows:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        print(f"wg: indexed {n_records} new chunks from {len(srcs)} sources (incremental)")
+    else:
+        print(f"wg: no new chunks (all {len(existing_ids)} already indexed)")
+
+    total = len(existing_ids) + n_records
+    print(f"wg: total index rows = {total}, vectors -> {out_path}")
+    return out_path
 
 
 def index_pdfs(out_dir=ART, limit: int = 0, model_name: str = "...") -> Path:

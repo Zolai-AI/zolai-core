@@ -12,8 +12,9 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_INDEX = ROOT / "artifacts" / "kg" / "knowledge_vectors.jsonl"
+from ..config import config
+
+DEFAULT_INDEX = config.paths.data_knowledge / "knowledge_vectors.jsonl"
 
 
 @dataclass
@@ -25,7 +26,7 @@ class Index:
 
 
 def load_index(path: Path = DEFAULT_INDEX) -> Index:
-    """Load a knowledge_vectors.jsonl index into memory. Missing → empty Index."""
+    """Load a knowledge_vectors.jsonl index into memory. Missing -> empty Index."""
     idx = Index()
     if not path.exists():
         return idx
@@ -60,11 +61,17 @@ def retrieve(
     top_k: int = 5,
     threshold: float = 0.85,
     model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+    source_type: str | None = None,
+    source: str | None = None,
 ) -> list[dict]:
     """Return top-k chunks relevant to the query (cosine >= threshold).
 
     Lazily loads the default index when `index` is None and embeds the query on
     the fly with all-MiniLM-L6-v2. Logs and returns [] if no index exists.
+
+    Args:
+        source_type: Filter results by metadata.source_type (e.g. "wiki", "pdf").
+        source: Filter results by metadata.source (exact match).
     """
     from sentence_transformers import SentenceTransformer
 
@@ -84,12 +91,18 @@ def retrieve(
     for pos in order:
         if sims[pos] < threshold:
             break
+        meta = index.metas[pos]
+        # Apply metadata filters
+        if source_type and meta.get("source_type") != source_type:
+            continue
+        if source and meta.get("source") != source:
+            continue
         hits.append(
             {
                 "id": index.ids[pos],
                 "text": index.texts[pos],
                 "score": round(float(sims[pos]), 4),
-                "metadata": index.metas[pos],
+                "metadata": meta,
             }
         )
         if len(hits) >= top_k:

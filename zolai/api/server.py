@@ -371,6 +371,52 @@ def create_app() -> FastAPI:
 
         return {"query": q, "version": version, "count": len(results), "results": results}
 
+    # --- Knowledge Brain (RAG) ---
+
+    class KnowledgeSearchRequest(BaseModel):
+        query: str
+        top_k: int = 5
+        threshold: float = 0.7
+        source_type: str | None = None  # filter: "wiki", "pdf"
+
+    class KnowledgeSearchResponse(BaseModel):
+        query: str
+        results: list[dict]
+        context: str  # formatted RAG context for injection
+
+    @app.post("/knowledge/search", response_model=KnowledgeSearchResponse)
+    async def knowledge_search(req: KnowledgeSearchRequest):
+        """Search the knowledge brain (RAG) for relevant chunks."""
+        from ..knowledge.retrieve import format_context
+        from ..knowledge.retrieve import retrieve as rag_retrieve
+
+        hits = rag_retrieve(
+            req.query,
+            top_k=req.top_k,
+            threshold=req.threshold,
+        )
+        # Apply metadata filtering
+        if req.source_type:
+            hits = [h for h in hits if h.get("metadata", {}).get("source_type") == req.source_type]
+        ctx = format_context(hits)
+        return KnowledgeSearchResponse(
+            query=req.query,
+            results=hits,
+            context=ctx,
+        )
+
+    @app.get("/knowledge/status")
+    async def knowledge_status():
+        """Check knowledge index status."""
+        from ..knowledge.retrieve import load_index
+
+        idx = load_index()
+        return {
+            "indexed_chunks": len(idx.ids),
+            "has_vectors": idx.vectors is not None,
+            "index_path": str(config.paths.data_knowledge / "knowledge_vectors.jsonl"),
+        }
+
     # --- WebSocket ---
 
     @app.websocket("/ws")

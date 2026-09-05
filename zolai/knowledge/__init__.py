@@ -4,11 +4,12 @@ Modules:
   ingest  : chunk wiki/*.md (+ optional txt) into newline-delimited JSONL with embeddings
   retrieve: cosine retrieval over the JSONL index (no external vector DB required)
   ngram   : word-frequency + bigram prediction tables from wordlists/dictionary
+  pdf     : PDF OCR ingestion into the same vector index
 
 Primary artifact layout (gitignored, local-only):
-  artifacts/kg/*.jsonl   — indexed knowledge chunks + embeddings + ngram tables
+  data/knowledge/*.jsonl   — indexed knowledge chunks + embeddings + ngram tables
 """
-from .ingest import index_pdfs, index_wiki
+from .ingest import index_pdfs, index_wiki, iter_sources
 from .ngram import (
     build_ngram_tables,
     load_ngram_tables,
@@ -16,15 +17,18 @@ from .ngram import (
     predict_next,
     suggest_corrections,
 )
-from .retrieve import load_index, retrieve
+from .pdf import extract_pdf_text, iter_ocr_markdown
+from .retrieve import format_context, load_index, retrieve
 
 __all__ = [
     "index_wiki",
     "index_pdfs",
+    "iter_sources",
     "extract_pdf_text",
     "iter_ocr_markdown",
     "load_index",
     "retrieve",
+    "format_context",
     "build_ngram_tables",
     "load_ngram_tables",
     "predict_next",
