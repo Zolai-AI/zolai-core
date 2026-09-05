@@ -11,6 +11,8 @@ data/
 artifacts/
 .venv/
 *.jsonl
+# Evaluation smoke fixtures are tracked (CI `--set smoke` requires them)
+!zolai/eval/sets/*.jsonl
 !kaggle_dataset/*.json
 logs/
 tmp/

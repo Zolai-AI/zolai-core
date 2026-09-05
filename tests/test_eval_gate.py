@@ -57,14 +57,14 @@ def test_baseline_json_round_trip(tmp_path: Path) -> None:
 
 def test_gate_passes_when_scores_meet_floors(tmp_path: Path) -> None:
     baseline = _write_baseline(tmp_path / "baseline.json", _FLOORS)
-    # Smoke set measures: zvs=1.0, bleu~0.68, chrf~0.78, qa~0.96 — all above
+    # Smoke set measures: zvs=1.0, bleu=1.0, chrf=1.0, qa~0.96 — all above
     # the committed conservative floors, so the gate must exit 0.
     assert cli_main(["--set", "smoke", "--baseline", str(baseline), "--gate"]) == 0
 
 
 def test_gate_fails_when_metric_injected_below_floor(tmp_path: Path) -> None:
     floors = dict(_FLOORS)
-    floors["translation_bleu"] = 0.99  # above measured ~0.68 -> regression
+    floors["translation_bleu"] = 1.01  # above measured 1.0 -> forced regression
     baseline = _write_baseline(tmp_path / "baseline.json", floors)
     assert cli_main(["--set", "smoke", "--baseline", str(baseline), "--gate"]) == 1
 
