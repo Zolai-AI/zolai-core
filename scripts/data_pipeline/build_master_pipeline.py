@@ -2,7 +2,7 @@
 """
 All-in-one pipeline:
 1. Copy NAH from Parallel/ into TDB77/ so study_bible_books.py finds it
-2. Merge all dictionaries into dict_master_v1.jsonl
+2. Merge all dictionaries into dict_canonical_v1.jsonl
 3. Fix family term bleeding (tanu/tapa/nu/pa)
 4. Infer antonyms from negation patterns in bible study files
 5. Add CEFR tags based on first_book + frequency
@@ -83,14 +83,14 @@ def merge_dicts():
                 master[w]["sources"] = list(set(src+new))
 
     # 1. enriched — best quality, real examples
-    print("Loading dict_enriched_v1.jsonl...")
-    for line in open("data/dictionary/processed/dict_enriched_v1.jsonl", encoding="utf-8"):
+    print("Loading dict_canonical_v1.jsonl...")
+    for line in open("data/dictionary/processed/dict_canonical_v1.jsonl", encoding="utf-8"):
         try: e=json.loads(line); add(e.get("zolai",""), e)
         except: pass
 
     # 2. semantic — has synonyms/antonyms/related
-    print("Loading dict_semantic_v1.jsonl...")
-    for line in open("data/dictionary/processed/dict_semantic_v1.jsonl", encoding="utf-8"):
+    print("Loading dict_canonical_v1.jsonl...")
+    for line in open("data/dictionary/processed/dict_canonical_v1.jsonl", encoding="utf-8"):
         try: e=json.loads(line); add(e.get("zolai",""), e)
         except: pass
 
@@ -152,7 +152,7 @@ def merge_dicts():
         except: pass
 
     # 9. combined, zo_tdm, unified — fill remaining gaps
-    for df in ["dict_combined_v1.jsonl","dict_zo_tdm_v1.jsonl","dict_unified_v1.jsonl"]:
+    for df in ["dict_canonical_v1.jsonl","dict_canonical_v1.jsonl","dict_canonical_v1.jsonl"]:
         print(f"Loading {df}...")
         for line in open(f"data/dictionary/processed/{df}", encoding="utf-8"):
             try:
@@ -321,7 +321,7 @@ def main():
         entry.setdefault("related", [])
 
     # Save master dict
-    out_master = Path("data/dictionary/processed/dict_master_v1.jsonl")
+    out_master = Path("data/dictionary/processed/dict_canonical_v1.jsonl")
     with open(out_master, "w", encoding="utf-8") as f:
         for word, entry in sorted(master.items()):
             entry["zolai"] = word  # normalize to lowercase key
@@ -356,7 +356,7 @@ def update_memory(n_master, n_inst, n_antonyms, cefr_counts):
 ## Session: 2026-04-17 (Pipeline Run)
 
 ### Outputs
-- `dict_master_v1.jsonl` — {n_master} entries (merged enriched + bible_learned + unified)
+- `dict_canonical_v1.jsonl` — {n_master} entries (merged enriched + bible_learned + unified)
 - `instructions_bible_v1.jsonl` — {n_inst} instruction pairs (ZO↔EN translation)
 - Antonyms inferred: {n_antonyms} word pairs from negation patterns
 - CEFR tags applied: A1={cefr_counts.get('A1',0)} A2={cefr_counts.get('A2',0)} B1={cefr_counts.get('B1',0)} B2={cefr_counts.get('B2',0)} C1={cefr_counts.get('C1',0)} C2={cefr_counts.get('C2',0)}
@@ -378,7 +378,7 @@ def update_memory(n_master, n_inst, n_antonyms, cefr_counts):
 ### Data Assets Created
 | File | Size | Description |
 |---|---|---|
-| `dict_master_v1.jsonl` | ~{n_master} entries | Merged master dictionary |
+| `dict_canonical_v1.jsonl` | ~{n_master} entries | Merged master dictionary |
 | `instructions_bible_v1.jsonl` | ~{n_inst} pairs | Bible-derived instruction pairs |
 | `data/dictionary/bible_study/` | 65 files | Per-book verse study |
 

@@ -29,7 +29,7 @@ for path in WORDLISTS:
             f.write(json.dumps(e, ensure_ascii=False) + "\n")
     print(f"{path}: added {added}")
 
-with open("data/dictionary/processed/dict_unified_v1.jsonl", "a", encoding="utf-8") as f:
+with open("data/dictionary/processed/dict_canonical_v1.jsonl", "a", encoding="utf-8") as f:
     for e in MISSING:
         f.write(json.dumps({"headword": e["zolai"], "translations": [e["english"]], "pos": [e["pos"]], "sources": [e["source"]], "synonyms": e["synonyms"], "cefr": e["cefr"], "example_zo": e["example_zo"], "example_en": e["example_en"], "dialect": e["dialect"], "category": e["category"]}, ensure_ascii=False) + "\n")
         print(f"dict_unified: added {e['zolai']}")

@@ -4,7 +4,7 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-MASTER = "data/dictionary/processed/dict_master_v1.jsonl"
+MASTER = "data/dictionary/processed/dict_canonical_v1.jsonl"
 OUT    = Path("wiki/vocabulary/wordlists")
 OUT.mkdir(parents=True, exist_ok=True)
 
@@ -47,7 +47,7 @@ def main():
     for level in ["A1","A2","B1","B2","C1"]:
         words = by_cefr.get(level, [])
         lines = [f"# Zolai Word List — {level} ({len(words)} words)\n"]
-        lines.append("> Zolai Standard Tedim standard | Generated from dict_master_v1.jsonl\n\n")
+        lines.append("> Zolai Standard Tedim standard | Generated from dict_canonical_v1.jsonl\n\n")
         for e in words:
             lines.append(fmt(e, show_example=(level in ("A1","A2"))))
         (OUT / f"wordlist_{level}.md").write_text("\n".join(lines), encoding="utf-8")

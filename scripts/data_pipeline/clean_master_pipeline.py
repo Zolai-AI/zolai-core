@@ -283,7 +283,7 @@ SOURCES: dict[str, tuple[list[Path], callable]] = {
         process_parallel,
     ),
     "dictionary": (
-        [DATA / "dictionary" / "processed" / "zvs_final_master_dictionary_v3.jsonl"],
+        [DATA / "dictionary" / "processed" / "dict_canonical_v1.jsonl"],
         process_dictionary,
     ),
     "instructions": (

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Enrich dict_master_v1.jsonl by scanning all Bible parallel files:
+Enrich dict_canonical_v1.jsonl by scanning all Bible parallel files:
 - For each word, find its best example verse (shortest clear verse)
 - Add context-derived translations (top EN glosses from all books)
 - Add simple short example: shortest verse containing the word
@@ -17,8 +17,8 @@ BIBLE_DIRS = [
     "data/corpus/bible/markdown/Parallel_Corpus/Tedim_Chin",
     "data/corpus/bible/markdown/Parallel",
 ]
-MASTER    = "data/dictionary/processed/dict_master_v1.jsonl"
-OUT       = "data/dictionary/processed/dict_master_v1.jsonl"
+MASTER    = "data/dictionary/processed/dict_canonical_v1.jsonl"
+OUT       = "data/dictionary/processed/dict_canonical_v1.jsonl"
 
 SKIP = {
     "in","a","hi","uh","leh","tawh","ah","kha","ta","pah","ciangin",

@@ -75,8 +75,8 @@ for path in TARGETS:
 
     print(f"{path}: {added}")
 
-# Also append full entries to dict_unified_v1.jsonl
-UNIFIED = "data/dictionary/processed/dict_unified_v1.jsonl"
+# Also append full entries to dict_canonical_v1.jsonl
+UNIFIED = "data/dictionary/processed/dict_canonical_v1.jsonl"
 with open(UNIFIED, "a", encoding="utf-8") as f:
     for entry in NEW_ENTRIES:
         record = {

@@ -4,7 +4,7 @@
 Usage:
     python scripts/data_audit.py                         # audit all JSONL files
     python scripts/data_audit.py --dir dictionary        # audit one subdirectory
-    python scripts/data_audit.py --file dict_unified_v1.jsonl  # audit one file
+    python scripts/data_audit.py --file dict_canonical_v1.jsonl  # audit one file
     python scripts/data_audit.py --report-only           # skip per-line error details
     python scripts/data_audit.py --no-duplicate-check    # skip duplicate detection (saves memory)
 """
@@ -333,7 +333,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Streaming data audit for /data")
     parser.add_argument("--data-root", type=Path, default=DATA_ROOT, help="Data root directory")
     parser.add_argument("--dir", type=str, default=None, help="Audit specific subdirectory (e.g., 'dictionary')")
-    parser.add_argument("--file", type=str, default=None, help="Audit specific file (e.g., 'dict_unified_v1.jsonl')")
+    parser.add_argument("--file", type=str, default=None, help="Audit specific file (e.g., 'dict_canonical_v1.jsonl')")
     parser.add_argument("--report-only", action="store_true", help="Skip per-line error details (faster)")
     parser.add_argument("--no-duplicate-check", action="store_true", help="Skip duplicate detection (saves memory)")
     args = parser.parse_args()

@@ -106,12 +106,12 @@ for fpath in [
 
 print(f"  {len(short_bible):,} words with short Bible examples")
 
-# Update dict_corpus_v1.jsonl with better examples
-print("Updating dict_corpus_v1.jsonl with clean examples...")
+# Update dict_canonical_v1.jsonl with better examples
+print("Updating dict_canonical_v1.jsonl with clean examples...")
 updated = 0
 out_lines = []
 
-with open(DATA / "dictionary/processed/dict_corpus_v1.jsonl") as f:
+with open(DATA / "dictionary/processed/dict_canonical_v1.jsonl") as f:
     for line in f:
         e = json.loads(line)
         zo = e['zolai'].lower()
@@ -133,7 +133,7 @@ with open(DATA / "dictionary/processed/dict_corpus_v1.jsonl") as f:
 
         out_lines.append(json.dumps(e, ensure_ascii=False))
 
-with open(DATA / "dictionary/processed/dict_corpus_v1.jsonl", 'w') as f:
+with open(DATA / "dictionary/processed/dict_canonical_v1.jsonl", 'w') as f:
     f.write('\n'.join(out_lines) + '\n')
 
 print(f"Updated examples for {updated:,} entries")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Clean dict_master_v1.jsonl:
+Clean dict_canonical_v1.jsonl:
 1. Remove English-word headwords (loiter, ankle, diacritical etc.)
 2. Remove proper noun fragments (hagar', rekhab' etc.)
 3. Shorten long examples to max 12 words
@@ -11,7 +11,7 @@ import random
 import re
 from pathlib import Path
 
-MASTER = "data/dictionary/processed/dict_master_v1.jsonl"
+MASTER = "data/dictionary/processed/dict_canonical_v1.jsonl"
 
 EN_SUFFIXES = re.compile(r'(tion|ight|ough|ck$|ical|ism$|ist$|ize$|ful$|less$|ness$|ment$|ance$|ence$|ble$|ank$|ank |wh)', re.I)
 EN_WORDS = {
