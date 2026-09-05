@@ -288,7 +288,8 @@ def main():
             file_count += 1
             if args.limit and file_count > args.limit:
                 break
-            relpath = abs_path.relative_to(WIKI_ROOT).as_posix()
+            wiki_base = wiki_dir if wiki_dir and wiki_dir.exists() else WIKI_ROOT
+            relpath = abs_path.relative_to(wiki_base).as_posix()
             try:
                 text = abs_path.read_text(encoding="utf-8", errors="replace")
             except Exception:
