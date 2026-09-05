@@ -76,7 +76,7 @@ async def validate_with_gemini():
             results["translations"][story] = f"Error: {str(e)}"
 
     # Save results
-    output_file = Path("/home/peter/Documents/Projects/zolai/GEMINI_VALIDATION_RESULTS.json")
+    output_file = Path(__file__).resolve().parent.parent.parent.parent / "GEMINI_VALIDATION_RESULTS.json"
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 

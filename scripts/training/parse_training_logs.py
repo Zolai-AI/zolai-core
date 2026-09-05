@@ -48,7 +48,7 @@ def parse_logs(log_file):
         print("✓ GPU training confirmed")
 
 if __name__ == "__main__":
-    log_file = Path("/home/peter/Documents/Projects/zolai/training_test.log")
+    log_file = Path(__file__).resolve().parent.parent.parent / "training_test.log"
     if log_file.exists():
         parse_logs(log_file)
     else:

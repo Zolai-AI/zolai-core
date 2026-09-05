@@ -15,7 +15,7 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger('AdvancedLearning')
 
-PROJECT_ROOT = Path('/home/peter/Documents/Projects/zolai')
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 WIKI_DIR = PROJECT_ROOT / 'wiki'
 CORPUS_DIR = PROJECT_ROOT / 'data' / 'corpus' / 'texts'
 PARALLEL_DIR = PROJECT_ROOT / 'data' / 'parallel'

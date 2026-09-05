@@ -218,8 +218,8 @@ class DiscussionGroup:
 
 def audit_wiki_files():
     """Audit all wiki files."""
-    wiki_root = Path("/home/peter/Documents/Projects/zolai/wiki")
-    readme_file = Path("/home/peter/Documents/Projects/zolai/README.md")
+    wiki_root = Path(__file__).resolve().parent.parent.parent / "wiki"
+    readme_file = Path(__file__).resolve().parent.parent.parent / "README.md"
 
     # Initialize agents
     agents = [
@@ -245,7 +245,7 @@ def audit_wiki_files():
     for file_path in files_to_audit[:10]:  # Limit to first 10 files
         try:
             content = file_path.read_text()
-            rel_path = str(file_path.relative_to(Path("/home/peter/Documents/Projects/zolai")))
+            rel_path = str(file_path.relative_to(Path(__file__).resolve().parent.parent.parent))
 
             for agent in agents:
                 agent.audit(content, rel_path)
@@ -277,7 +277,7 @@ def audit_wiki_files():
                 print()
 
     # Save report
-    report_file = Path("/home/peter/Documents/Projects/zolai/artifacts/wiki_audit_discussion_report.json")
+    report_file = Path(__file__).resolve().parent.parent.parent / "artifacts" / "wiki_audit_discussion_report.json"
     report_file.parent.mkdir(parents=True, exist_ok=True)
 
     report = {

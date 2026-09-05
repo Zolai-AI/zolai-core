@@ -198,7 +198,7 @@ class MultiAgentAuditSystem:
         return False
 
 if __name__ == "__main__":
-    project_root = Path("/home/peter/Documents/Projects/zolai")
+    project_root = Path(__file__).resolve().parent.parent.parent
 
     print("🔐 Multi-Agent Security Audit System")
     print("=" * 50)

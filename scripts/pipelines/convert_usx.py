@@ -20,7 +20,7 @@ class VerseRef:
 
 
 ROOT = Path(__file__).resolve().parents[2]
-BIBLES_DIR = Path("/path/to/zolai/Documents/Projects/bibles")
+BIBLES_DIR = ROOT / "bibles"
 RAW_BIBLE = ROOT / "raw" / "bible"
 
 

@@ -12,7 +12,7 @@ class SystemOrchestrator:
     """Orchestrates all audit and validation agents."""
 
     def __init__(self):
-        self.project_root = Path("/home/peter/Documents/Projects/zolai")
+        self.project_root = Path(__file__).resolve().parent.parent.parent
         self.results = {
             "timestamp": datetime.now().isoformat(),
             "agents": {},

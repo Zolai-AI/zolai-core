@@ -4,7 +4,7 @@
 
 set -e
 
-PROJECT_ROOT="/home/peter/Documents/Projects/zolai"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPTS_DIR="$PROJECT_ROOT/scripts"
 ARTIFACTS_DIR="$PROJECT_ROOT/artifacts"
 

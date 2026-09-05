@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-WORK_ROOT="${WORK_ROOT:-/path/to/zolai/Documents/Projects/data/zolai}"
-REPORT_ROOT="${REPORT_ROOT:-/path/to/zolai/Documents/Projects/data/zolai/reports}"
+WORK_ROOT="${WORK_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/data/zolai}"
+REPORT_ROOT="${REPORT_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/data/zolai/reports}"
 RUN_LABEL="${RUN_LABEL:-zolai-web-cycle}"
 RESUME="${RESUME:-1}"
 
-SEEDS_FILE="${SEEDS_FILE:-/path/to/zolai/.openclaw/skills/web-public-dataset-harvester/references/zolai-source-seeds.txt}"
+SEEDS_FILE="${SEEDS_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.openclaw/skills/web-public-dataset-harvester/references/zolai-source-seeds.txt}"
 RAW_OUT="$WORK_ROOT/raw/zolai_web_raw.jsonl"
 VERIFIED_OUT="$WORK_ROOT/verified/zolai_web_verified.jsonl"
 TRAIN_OUT="$WORK_ROOT/training/zolai_train_candidates.jsonl"
