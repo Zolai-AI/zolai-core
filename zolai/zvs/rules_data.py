@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from typing import Final, Mapping
 
+from .exceptions import ExceptionRegistry
+
 # ---------------------------------------------------------------------------
 # Categories
 # ---------------------------------------------------------------------------
@@ -83,6 +85,53 @@ STEM_FORBIDDEN_TO_PREFERRED: Final[Mapping[str, str]] = {
     "kipanna": "kipatna",
     "piangna": "pian'na",
 }
+
+# ---------------------------------------------------------------------------
+# HISTORICAL EXCEPTIONS — curated registry of historical/scripture surfaces.
+#
+# Seeded from the wiki historical + biblical surfaces (zolai-wiki/history/,
+# zolai-wiki/biblical/). These are classic Bible-era / kingdom-era forms and
+# phrases that legitimately appear in quoted scripture and historical records
+# and must NOT be silently "corrected" to modern ZVS orthography.
+#
+# Scope is LOCALIZED (specific tokens + phrases only) — we deliberately do NOT
+# disable whole rules here, so a genuinely new forbidden form elsewhere in the
+# corpus still gets flagged. Only the classic deprecated forms that appear in
+# historical/scripture surfaces are registered as tokens; a handful of modern
+# surface forms remain outside the registry (e.g. ``ram``, ``suah``, ``nunnak``)
+# to preserve the fail-closure guarantee for non-historical text.
+# ---------------------------------------------------------------------------
+HISTORICAL_EXCEPTIONS: Final[Mapping[str, list[str]]] = {
+    # No whole-rule silencing: historical forms are localized to tokens/phrases.
+    "rule_ids": [],
+    # Classic Bible-era / kingdom-era forms (source: wiki biblical + history).
+    "tokens": [
+        "pathian",  # -> pasian   (classic 'God'; Tedim 1932 orthography)
+        "bawipa",  # -> topa      (classic 'Lord')
+        "siangpahrang",  # -> kumpipa (classic 'king')
+        "fapa",  # -> tapa        (classic 'son')
+        "zalenna",  # -> suahtakna (classic 'freedom')
+        "cun",  # -> tua          (classic subordinating conjunction)
+        "cu",  # -> tua           (classic demonstrative)
+    ],
+    # Scripture names + kingdom-era phrases sourced from the wiki surfaces.
+    # ``kanaan ramah`` uses the classic unregistered token ``ram`` to
+    # demonstrate localized whole-phrase suppression.
+    "phrases": [
+        "tedim 1932",  # landmark Bible translation (history/zolai_bible_history.md)
+        "lai siangtho",  # name of the 1932 Bible
+        "heshbon kumpipa sihon",  # kingdom-era (history/zolai_history_snippets.md)
+        "persia kumpipa",  # royal/administrative (biblical/survey/historical.md)
+        "kote hong uk dingin kumpi khat seh in",  # 'appoint for us a king'
+        "kanaan ramah",  # classic orthography for 'in the land of Canaan'
+    ],
+}
+
+DEFAULT_EXCEPTIONS: Final[ExceptionRegistry] = ExceptionRegistry(
+    rule_ids=set(HISTORICAL_EXCEPTIONS["rule_ids"]),
+    tokens={t.lower() for t in HISTORICAL_EXCEPTIONS["tokens"]},
+    phrases={p.strip().lower() for p in HISTORICAL_EXCEPTIONS["phrases"]},
+)
 
 # ---------------------------------------------------------------------------
 # PHONOTACTIC — noise-prone rules that are available but OFF by default.

@@ -30,7 +30,7 @@ class TestDialectForbiddenForms:
     """Each forbidden dialect form must be flagged."""
 
     def test_pathian_flagged(self) -> None:
-        report = validate("Pathian tapa hi.")
+        report = validate("Pathian tapa hi.", exceptions=ExceptionRegistry())
         assert not report.is_valid
         assert any(v.forbidden == "pathian" for v in report.violations)
 
@@ -40,27 +40,27 @@ class TestDialectForbiddenForms:
         assert any(v.forbidden == "ram" for v in report.violations)
 
     def test_fapa_flagged(self) -> None:
-        report = validate("Fapa chu a hi.")
+        report = validate("Fapa chu a hi.", exceptions=ExceptionRegistry())
         assert not report.is_valid
         assert any(v.forbidden == "fapa" for v in report.violations)
 
     def test_bawipa_flagged(self) -> None:
-        report = validate("Bawipa hia.")
+        report = validate("Bawipa hia.", exceptions=ExceptionRegistry())
         assert not report.is_valid
         assert any(v.forbidden == "bawipa" for v in report.violations)
 
     def test_siangpahrang_flagged(self) -> None:
-        report = validate("Siangpahrang a hia.")
+        report = validate("Siangpahrang a hia.", exceptions=ExceptionRegistry())
         assert not report.is_valid
         assert any(v.forbidden == "siangpahrang" for v in report.violations)
 
     def test_cu_flagged(self) -> None:
-        report = validate("Cu hi a hih.")
+        report = validate("Cu hi a hih.", exceptions=ExceptionRegistry())
         assert not report.is_valid
         assert any(v.forbidden == "cu" for v in report.violations)
 
     def test_cun_flagged(self) -> None:
-        report = validate("Cun ka a hi.")
+        report = validate("Cun ka a hi.", exceptions=ExceptionRegistry())
         assert not report.is_valid
         assert any(v.forbidden == "cun" for v in report.violations)
 
@@ -70,7 +70,7 @@ class TestDialectForbiddenForms:
         assert any(v.forbidden == "suah" for v in report.violations)
 
     def test_zalenna_flagged(self) -> None:
-        report = validate("Zalenna hia.")
+        report = validate("Zalenna hia.", exceptions=ExceptionRegistry())
         assert not report.is_valid
         assert any(v.forbidden == "zalenna" for v in report.violations)
 
@@ -131,7 +131,7 @@ class TestExceptions:
         assert report.is_valid
 
     def test_no_exception_flags(self) -> None:
-        report = validate("Pathian tapa hi.")
+        report = validate("Pathian tapa hi.", exceptions=ExceptionRegistry())
         assert not report.is_valid
 
 
@@ -143,7 +143,7 @@ class TestReportSerialisation:
     """to_dict / to_json round-trips must work."""
 
     def test_to_dict_structure(self) -> None:
-        report = validate("Pathian tapa hi.")
+        report = validate("Pathian tapa hi.", exceptions=ExceptionRegistry())
         d = report.to_dict()
         assert d["source"] == "<text>"
         assert d["valid"] is False
@@ -152,7 +152,7 @@ class TestReportSerialisation:
         assert d["violations"][0]["rule_id"].startswith("DIALECT_")
 
     def test_to_json_round_trip(self) -> None:
-        report = validate("Pathian tapa hi.")
+        report = validate("Pathian tapa hi.", exceptions=ExceptionRegistry())
         blob = report.to_json()
         parsed = json.loads(blob)
         assert parsed["valid"] is False
@@ -273,12 +273,12 @@ class TestHistoricalFlagging:
     """Historical forms (e.g. Bible-era) must still be flagged, not silenced."""
 
     def test_pathian_in_biblical_context(self) -> None:
-        report = validate("Noah ka suak Pathian thei.")
+        report = validate("Noah ka suak Pathian thei.", exceptions=ExceptionRegistry())
         assert not report.is_valid
         assert any(v.forbidden == "pathian" for v in report.violations)
 
     def test_fapa_in_historical_context(self) -> None:
-        report = validate("Ram pum ah Fapa a hih a hia.")
+        report = validate("Ram pum ah Fapa a hih a hia.", exceptions=ExceptionRegistry())
         assert not report.is_valid
         assert any(v.category == "dialect" for v in report.violations)
 
@@ -291,11 +291,11 @@ class TestPreferredSuggestions:
     """Each violation should carry the correct preferred form."""
 
     def test_pathian_suggests_pasian(self) -> None:
-        report = validate("Pathian tapa hi.")
+        report = validate("Pathian tapa hi.", exceptions=ExceptionRegistry())
         pathian_v = next(v for v in report.violations if v.forbidden == "pathian")
         assert pathian_v.preferred == "pasian"
 
     def test_fapa_suggests_tapa(self) -> None:
-        report = validate("Fapa hi.")
+        report = validate("Fapa hi.", exceptions=ExceptionRegistry())
         v = next(v for v in report.violations if v.forbidden == "fapa")
         assert v.preferred == "tapa"

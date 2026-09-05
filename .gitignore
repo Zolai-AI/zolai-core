@@ -23,3 +23,6 @@ test-results/
 
 # Orchestra session-claims runtime artifact
 .pcore-claims/
+
+# ZVS scan reports
+report/zvs-scan*

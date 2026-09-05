@@ -28,6 +28,17 @@ jobs:
       - name: Test
         run: pytest tests/ -q
 
+      - name: ZVS scan (report-only)
+        run: python scripts/zvs/scan_content.py --wiki
+        continue-on-error: true
+
+      - name: Upload ZVS scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zvs-scan-report
+          path: report/zvs-scan*
+
   docker-build:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
