@@ -28,6 +28,9 @@ jobs:
       - name: Test
         run: pytest tests/ -q
 
+      - name: ZVS validate core library
+        run: pytest tests/test_zvs_integration.py -v
+
       - name: ZVS scan (report-only)
         run: python scripts/zvs/scan_content.py --wiki
         continue-on-error: true
