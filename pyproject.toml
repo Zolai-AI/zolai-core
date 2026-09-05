@@ -81,6 +81,7 @@ full = [
 [project.scripts]
 zolai = "zolai.cli.main:main"
 zolai-zvs = "zolai.zvs.cli:main"
+zolai-eval = "zolai.eval.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

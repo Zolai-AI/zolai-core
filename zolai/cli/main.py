@@ -573,6 +573,31 @@ def ocr(
 
 
 # ============================================================
+# EVAL (offline quality metrics)
+# ============================================================
+
+
+@app.command()
+def evaluate_cmd(
+    set_name: str = typer.Option("smoke", "--set", help="Set name ('smoke') or a path/base prefix"),
+    baseline: str = typer.Option(None, "--baseline", help="Path to baseline JSON (metric -> minimum floor)"),
+    gate: bool = typer.Option(False, "--gate", help="Exit non-zero when any metric drops below its floor"),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+):
+    """📊 Run offline evaluation metrics on a dataset set."""
+    from ..eval.cli import main as eval_main
+
+    argv = ["--set", set_name]
+    if baseline:
+        argv += ["--baseline", baseline]
+    if gate:
+        argv += ["--gate"]
+    if json_out:
+        argv += ["--json"]
+    raise typer.Exit(eval_main(argv))
+
+
+# ============================================================
 # INFO
 # ============================================================
 
