@@ -77,11 +77,15 @@ def chunk_text(text: str, max_chars: int = 1200, min_chars: int = 60, hard_max: 
     return final
 
 
-def iter_wiki_files(data_dir: Path | None = None):
+def iter_wiki_files(data_dir: Path | None = None, wiki_dir: Path | None = None):
     """Yield (abs_path, kind) for wiki MD/TXT files."""
-    wiki = data_dir / "wiki" if data_dir else WIKI_ROOT
-    # Also check if WIKI_ROOT itself has the wiki files (default behavior)
-    if not wiki.exists():
+    if wiki_dir and wiki_dir.exists():
+        wiki = wiki_dir
+    elif data_dir:
+        wiki = data_dir / "wiki"
+        if not wiki.exists():
+            wiki = WIKI_ROOT
+    else:
         wiki = WIKI_ROOT
     if not wiki.exists():
         return
@@ -206,12 +210,29 @@ def main():
     ap.add_argument("--data-dir", default=None, help="Data root (default: ../data or /kaggle/input/zolai-rag-data)")
     ap.add_argument("--sources", default="wiki,dictionary,parallel,bible", help="Comma-separated sources to include")
     ap.add_argument("--output-dir", default=None, help="Override output directory (default: <repo>/data/knowledge)")
+    ap.add_argument("--wiki-dir", default=None, help="Override wiki directory (default: ../zolai-wiki)")
     args = ap.parse_args()
 
     import torch
     from sentence_transformers import SentenceTransformer
 
-    device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
+    # Auto-detect device with CUDA compatibility check
+    if args.device:
+        device = args.device
+    elif torch.cuda.is_available():
+        # Check if GPU is compatible with installed PyTorch
+        cap = torch.cuda.get_device_capability(0)
+        major, minor = cap
+        # PyTorch only supports sm_70+ (Volta+). P100 is sm_60.
+        if major < 7:
+            print(f"WARNING: GPU {torch.cuda.get_device_name(0)} has CUDA capability sm_{major}{minor}0, "
+                  f"but PyTorch requires sm_70+. Falling back to CPU.")
+            device = "cpu"
+        else:
+            device = "cuda"
+    else:
+        device = "cpu"
+
     batch_size = args.batch_size or (BATCH_SIZE_GPU if device == "cuda" else BATCH_SIZE_CPU)
     sources = set(args.sources.split(","))
 
@@ -223,6 +244,9 @@ def main():
 
     # Resolve output directory
     out_dir = Path(args.output_dir) if args.output_dir else DATA_KNOWLEDGE
+
+    # Resolve wiki directory
+    wiki_dir = Path(args.wiki_dir) if args.wiki_dir else None
 
     print(f"Device: {device}, Batch: {batch_size}, Model: {args.model}")
     print(f"Data dir: {data_dir}")
@@ -259,7 +283,7 @@ def main():
         t1 = time.time()
         count = 0
         file_count = 0
-        for abs_path, kind in iter_wiki_files(data_dir):
+        for abs_path, kind in iter_wiki_files(data_dir, wiki_dir=wiki_dir):
             file_count += 1
             if args.limit and file_count > args.limit:
                 break
