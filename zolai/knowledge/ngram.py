@@ -12,12 +12,13 @@ import re
 from collections import Counter
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-ART = ROOT / "artifacts" / "kg"
-DICT = ROOT / "data" / "dictionary" / "processed" / "dict_master_v2.json"
-WORDLISTS = ROOT / "wiki" / "vocabulary" / "wordlists"
+from ..config import config
 
-_WORD = re.compile(r"[a-zA-Z][a-zA-Z'’]*")
+ART = config.paths.data_knowledge
+DICT = config.paths.data / "dictionary" / "processed" / "dict_master_v2.json"
+WORDLISTS = config.paths.root.parent / "zolai-wiki" / "vocabulary" / "wordlists"
+
+_WORD = re.compile(r"[a-zA-Z][a-zA-Z'']*")
 
 
 def build_ngram_tables(out_dir=ART) -> Path:

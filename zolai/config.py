@@ -28,48 +28,48 @@ class Paths:
 
     # Use global data root as primary
     data: Path = field(
-        default_factory=lambda: _env_path("ZOLAI_DATA_ROOT", Path.home() / "Documents" / "Projects" / "data")
+        default_factory=lambda: _env_path("ZOLAI_DATA_ROOT", _TOOLKIT_ROOT.parent / "data")
     )
 
     data_raw: Path = field(
         default_factory=lambda: _env_path(
-            "ZOLAI_DATA_RAW", _env_path("ZOLAI_DATA_ROOT", Path.home() / "Documents" / "Projects" / "data") / "raw"
+            "ZOLAI_DATA_RAW", _env_path("ZOLAI_DATA_ROOT", _TOOLKIT_ROOT.parent / "data") / "raw"
         )
     )
     data_cleaned: Path = field(
         default_factory=lambda: _env_path(
             "ZOLAI_DATA_CLEANED",
-            _env_path("ZOLAI_DATA_ROOT", Path.home() / "Documents" / "Projects" / "data") / "master",
+            _env_path("ZOLAI_DATA_ROOT", _TOOLKIT_ROOT.parent / "data") / "master",
         )
     )
     data_training: Path = field(
         default_factory=lambda: _env_path(
             "ZOLAI_DATA_TRAINING",
-            _env_path("ZOLAI_DATA_ROOT", Path.home() / "Documents" / "Projects" / "data") / "training",
+            _env_path("ZOLAI_DATA_ROOT", _TOOLKIT_ROOT.parent / "data") / "training",
         )
     )
     data_knowledge: Path = field(
         default_factory=lambda: _env_path(
             "ZOLAI_DATA_KNOWLEDGE",
-            _env_path("ZOLAI_DATA_ROOT", Path.home() / "Documents" / "Projects" / "data") / "knowledge",
+            _env_path("ZOLAI_DATA_ROOT", _TOOLKIT_ROOT.parent / "data") / "knowledge",
         )
     )
     data_archive: Path = field(
         default_factory=lambda: _env_path(
             "ZOLAI_DATA_ARCHIVE",
-            _env_path("ZOLAI_DATA_ROOT", Path.home() / "Documents" / "Projects" / "data") / "archive",
+            _env_path("ZOLAI_DATA_ROOT", _TOOLKIT_ROOT.parent / "data") / "archive",
         )
     )
     db: Path = field(
         default_factory=lambda: _env_path(
             "ZOLAI_DB_PATH",
-            _env_path("ZOLAI_DATA_ROOT", Path.home() / "Documents" / "Projects" / "data") / "crawler.db",
+            _env_path("ZOLAI_DATA_ROOT", _TOOLKIT_ROOT.parent / "data") / "crawler.db",
         )
     )
 
     # External input folder — used by ingest scripts, NOT overriding toolkit data
     external_data: Path = field(
-        default_factory=lambda: _env_path("ZOLAI_EXTERNAL_DATA", Path.home() / "Documents" / "Projects" / "data")
+        default_factory=lambda: _env_path("ZOLAI_EXTERNAL_DATA", _TOOLKIT_ROOT.parent / "data")
     )
 
     def ensure_dirs(self):
