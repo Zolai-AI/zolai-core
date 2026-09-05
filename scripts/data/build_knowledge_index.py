@@ -34,7 +34,7 @@ WIKI_ROOT = REPO_ROOT.parent / "zolai-wiki"
 DATA_ROOT = REPO_ROOT.parent / "data"
 DATA_KNOWLEDGE = DATA_ROOT / "knowledge"
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-BATCH_SIZE_GPU = 2048
+BATCH_SIZE_GPU = 256
 BATCH_SIZE_CPU = 256
 
 
@@ -88,6 +88,7 @@ def iter_wiki_files(data_dir: Path | None = None, wiki_dir: Path | None = None):
     else:
         wiki = WIKI_ROOT
     if not wiki.exists():
+        print(f"  DEBUG: wiki path not found: {wiki}", flush=True)
         return
     for p in sorted(wiki.rglob("*")):
         if not p.is_file():
@@ -366,11 +367,19 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     mode = "a" if args.resume and existing_count > 0 else "w"
     total = 0
+    start = 0
     with open(out_path, mode) as f:
-        for start in range(0, len(pending), batch_size):
-            batch = pending[start:start + batch_size]
+        while start < len(pending):
+            end = min(start + batch_size, len(pending))
+            batch = pending[start:end]
             texts = [r["text"][:512] for r in batch]
-            embs = model.encode(texts, batch_size=batch_size, normalize_embeddings=True, show_progress_bar=False)
+            try:
+                embs = model.encode(texts, batch_size=batch_size, normalize_embeddings=True, show_progress_bar=False)
+            except torch.cuda.OutOfMemoryError:
+                torch.cuda.empty_cache()
+                batch_size = max(32, batch_size // 2)
+                print(f"  OOM! Reducing batch to {batch_size}", flush=True)
+                continue
             for r, e in zip(batch, embs):
                 r["embedding"] = e.tolist() if hasattr(e, "tolist") else list(e)
                 r["embeddingModel"] = args.model
@@ -382,6 +391,7 @@ def main():
             rate = total / elapsed if elapsed > 0 else 0
             eta = (len(pending) - total) / rate if rate > 0 else 0
             print(f"  {total}/{len(pending)} ({rate:.0f}/s, ETA {eta:.0f}s)", flush=True)
+            start = end
 
     size_mb = out_path.stat().st_size / 1024 / 1024
     print(f"=== DONE in {time.time()-t0:.1f}s ===", flush=True)
