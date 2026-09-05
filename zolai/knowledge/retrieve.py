@@ -7,6 +7,7 @@ source metadata so callers can inject them as RAG context for existing AIs.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -15,6 +16,11 @@ import numpy as np
 from ..config import config
 
 DEFAULT_INDEX = config.paths.data_knowledge / "knowledge_vectors.jsonl"
+
+# HuggingFace dataset for auto-download
+HF_REPO = "peterpausianlian/zolai-knowledge-vectors"
+HF_FILENAME = "knowledge_vectors.jsonl"
+HF_REPO_TYPE = "dataset"
 
 
 @dataclass
@@ -25,10 +31,43 @@ class Index:
     vectors: np.ndarray | None = None
 
 
+def _ensure_index_file(path: Path) -> Path:
+    """Download knowledge_vectors.jsonl from HuggingFace if missing or empty."""
+    if path.exists() and path.stat().st_size > 1024:
+        return path
+
+    print(f"knowledge index not found at {path} — downloading from HuggingFace...")
+    try:
+        from huggingface_hub import hf_hub_download
+
+        # Use HF_TOKEN from env if set (for private repos / rate limits)
+        token = os.environ.get("HF_TOKEN")
+        downloaded = hf_hub_download(
+            repo_id=HF_REPO,
+            filename=HF_FILENAME,
+            repo_type=HF_REPO_TYPE,
+            token=token,
+            local_dir=str(path.parent),
+            local_dir_use_symlinks=False,
+        )
+        # hf_hub_download saves as <local_dir>/<filename>
+        src = Path(downloaded)
+        if src != path:
+            import shutil
+            shutil.move(str(src), str(path))
+        print(f"Downloaded {path.stat().st_size / 1024 / 1024:.1f} MB to {path}")
+    except Exception as e:
+        print(f"WARNING: Failed to download knowledge index from HF: {e}")
+        print(f"  Repo: {HF_REPO}")
+        print(f"  You can manually download: huggingface-cli download {HF_REPO} {HF_FILENAME} --repo-type dataset --local-dir {path.parent}")
+    return path
+
+
 def load_index(path: Path = DEFAULT_INDEX) -> Index:
     """Load a knowledge_vectors.jsonl index into memory. Missing -> empty Index."""
     idx = Index()
-    if not path.exists():
+    path = _ensure_index_file(path)
+    if not path.exists() or path.stat().st_size < 1024:
         return idx
     rows = []
     with path.open(encoding="utf-8") as f:
