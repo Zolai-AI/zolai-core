@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Report-only ZVS 2018 content scanner.
+"""ZVS 2018 content scanner with regression-gated CI mode.
 
 Scans repository text content (wiki Markdown files and/or corpus JSONL
-records) against the ZVS 2018 validator and writes a non-blocking report.
+records) against the ZVS 2018 validator and writes a non-blocking report, and
+optionally enforces a **regression gate** against a committed baseline.
 
-This is a **report-only** tool:
+This is a **report-only** tool by default:
 
 - It NEVER writes to any source file (wiki / corpus content is read-only).
 - It exits ``0`` ALWAYS, even when violations are found — scans are
@@ -12,19 +13,39 @@ This is a **report-only** tool:
 - Only the **contents** of files are scanned. File names and directory names
   are never tokenized (so a file named ``bawipa.md`` cannot trip a rule).
 
+With ``--gate`` it becomes a regression check:
+
+- A baseline file (committed, e.g. ``report/zvs-baseline.json``) is loaded.
+  It is a flat dict keyed by ``source\\u0000rule_id\\u0000forbidden`` -> count.
+- The gate exits ``1`` **only** when a combo is NEW or its current count
+  exceeds the baseline count. Existing counts never fail, so vocabulary /
+  generated / stem-mapping reference content is auto-excluded by having been
+  captured in the baseline — with zero per-source classification code.
+- The gate exits ``0`` when every combo is present at or below its baseline.
+
+A ``reference`` triage bucket is assigned (for the human summary only) to
+lexicographic reference content: paths under ``vocabulary/`` /
+``vocabulary/generated/``, ``*_auto.md`` files, and the stem-mapping tables.
+This bucket is purely cosmetic and is **never** consulted by the gate.
+
 Usage::
 
-    python scripts/zvs/scan_content.py --wiki                # wiki scan (default on)
-    python scripts/zvs/scan_content.py --corpus              # corpus scan (local/on-demand)
-    python scripts/zvs/scan_content.py --wiki --corpus       # both
+    python scripts/zvs/scan_content.py --wiki                 # wiki scan (default on)
+    python scripts/zvs/scan_content.py --corpus               # corpus scan (local/on-demand)
+    python scripts/zvs/scan_content.py --wiki --corpus        # both
+    python scripts/zvs/scan_content.py --wiki --write-baseline report/zvs-baseline.json
+    python scripts/zvs/scan_content.py --wiki --gate --baseline report/zvs-baseline.json
 
 Outputs (written to the repo ``report/`` dir):
 
 - ``zvs-scan-<iso-date>.json``  — full machine-readable result.
 - ``zvs-scan-summary.md``       — human summary (counts + triage buckets).
+- ``zvs-baseline.json``         — committed baseline (only with --write-baseline).
 
 If the wiki checkout is not present (e.g. a fresh zolai-core checkout), a
-clear warning is printed and the script still exits ``0``.
+clear warning is printed and (in default report-only mode) the script still
+exits ``0``. In ``--gate`` mode a missing wiki or missing baseline is a hard
+``1`` because the regression gate cannot be validated.
 """
 
 from __future__ import annotations
@@ -45,25 +66,55 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_WIKI = REPO_ROOT.parent / "zolai-wiki"
 DEFAULT_CORPUS = REPO_ROOT.parent / "data" / "corpus"
 REPORT_DIR = REPO_ROOT / "report"
+DEFAULT_BASELINE = REPORT_DIR / "zvs-baseline.json"
 
 # Field names to read from JSONL records (mirrors the zolai-zvs CLI).
 _JSONL_FIELDS = ("text", "zolai", "sentence", "corrected", "original")
 
+# Composite-key separator between source / rule_id / forbidden.
+_KEY_SEP = "\u0000"
+
 # Triage buckets used in the summary.
+_BUCKET_REFERENCE = "reference"  # lexicographic reference — never gates.
 _BUCKET_EXCEPTION = "exception"
 _BUCKET_FIX = "fix"
 _BUCKET_IGNORE = "ignore"
 _BUCKET_FALSE_POSITIVE = "false-positive"
 _ALL_BUCKETS = (
     _BUCKET_FIX,
+    _BUCKET_REFERENCE,
     _BUCKET_EXCEPTION,
     _BUCKET_IGNORE,
     _BUCKET_FALSE_POSITIVE,
 )
 
+# Reference content markers used only for the human summary (never for gating).
+_REFERENCE_MARKERS = ("vocabulary/", "_auto.md", "forbidden_stems_auto.md")
+
+
+def _is_reference_source(source: str) -> bool:
+    """True for lexicographic/auto reference sources (cosmetic bucket only).
+
+    Matches vocabulary/, vocabulary/generated/, ``*_auto.md`` files, and the
+    auto-joined stem-mapping table ``grammar/forbidden_stems_auto.md``.
+    """
+    normalized = source.replace("\\", "/")
+    for marker in _REFERENCE_MARKERS:
+        if marker in normalized:
+            return True
+    return False
+
 
 def _triage_bucket(report: Report, v) -> str:
     """Classify a single violation into a triage bucket."""
+    # The stem-mapping section of 03_negation_particles.md is a reference
+    # table; its STEM_* rows are bucketed as reference (cosmetic only).
+    if report.source.replace("\\", "/").endswith(
+        "bundle/03_negation_particles.md"
+    ) and v.rule_id.startswith("STEM_"):
+        return _BUCKET_REFERENCE
+    if _is_reference_source(report.source):
+        return _BUCKET_REFERENCE
     if v.category == "phonotactic":
         return _BUCKET_FALSE_POSITIVE
     if v.forbidden.strip().lower() in DEFAULT_EXCEPTIONS.tokens:
@@ -71,6 +122,22 @@ def _triage_bucket(report: Report, v) -> str:
     if v.preferred is None:
         return _BUCKET_IGNORE
     return _BUCKET_FIX
+
+
+def _rel_source(source: str) -> str:
+    """Normalize an absolute scan source to a repo-stable relative path.
+
+    Baseline keys must be portable across machines (local vs CI), so absolute
+    source paths are stripped back to the wiki/corpus root.
+    """
+    normalized = source.replace("\\", "/")
+    for root in (DEFAULT_WIKI, DEFAULT_CORPUS):
+        prefix = str(root).replace("\\", "/").rstrip("/") + "/"
+        if normalized.startswith(prefix):
+            return normalized[len(prefix):]
+        if normalized == str(root):
+            return ""
+    return normalized
 
 
 def _iter_wiki_texts(wiki_dir: Path) -> Iterator[tuple[str, str]]:
@@ -130,6 +197,8 @@ def _write_summary(
     buckets: Counter,
     top_files: list[tuple[str, int]],
     dest: Path,
+    *,
+    gated: bool,
 ) -> None:
     total_invalid = sum(1 for r in results if not r["valid"])
     total_violations = sum(len(r["violations"]) for r in results)
@@ -141,7 +210,13 @@ def _write_summary(
     lines.append(f"- Sources with violations: **{total_invalid}**")
     lines.append(f"- Total violations: **{total_violations}**")
     lines.append("")
-    lines.append("> Report-only scan — non-blocking. Exit code is always 0.")
+    if gated:
+        lines.append(
+            "> Regression-gated scan — exits 1 only on NEW or increased "
+            "violations vs the committed baseline."
+        )
+    else:
+        lines.append("> Report-only scan — non-blocking. Exit code is always 0.")
     lines.append("")
 
     lines.append("## Violations by rule")
@@ -186,13 +261,66 @@ def _write_summary(
     dest.write_text("\n".join(lines), encoding="utf-8")
 
 
-def scan(wiki: bool, corpus: bool) -> int:
-    """Run the report-only scan and write outputs. Always returns 0."""
+def _write_baseline(composite_counts: Counter, dest: Path) -> None:
+    """Write a committed baseline as a flat ``key -> count`` JSON dict."""
+    payload: dict[str, int] = {
+        str(key): int(count) for key, count in sorted(composite_counts.items())
+    }
+    dest.write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _load_baseline(path: Path) -> dict[str, int]:
+    """Load a baseline JSON dict, tolerating a missing/empty file.
+
+    A missing baseline is reported as empty; the caller decides hard-fail.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"baseline {path} is not a JSON object")
+    return {str(k): int(v) for k, v in raw.items()}
+
+
+def _check_gate(composite_counts: Counter, baseline: dict[str, int]) -> list[tuple[str, int, int]]:
+    """Return ``(key, baseline_count, current_count)`` for violations to flag.
+
+    A combo is flagged when it is NEW (baseline_count == 0) or its current
+    count exceeds the baseline count. Existing combos never flag.
+    """
+    flagged: list[tuple[str, int, int]] = []
+    for key, current_count in sorted(composite_counts.items()):
+        base_count = int(baseline.get(key, 0))
+        if base_count == 0 or current_count > base_count:
+            flagged.append((key, base_count, current_count))
+    return flagged
+
+
+def scan(
+    wiki: bool,
+    corpus: bool,
+    *,
+    gate: bool = False,
+    baseline_file: Path | None = None,
+    write_baseline_file: Path | None = None,
+) -> int:
+    """Run the scan and (optionally) the regression gate.
+
+    Returns 0 on success (or no gate trip); 1 when the gate trips, the gate
+    cannot be validated (missing wiki/baseline), or writing fails.
+    """
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     results: list[dict] = []
     rules_by_id: dict[str, Counter] = defaultdict(Counter)
     buckets: Counter = Counter()
     file_violations: Counter = Counter()
+    composite_counts: Counter = Counter()
+
+    scan_contexts = []
 
     if wiki:
         wiki_dir = DEFAULT_WIKI
@@ -203,9 +331,7 @@ def scan(wiki: bool, corpus: bool) -> int:
                 file=sys.stderr,
             )
         else:
-            for source, text in _iter_wiki_texts(wiki_dir):
-                report = validate(text, source=source)
-                _accumulate(results, report, rules_by_id, buckets, file_violations)
+            scan_contexts.append(("wiki", wiki_dir, _iter_wiki_texts(wiki_dir)))
 
     if corpus:
         corpus_dir = DEFAULT_CORPUS
@@ -216,16 +342,39 @@ def scan(wiki: bool, corpus: bool) -> int:
                 file=sys.stderr,
             )
         else:
-            for source, text in _iter_corpus_texts(corpus_dir):
-                report = validate(text, source=source)
-                _accumulate(results, report, rules_by_id, buckets, file_violations)
+            scan_contexts.append(("corpus", corpus_dir, _iter_corpus_texts(corpus_dir)))
+
+    for _kind, _root, texts in scan_contexts:
+        for source, text in texts:
+            report = validate(text, source=source)
+            _accumulate(
+                results,
+                report,
+                rules_by_id,
+                buckets,
+                file_violations,
+                composite_counts,
+            )
+
+    if write_baseline_file is not None:
+        resolved = Path(write_baseline_file)
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        _write_baseline(composite_counts, resolved)
+        print(f"[zvs-scan] wrote baseline {resolved}")
 
     json_dest = REPORT_DIR / f"zvs-scan-{date.today().isoformat()}.json"
     md_dest = REPORT_DIR / "zvs-scan-summary.md"
     top_files = file_violations.most_common(20)
 
     _write_json(results, json_dest)
-    _write_summary(results, rules_by_id, buckets, top_files, md_dest)
+    _write_summary(
+        results,
+        rules_by_id,
+        buckets,
+        top_files,
+        md_dest,
+        gated=gate,
+    )
 
     scanned = len(results)
     invalid = sum(1 for r in results if not r["valid"])
@@ -235,6 +384,40 @@ def scan(wiki: bool, corpus: bool) -> int:
     )
     print(f"[zvs-scan] wrote {json_dest}")
     print(f"[zvs-scan] wrote {md_dest}")
+
+    if not gate:
+        return 0
+
+    # ---- Regression gate ----
+    if not scan_contexts:
+        print(
+            "[zvs-scan] GATE: no content sources present to scan "
+            "(wiki/corpus missing). Gate cannot be validated -> FAIL.",
+            file=sys.stderr,
+        )
+        return 1
+
+    baseline_path = Path(baseline_file) if baseline_file else DEFAULT_BASELINE
+    if not baseline_path.is_file():
+        print(
+            f"[zvs-scan] GATE: baseline not found at {baseline_path} -> FAIL.",
+            file=sys.stderr,
+        )
+        return 1
+
+    baseline = _load_baseline(baseline_path)
+
+    flagged = _check_gate(composite_counts, baseline)
+    if flagged:
+        print(f"[zvs-scan] GATE: FAILED — {len(flagged)} new/increased violation(s).")
+        print(f"{'key':90} baseline  current")
+        for key, base_count, current_count in flagged:
+            print(
+                f"  {key}{' ' * max(1, 88 - len(key))} {base_count:8} {current_count:8}"
+            )
+        return 1
+
+    print("[zvs-scan] GATE: PASS — no new or increased violations vs baseline.")
     return 0
 
 
@@ -244,18 +427,24 @@ def _accumulate(
     rules_by_id: dict[str, Counter],
     buckets: Counter,
     file_violations: Counter,
+    composite_counts: Counter,
 ) -> None:
     results.append(report.to_dict())
     for v in report.violations:
         rules_by_id[v.rule_id][v.forbidden] += 1
         buckets[_triage_bucket(report, v)] += 1
         file_violations[report.source] += 1
+        rel_source = _rel_source(report.source)
+        composite_counts[_KEY_SEP.join((rel_source, v.rule_id, v.forbidden))] += 1
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="scan_content",
-        description="Report-only ZVS 2018 content scanner (non-blocking).",
+        description=(
+            "ZVS 2018 content scanner. Report-only by default; "
+            "--gate turns it into a regression check against a baseline."
+        ),
     )
     parser.add_argument(
         "--wiki",
@@ -269,8 +458,37 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Scan local corpus JSONL records (on-demand).",
     )
+    parser.add_argument(
+        "--gate",
+        action="store_true",
+        help=(
+            "Enforce regression gate: exit 1 iff a (source, rule, token) "
+            "combo is NEW or its count exceeds the baseline."
+        ),
+    )
+    parser.add_argument(
+        "--baseline",
+        type=Path,
+        default=None,
+        help=(
+            "Baseline JSON file (default: report/zvs-baseline.json). "
+            "Used with --gate."
+        ),
+    )
+    parser.add_argument(
+        "--write-baseline",
+        type=Path,
+        default=None,
+        help="Write the current scan counts as a baseline JSON file.",
+    )
     args = parser.parse_args(argv)
-    return scan(wiki=args.wiki, corpus=args.corpus)
+    return scan(
+        wiki=args.wiki,
+        corpus=args.corpus,
+        gate=args.gate,
+        baseline_file=args.baseline if args.gate else None,
+        write_baseline_file=args.write_baseline,
+    )
 
 
 if __name__ == "__main__":

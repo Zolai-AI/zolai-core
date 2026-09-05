@@ -31,16 +31,22 @@ jobs:
       - name: ZVS validate core library
         run: pytest tests/test_zvs_integration.py -v
 
-      - name: ZVS scan (report-only)
-        run: python scripts/zvs/scan_content.py --wiki
-        continue-on-error: true
+      - name: Checkout zolai-wiki (sibling content for ZVS gate)
+        uses: actions/checkout@v4
+        with:
+          repository: Zolai-AI/zolai-wiki
+          path: ../zolai-wiki
+          ref: main
 
-      - name: Upload ZVS scan report
+      - name: ZVS scan (regression gate)
+        run: python scripts/zvs/scan_content.py --wiki --gate --baseline report/zvs-baseline.json
+
+      - name: Upload ZVS scan summary
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zvs-scan-report
-          path: report/zvs-scan*
+          name: zvs-scan-summary
+          path: report/zvs-scan-summary.md
 
   docker-build:
     runs-on: ubuntu-latest
