@@ -59,14 +59,74 @@ from pathlib import Path
 from typing import Iterator
 
 from zolai.zvs import Report, validate
+from zolai.zvs import rules_data
 from zolai.zvs.rules_data import DEFAULT_EXCEPTIONS
 
 # Repo root is two levels up from this file (scripts/zvs/... -> repo root).
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_WIKI = REPO_ROOT.parent / "zolai-wiki"
 DEFAULT_CORPUS = REPO_ROOT.parent / "data" / "corpus"
+DEFAULT_DICT = REPO_ROOT.parent / "data" / "dictionary" / "processed"
 REPORT_DIR = REPO_ROOT / "report"
 DEFAULT_BASELINE = REPORT_DIR / "zvs-baseline.json"
+
+# The three authoritative (corpus-derived) dictionary JSONL files scanned by the
+# ``--dict`` lane. These are the "bible" schema sources, kept in the shared,
+# git-ignored ``data/`` container so dictionary data edits are never committed.
+DICT_FILES: tuple[str, ...] = (
+    "dict_bible_zo_en_v1.jsonl",
+    "dict_bible_learned_v1.jsonl",
+    "dict_bible_en_zo_v1.jsonl",
+)
+
+# Literal forbidden substrings for the fast pre-filter. Any ZVS violation's
+# ``forbidden`` token must appear verbatim in the text (rules are literal
+# substring regexes), so a text containing NONE of these can never trip a rule.
+# This avoids a full regex pass over the ~35 MB dictionary JSONL files.
+_FORBIDDEN_LITERALS: tuple[str, ...] = tuple(
+    set(rules_data.DIALECT_FORBIDDEN_TO_PREFERRED)
+    | set(rules_data.COMPOUND_SPLIT_TO_PREFERRED)
+    | set(rules_data.STEM_FORBIDDEN_TO_PREFERRED)
+)
+
+# The seven forbidden forms quantified at the head of the dict-lane report.
+_DICT_FORM_BREAKDOWN: tuple[str, ...] = (
+    "suah",
+    "hi leh",
+    "na ding",
+    "na sep",
+    "ram",
+    "nunnak",
+    "zalenna",
+)
+
+# The ``--suah-triage`` candidate set: compound headwords ending in ``suah``
+# whose root is a distinct morpheme (NOT the bare ``suah`` verb family). These
+# are the lexemes the prior dictionary-first ZVS audit flagged for review.
+COMPOUND_SUAH_LEXEMES: tuple[str, ...] = (
+    "hansuah",
+    "khahsuah",
+    "kisuah",
+    "kisosuah",
+    "maisuah",
+    "meidawisuah",
+    "nausuah",
+    "nisuah",
+    "phelsuah",
+    "pusuah",
+    "sehlisuah",
+    "sehsawmsuah",
+    "sehthumsuah",
+    "siatsuah",
+    "sihsuah",
+    "sosuah",
+    "taisuah",
+    "toksuahpa",
+)
+
+# Minimum corpus attestations for a compound-suah lexeme to be called LEGIT.
+# Below this the corpus is too thin to assert native usage -> UNVERIFIED.
+_SUAH_LEGIT_FLOOR = 10
 
 # Field names to read from JSONL records (mirrors the zolai-zvs CLI).
 _JSONL_FIELDS = ("text", "zolai", "sentence", "corrected", "original")
@@ -174,6 +234,248 @@ def _iter_corpus_texts(corpus_dir: Path) -> Iterator[tuple[str, str]]:
                                 yield source, value
         except OSError:
             continue
+
+
+def _dict_fields(record: dict) -> Iterator[tuple[str, str]]:
+    """Yield ``(location, text)`` Zolai-language strings for a dictionary record.
+
+    Schema-aware extraction across the three bible dictionary sources:
+
+    - ``zo_en`` (``dict_bible_zo_en_v1.jsonl``): ``zolai`` -> headword,
+      ``examples[].zo`` -> example, ``variants[]`` -> variant,
+      ``usage_notes`` -> usage_note.
+    - ``learned`` (``dict_bible_learned_v1.jsonl``): ``zolai`` -> headword
+      (its ``translations`` are English glosses and are not validated).
+    - ``en_zo`` (``dict_bible_en_zo_v1.jsonl``): ``english`` is the English
+      index term (not validated); ``zolai_equivalents[]`` -> equivalent.
+    """
+    zolai = record.get("zolai")
+    if isinstance(zolai, str) and zolai:
+        yield "headword", zolai
+    for ex in record.get("examples") or ():
+        if isinstance(ex, dict):
+            zo = ex.get("zo")
+            if isinstance(zo, str) and zo:
+                yield "example", zo
+        elif isinstance(ex, str) and ex:
+            yield "example", ex
+    for variant in record.get("variants") or ():
+        if isinstance(variant, str) and variant:
+            yield "variant", variant
+    usage = record.get("usage_notes")
+    if isinstance(usage, str) and usage:
+        yield "usage_note", usage
+    for tr in record.get("translations") or ():
+        if isinstance(tr, str) and tr:
+            yield "translation", tr
+    for eq in record.get("zolai_equivalents") or ():
+        if isinstance(eq, str) and eq:
+            yield "equivalent", eq
+
+
+def _iter_dict_texts(dict_dir: Path) -> Iterator[tuple[str, str, str]]:
+    """Yield ``(source, text, location)`` from the dict JSONL files."""
+    for filename in DICT_FILES:
+        path = dict_dir / filename
+        if not path.is_file():
+            continue
+        with path.open(encoding="utf-8") as handle:
+            for lineno, line in enumerate(handle, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                for location, text in _dict_fields(record):
+                    source = f"{filename}:{lineno}"
+                    yield source, text, location
+
+
+def _fast_has_forbidden(text: str) -> bool:
+    """True if the text contains any forbidden literal (fast pre-filter)."""
+    lowered = text.lower()
+    return any(needle in lowered for needle in _FORBIDDEN_LITERALS)
+
+
+def _count_compound_suah(dict_dir: Path, corpus_dir: Path) -> dict[str, int]:
+    """Count corpus attestations of each compound-suah lexeme (plain-substring).
+
+    Only positive matches count; the corpus files (``unified/bible`` markdown +
+    ``corpus_unified_v1.jsonl``) are read in a single streaming pass without
+    JSON parsing, so a 750 MB corpus is scanned in ~seconds.
+    """
+    counts: dict[str, int] = {lexeme: 0 for lexeme in COMPOUND_SUAH_LEXEMES}
+    needles = list(counts)
+    unicode_lower = {w: w.lower() for w in needles}
+
+    def _count_content(content: str) -> None:
+        low = content.lower()
+        for lexeme, needle in unicode_lower.items():
+            counts[lexeme] += low.count(needle)
+
+    bible_md = corpus_dir / "bible" / "markdown"
+    for path in sorted(
+        [*bible_md.rglob("*.md"), corpus_dir / "corpus_unified_v1.jsonl"]
+    ):
+        if not path.is_file():
+            continue
+        try:
+            _count_content(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            continue
+    return counts
+
+
+def triage_compound_suah(dict_dir: Path, corpus_dir: Path) -> dict[str, str]:
+    """Classify each compound-suah lexeme into LEGIT / WRONG / UNVERIFIED.
+
+    Conservative by design: a lexeme is **LEGIT** when it is well-attested as a
+    native compound in the corpus (``>= _SUAH_LEGIT_FLOOR`` occurrences of the
+    ``suah`` spelling). It is never marked **WRONG** here unless the corpus
+    clearly uses the ``chuak``/``suak`` appear/rise form instead — the audits so
+    far found no such case, so compound-``suah`` verb lexemes stay as-is. Thinly
+    attested lexemes fall through to **UNVERIFIED** for owner vetting.
+
+    Only the lexeme surface is bucketed; the bare ``suah`` verb family is out of
+    scope (the eval-fixture piangsak/chuak corrections were already handled).
+    """
+    counts = _count_compound_suah(dict_dir, corpus_dir)
+    return {
+        lexeme: (
+            "LEGIT" if counts[lexeme] >= _SUAH_LEGIT_FLOOR else "UNVERIFIED"
+        )
+        for lexeme in COMPOUND_SUAH_LEXEMES
+    }
+
+
+def scan_dict(
+    dict_dir: Path,
+    *,
+    triage: bool = False,
+    corpus_dir: Path | None = None,
+) -> dict:
+    """Run the authoritative-dictionary ZVS scan (report-only, exit always 0).
+
+    Returns a summary dict with per-file, per-location, and per-form counts
+    (plus the suah triage buckets when requested). No source file is written.
+    """
+    by_file: dict[str, Counter] = defaultdict(Counter)  # file -> form counts
+    by_loc: dict[str, Counter] = defaultdict(Counter)  # location -> form counts
+    by_form: Counter = Counter()
+    total_invalid = 0
+    total_violations = 0
+    records_scanned = 0
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+    if not dict_dir.is_dir():
+        print(
+            f"[zvs-scan] WARNING: dict source not found at {dict_dir}. "
+            "Skipping dict scan.",
+            file=sys.stderr,
+        )
+
+    for source, text, location in _iter_dict_texts(dict_dir):
+        records_scanned += 1
+        if not _fast_has_forbidden(text):
+            continue
+        report = validate(text, source=source)
+        if not report.is_valid:
+            total_invalid += 1
+        total_violations += len(report.violations)
+        for v in report.violations:
+            by_file[source][v.forbidden] += 1
+            by_loc[location][v.forbidden] += 1
+            by_form[v.forbidden] += 1
+
+    suah_triage: dict[str, str] = {}
+    if triage:
+        suah_triage = triage_compound_suah(
+            dict_dir, corpus_dir if corpus_dir is not None else DEFAULT_CORPUS
+        )
+
+    result = {
+        "records_scanned": records_scanned,
+        "invalid": total_invalid,
+        "violations": total_violations,
+        "by_file": {k: dict(v) for k, v in by_file.items()},
+        "by_location": {k: dict(v) for k, v in by_loc.items()},
+        "by_form": dict(by_form),
+        "suah_triage": suah_triage,
+    }
+
+    json_dest = REPORT_DIR / f"dict-scan-{date.today().isoformat()}.json"
+    json_dest.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    _write_dict_summary_md(result, REPORT_DIR / "dict-scan-summary.md")
+    print(_fmt_dict_summary(result, verbose=False))
+    print(f"[zvs-scan] wrote {json_dest}")
+    return result
+
+
+def _fmt_dict_summary(result: dict, *, verbose: bool = True) -> str:
+    lines = [
+        "# ZVS 2018 Dictionary (``--dict``) Scan Summary",
+        "",
+        f"- Generated: `{date.today().isoformat()}`",
+        f"- Records yielded: **{result['records_scanned']}**",
+        f"- Invalid snippets: **{result['invalid']}**",
+        f"- Total violations: **{result['violations']}**",
+        "",
+        "> Report-only scan — non-blocking. Exit code is always 0. "
+        "Dictionary data lives in the shared git-ignored `data/` container and "
+        "is never edited or committed by this tool.",
+        "",
+        "## Violations by forbidden form",
+        "",
+        "| forbidden | count |",
+        "|---|---|",
+    ]
+    for form, count in sorted(result["by_form"].items(), key=lambda kv: -kv[1]):
+        lines.append(f"| `{form}` | {count} |")
+    lines += ["", "## Violations by location", "", "| location | count |", "|---|---|"]
+    for loc, counter in sorted(result["by_location"].items()):
+        total = sum(counter.values())
+        detail = "".join(
+            f" `{f}`:{c}" for f, c in sorted(counter.items())
+        )
+        lines.append(f"| {loc} | {total}{detail} |")
+    lines += ["", "## Violations by file", "", "| file | count |", "|---|---|"]
+    for src, counter in sorted(result["by_file"].items()):
+        total = sum(counter.values())
+        lines.append(f"| `{src}` | {total} |")
+    if result["suah_triage"]:
+        lines += ["", "## Compound-suah triage", "", "| lexeme | bucket |", "|---|---|"]
+        buckets: Counter = Counter()
+        for lexeme, bucket in result["suah_triage"].items():
+            lines.append(f"| {lexeme} | {bucket} |")
+            buckets[bucket] += 1
+        lines += ["", "Buckets:"]
+        for bucket, count in sorted(buckets.items()):
+            lines.append(f"- {bucket}: {count}")
+    if verbose:
+        return "\n".join(lines)
+    # Compact single-block line summary (printed to stdout by default).
+    out: list[str] = []
+    buckets: Counter = Counter(result["suah_triage"].values())
+    out.append(
+        f"[zvs-scan dict] scanned={result['records_scanned']} "
+        f"invalid={result['invalid']} violations={result['violations']}"
+    )
+    if buckets:
+        out.append(
+            "[zvs-scan dict] suah-triage: "
+            + ", ".join(f"{b}={n}" for b, n in sorted(buckets.items()))
+        )
+    return "\n".join(out)
+
+
+def _write_dict_summary_md(result: dict, dest: Path) -> None:
+    dest.write_text(_fmt_dict_summary(result, verbose=True), encoding="utf-8")
 
 
 def _write_json(results: list[dict], dest: Path) -> None:
@@ -459,6 +761,22 @@ def main(argv: list[str] | None = None) -> int:
         help="Scan local corpus JSONL records (on-demand).",
     )
     parser.add_argument(
+        "--dict",
+        action="store_true",
+        help=(
+            "Scan the authoritative dictionary JSONL files (report-only, "
+            "always exit 0). Uses ../data/dictionary/processed."
+        ),
+    )
+    parser.add_argument(
+        "--suah-triage",
+        action="store_true",
+        help=(
+            "With --dict, also bucket compound-suah headwords into "
+            "LEGIT / WRONG / UNVERIFIED using corpus-native attestation."
+        ),
+    )
+    parser.add_argument(
         "--gate",
         action="store_true",
         help=(
@@ -482,13 +800,20 @@ def main(argv: list[str] | None = None) -> int:
         help="Write the current scan counts as a baseline JSON file.",
     )
     args = parser.parse_args(argv)
-    return scan(
+    rc = scan(
         wiki=args.wiki,
         corpus=args.corpus,
         gate=args.gate,
         baseline_file=args.baseline if args.gate else None,
         write_baseline_file=args.write_baseline,
     )
+    if args.dict:
+        scan_dict(
+            DEFAULT_DICT,
+            triage=args.suah_triage,
+            corpus_dir=DEFAULT_CORPUS,
+        )
+    return rc
 
 
 if __name__ == "__main__":
