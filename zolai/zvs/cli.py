@@ -19,6 +19,7 @@ from collections.abc import Iterable, Sequence
 from . import validate
 from .exceptions import ExceptionRegistry
 from .report import Report
+from .rules_data import DEFAULT_EXCEPTIONS
 
 
 def _categorise(text: str) -> str:
@@ -81,6 +82,14 @@ def _parse_categories(value: str | None) -> Iterable[str] | None:
 
 def _build_exceptions(args: argparse.Namespace) -> ExceptionRegistry:
     registry = ExceptionRegistry()
+    if getattr(args, "use_default_exceptions", False):
+        # Merge the seeded historical exceptions into the CLI's registry.
+        for rule_id in DEFAULT_EXCEPTIONS.rule_ids:
+            registry.add_rule(rule_id)
+        for token in DEFAULT_EXCEPTIONS.tokens:
+            registry.add_token(token)
+        for phrase in DEFAULT_EXCEPTIONS.phrases:
+            registry.add_phrase(phrase)
     for rule_id in args.exclude_rules or ():
         registry.add_rule(rule_id)
     for token in args.exclude_tokens or ():
@@ -118,6 +127,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     validate_p.add_argument(
         "--allow-phrase", nargs="*", help="Whole phrases allowed (historical quotes)."
+    )
+    validate_p.add_argument(
+        "--use-default-exceptions",
+        action="store_true",
+        help="Merge the seeded historical DEFAULT_EXCEPTIONS into this run.",
     )
     return parser
 
