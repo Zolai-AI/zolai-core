@@ -15,7 +15,7 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-MASTER = "data/dictionary/processed/dict_master_v1.jsonl"
+MASTER = "data/dictionary/processed/dict_canonical_v1.jsonl"
 
 def load_entries():
     entries = []
@@ -97,7 +97,7 @@ def build_vocab_pages(entries):
 
         out = out_dir / f"vocab_{letter}.md"
         header = f"# Zolai Vocabulary — {letter.upper()}\n\n"
-        header += f"> {len(words)} entries | Generated from dict_master_v1.jsonl\n\n"
+        header += f"> {len(words)} entries | Generated from dict_canonical_v1.jsonl\n\n"
 
         # Group by CEFR
         by_cefr = defaultdict(list)

@@ -6,7 +6,7 @@ Also adds correct contextual meanings based on corpus evidence.
 import json
 from pathlib import Path
 
-MASTER = "data/dictionary/processed/dict_master_v1.jsonl"
+MASTER = "data/dictionary/processed/dict_canonical_v1.jsonl"
 
 # Words to remove (pure noise — apostrophe fragments, proper noun artifacts)
 REMOVE = {"'laban'"}

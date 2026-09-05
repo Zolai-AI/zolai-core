@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 
-MASTER  = "data/dictionary/processed/dict_master_v1.jsonl"
+MASTER  = "data/dictionary/processed/dict_canonical_v1.jsonl"
 CORPUS  = "data/corpus/corpus_unified_v1.jsonl"
 BIBLE_DIRS = [
     "data/corpus/bible/markdown/Parallel_Corpus/TDB77",

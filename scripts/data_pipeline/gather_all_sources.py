@@ -208,8 +208,8 @@ with open(OUT, "w") as out:
                 emit(out, rec(zo=zo, en=en, source=tag, typ="parallel", ref=ref))
 
     # ── 8. DICTIONARY ───────────────────────────────────────────────────────
-    print("8. dict_semantic_v1.jsonl ...")
-    with open(DATA / "dictionary/processed/dict_semantic_v1.jsonl") as f:
+    print("8. dict_canonical_v1.jsonl ...")
+    with open(DATA / "dictionary/processed/dict_canonical_v1.jsonl") as f:
         for line in f:
             d = json.loads(line)
             zo = d.get("zolai", "").strip()
@@ -218,8 +218,8 @@ with open(OUT, "w") as out:
             emit(out, rec(zo=zo, en=en, source="dict_semantic",
                           typ="dictionary", ref=d.get("category", "")))
 
-    print("8b. dict_unified_v1.jsonl ...")
-    with open(DATA / "dictionary/processed/dict_unified_v1.jsonl") as f:
+    print("8b. dict_canonical_v1.jsonl ...")
+    with open(DATA / "dictionary/processed/dict_canonical_v1.jsonl") as f:
         for line in f:
             d = json.loads(line)
             zo = d.get("headword", "").strip()
@@ -229,8 +229,8 @@ with open(OUT, "w") as out:
             emit(out, rec(zo=zo, en=en, source="dict_unified",
                           typ="dictionary", ref=d.get("pos", "")))
 
-    print("8c. dict_combined_v1.jsonl ...")
-    with open(DATA / "dictionary/processed/dict_combined_v1.jsonl") as f:
+    print("8c. dict_canonical_v1.jsonl ...")
+    with open(DATA / "dictionary/processed/dict_canonical_v1.jsonl") as f:
         for line in f:
             d = json.loads(line)
             zo = d.get("headword", "").strip()
@@ -240,8 +240,8 @@ with open(OUT, "w") as out:
             emit(out, rec(zo=zo, en=en, source="dict_combined",
                           typ="dictionary", ref=d.get("pos", "")))
 
-    print("8d. dict_enriched_v1.jsonl ...")
-    with open(DATA / "dictionary/processed/dict_enriched_v1.jsonl") as f:
+    print("8d. dict_canonical_v1.jsonl ...")
+    with open(DATA / "dictionary/processed/dict_canonical_v1.jsonl") as f:
         for line in f:
             d = json.loads(line)
             zo = d.get("zolai", "").strip()
@@ -250,8 +250,8 @@ with open(OUT, "w") as out:
             emit(out, rec(zo=zo, en=en, source="dict_enriched",
                           typ="dictionary", ref=d.get("category", "")))
 
-    print("8e. dict_en_zo_v1.jsonl ...")
-    with open(DATA / "dictionary/processed/dict_en_zo_v1.jsonl") as f:
+    print("8e. dict_canonical_v1.jsonl ...")
+    with open(DATA / "dictionary/processed/dict_canonical_v1.jsonl") as f:
         for line in f:
             d = json.loads(line)
             zo = d.get("zolai", "").strip()
@@ -260,8 +260,8 @@ with open(OUT, "w") as out:
             emit(out, rec(zo=zo, en=en, source="dict_en_zo",
                           typ="dictionary", ref=d.get("category", "")))
 
-    print("8f. dict_zo_tdm_v1.jsonl ...")
-    with open(DATA / "dictionary/processed/dict_zo_tdm_v1.jsonl") as f:
+    print("8f. dict_canonical_v1.jsonl ...")
+    with open(DATA / "dictionary/processed/dict_canonical_v1.jsonl") as f:
         for line in f:
             d = json.loads(line)
             zo = d.get("headword", "").strip()

@@ -60,7 +60,7 @@ def main() -> int:
     candidates = {
         "training": PROJECT_ROOT / "data" / "training" / "llm_train.jsonl",
         "parallel": PROJECT_ROOT / "data" / "parallel" / "parallel_combined_v1.jsonl",
-        "dictionary": PROJECT_ROOT / "data" / "dictionary" / "dict_unified_v1.jsonl",
+        "dictionary": PROJECT_ROOT / "data" / "dictionary" / "dict_canonical_v1.jsonl",
     }
 
     report = {

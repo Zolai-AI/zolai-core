@@ -32,7 +32,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 DATA = Path(str(Path(__file__).resolve().parents[2]) + "/data")
-OUT  = DATA / "dictionary/processed/dict_corpus_v1.jsonl"
+OUT  = DATA / "dictionary/processed/dict_canonical_v1.jsonl"
 
 # ── Grammar particles (manually verified from corpus) ─────────────────────────
 GRAMMAR = {
@@ -92,7 +92,7 @@ GRAMMAR = {
 
 print("Loading existing dict_semantic...")
 semantic = {}
-with open(DATA / "dictionary/processed/dict_semantic_v1.jsonl") as f:
+with open(DATA / "dictionary/processed/dict_canonical_v1.jsonl") as f:
     for line in f:
         d = json.loads(line)
         zo = d.get('zolai','').strip().lower()

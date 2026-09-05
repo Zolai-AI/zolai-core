@@ -4,7 +4,7 @@ import re
 import sqlite3
 
 # File paths
-JSONL_PATH = 'data/dictionary/processed/zvs_final_master_dictionary_v3.jsonl'
+JSONL_PATH = 'data/dictionary/processed/dict_canonical_v1.jsonl'
 DB_PATH = 'data/dictionary/db/zvs_master_dictionary.db'
 
 def setup_db(conn):
