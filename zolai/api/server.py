@@ -333,6 +333,44 @@ def create_app() -> FastAPI:
         files = list(bibles_dir.glob("**/*.xml")) if bibles_dir.exists() else []
         return {"status": "ok", "bible_files": len(files), "path": str(bibles_dir)}
 
+    @app.get("/bible/search")
+    async def bible_search(q: str = "", version: str = "tdb77", limit: int = 10):
+        """Search bible parallel corpora for matching verses."""
+        import json
+
+        parallel_dir = Path("/home/peter/Documents/Projects/zolai-ai/data/parallel")
+        version_map = {
+            "tdb77": "bible_parallel_tdb77_kjv.jsonl",
+            "tbr17": "bible_parallel_tbr17_kjv.jsonl",
+            "tedim2010": "bible_parallel_tedim2010_kjv.jsonl",
+        }
+        filename = version_map.get(version)
+        if not filename:
+            raise HTTPException(
+                400, f"Unknown version: {version}. Use tdb77, tbr17, or tedim2010"
+            )
+
+        filepath = parallel_dir / filename
+        if not filepath.exists():
+            raise HTTPException(404, f"Bible data not found: {filename}")
+
+        results = []
+        q_lower = q.lower()
+        with open(filepath, encoding="utf-8") as f:
+            for line in f:
+                if len(results) >= limit:
+                    break
+                try:
+                    entry = json.loads(line)
+                    zolai = entry.get("zolai", "")
+                    english = entry.get("english", "")
+                    if q_lower in zolai.lower() or q_lower in english.lower():
+                        results.append(entry)
+                except json.JSONDecodeError:
+                    continue
+
+        return {"query": q, "version": version, "count": len(results), "results": results}
+
     # --- WebSocket ---
 
     @app.websocket("/ws")
