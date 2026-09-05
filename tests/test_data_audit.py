@@ -3,7 +3,7 @@ import json
 import tempfile
 from pathlib import Path
 
-import scripts.data_audit as data_audit_mod
+import scripts.data.data_audit as data_audit_mod
 
 
 def test_detect_schema():

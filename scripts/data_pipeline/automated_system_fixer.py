@@ -12,7 +12,7 @@ class AutomatedSystemFixer:
     """Automatically fixes all detected issues."""
 
     def __init__(self):
-        self.project_root = Path("/home/peter/Documents/Projects/zolai")
+        self.project_root = Path(__file__).resolve().parent.parent.parent
         self.fixes_applied = []
         self.errors = []
 

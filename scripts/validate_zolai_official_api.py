@@ -60,7 +60,7 @@ def validate_with_official_api():
             results["translations"][story] = f"Error: {str(e)}"
 
     # Save results
-    output_file = Path("/home/peter/Documents/Projects/zolai/GEMINI_OFFICIAL_API_RESULTS.json")
+    output_file = Path(__file__).resolve().parent.parent / "GEMINI_OFFICIAL_API_RESULTS.json"
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 

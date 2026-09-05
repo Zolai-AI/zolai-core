@@ -11,7 +11,7 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 
-PROJECT_ROOT = Path('/home/peter/Documents/Projects/zolai')
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 PARALLEL_DIR = PROJECT_ROOT / 'data' / 'parallel'
 WIKI_DIR = PROJECT_ROOT / 'wiki'
 ARTIFACTS_DIR = PROJECT_ROOT / 'artifacts'

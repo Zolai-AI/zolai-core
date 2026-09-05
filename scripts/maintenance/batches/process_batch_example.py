@@ -19,7 +19,7 @@ def standardize(entry):
     return entry
 
 input_file = '/tmp/batch_22_31_raw.jsonl'
-output_file = '/home/peter/Documents/Projects/zolai/tmp/batch_22_31_perfect.jsonl'
+output_file = str(Path(__file__).resolve().parent.parent.parent / 'tmp' / 'batch_22_31_perfect.jsonl')
 
 with open(input_file, 'r') as f_in, open(output_file, 'w') as f_out:
     for line in f_in:

@@ -27,7 +27,7 @@ TRANSLATIONS = {
 
 async def validate_with_webapi():
     """Validate using gemini-webapi with proper initialization."""
-    cookies_file = Path("/home/peter/Documents/Projects/zolai/cookies.json")
+    cookies_file = Path(__file__).resolve().parent.parent / "cookies.json"
 
     if not cookies_file.exists():
         print("❌ cookies.json not found")
@@ -86,7 +86,7 @@ async def validate_with_webapi():
             results["translations"][story] = f"Error: {str(e)}"
 
     # Save results
-    output_file = Path("/home/peter/Documents/Projects/zolai/GEMINI_WEBAPI_RESULTS.json")
+    output_file = Path(__file__).resolve().parent.parent / "GEMINI_WEBAPI_RESULTS.json"
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 

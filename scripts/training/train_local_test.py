@@ -25,9 +25,9 @@ BATCH_SIZE = 8
 MAX_LENGTH = 256
 
 # Load datasets
-TRAIN_FILE = "/home/peter/Documents/Projects/zolai/data/training/llm_train.jsonl"
-VAL_FILE = "/home/peter/Documents/Projects/zolai/data/training/llm_val.jsonl"
+TRAIN_FILE = str(Path(__file__).resolve().parent.parent.parent / 'data' / 'training' / 'llm_train.jsonl')
 
+VAL_FILE = str(Path(__file__).resolve().parent.parent.parent / 'data' / 'training' / 'llm_val.jsonl')
 def load_dataset(filepath, max_samples=10000):
     texts = []
     with open(filepath, "r") as f:

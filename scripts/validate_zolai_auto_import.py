@@ -25,7 +25,7 @@ TRANSLATIONS = {
 
 async def validate_with_cookies():
     """Validate using cookies.json."""
-    cookies_file = Path("/home/peter/Documents/Projects/zolai/cookies.json")
+    cookies_file = Path(__file__).resolve().parent.parent / "cookies.json"
 
     if not cookies_file.exists():
         print("❌ cookies.json not found in project root")
@@ -70,7 +70,7 @@ async def validate_with_cookies():
             results["translations"][story] = f"Error: {str(e)}"
 
     # Save results
-    output_file = Path("/home/peter/Documents/Projects/zolai/GEMINI_VALIDATION_RESULTS.json")
+    output_file = Path(__file__).resolve().parent.parent / "GEMINI_VALIDATION_RESULTS.json"
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 

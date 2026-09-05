@@ -26,13 +26,13 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(name)s] %(levelname)s: %(message)s',
     handlers=[
-        logging.FileHandler('/home/peter/Documents/Projects/zolai/artifacts/learning_log.txt'),
+        logging.FileHandler(str(PROJECT_ROOT / 'artifacts' / 'learning_log.txt')),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger('Orchestrator')
 
-PROJECT_ROOT = Path('/home/peter/Documents/Projects/zolai')
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 WIKI_DIR = PROJECT_ROOT / 'wiki'
 DATA_DIR = PROJECT_ROOT / 'data'
 CORPUS_DIR = DATA_DIR / 'corpus' / 'texts'

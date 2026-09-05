@@ -73,7 +73,7 @@ def scan_for_secrets(root: Path) -> dict:
     return findings
 
 if __name__ == "__main__":
-    root = Path("/home/peter/Documents/Projects/zolai")
+    root = Path(__file__).resolve().parent.parent.parent
 
     print("🔐 Quick Security Audit")
     print("=" * 50)
