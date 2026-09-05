@@ -29,9 +29,6 @@ import os
 import time
 from pathlib import Path
 
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
-os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
-
 REPO_ROOT = Path(__file__).resolve().parents[3]  # scripts/data/ → zolai-core
 WIKI_ROOT = REPO_ROOT.parent / "zolai-wiki"
 DATA_ROOT = REPO_ROOT.parent / "data"
@@ -208,6 +205,7 @@ def main():
     ap.add_argument("--model", default=MODEL_NAME, help="Sentence-transformer model")
     ap.add_argument("--data-dir", default=None, help="Data root (default: ../data or /kaggle/input/zolai-rag-data)")
     ap.add_argument("--sources", default="wiki,dictionary,parallel,bible", help="Comma-separated sources to include")
+    ap.add_argument("--output-dir", default=None, help="Override output directory (default: <repo>/data/knowledge)")
     args = ap.parse_args()
 
     import torch
@@ -223,17 +221,20 @@ def main():
     else:
         data_dir = DATA_ROOT
 
+    # Resolve output directory
+    out_dir = Path(args.output_dir) if args.output_dir else DATA_KNOWLEDGE
+
     print(f"Device: {device}, Batch: {batch_size}, Model: {args.model}")
     print(f"Data dir: {data_dir}")
     print(f"Sources: {', '.join(sorted(sources))}")
-    print(f"Output: {DATA_KNOWLEDGE}")
+    print(f"Output: {out_dir}")
 
     t0 = time.time()
     model = SentenceTransformer(args.model, device=device)
     print(f"Model loaded in {time.time()-t0:.1f}s")
 
     # Load existing IDs for resume
-    out_path = DATA_KNOWLEDGE / "knowledge_vectors.jsonl"
+    out_path = out_dir / "knowledge_vectors.jsonl"
     existing_ids: set[str] = set()
     existing_count = 0
     if args.resume and out_path.exists():
@@ -338,7 +339,7 @@ def main():
     # Embed + write
     print("Embedding + writing...", flush=True)
     t2 = time.time()
-    DATA_KNOWLEDGE.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
     mode = "a" if args.resume and existing_count > 0 else "w"
     total = 0
     with open(out_path, mode) as f:
