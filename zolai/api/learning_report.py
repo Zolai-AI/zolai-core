@@ -36,6 +36,7 @@ class LearningReport:
     def generate_text_report(self) -> str:
         """Generate human-readable progress report."""
         report = self.generate_session_report()
+        grammar_stats = self.get_grammar_stats()
 
         lines = [
             "# Zolai AI Learning Report",
@@ -66,7 +67,21 @@ class LearningReport:
             for rule, count in report['corrections']['by_rule'].items():
                 lines.append(f"- {rule}: {count}")
 
+        lines.extend([
+            "",
+            "## Grammar",
+            f"- Rules learned: {grammar_stats['rules_learned']}",
+            f"- Corrections made: {grammar_stats['corrections_made']}",
+        ])
+
         return "\n".join(lines)
+
+    def get_grammar_stats(self) -> dict:
+        """Get grammar learning statistics."""
+        return {
+            'rules_learned': len([p for p in self.memory.l4.patterns if p['type'] == 'grammar_rule']),
+            'corrections_made': len([p for p in self.memory.l4.patterns if p['type'] == 'correction']),
+        }
 
     def save_report(self):
         """Save report to file."""

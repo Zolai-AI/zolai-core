@@ -270,6 +270,10 @@ class MemoryLayers:
         self.l3.update(original, False, f"Corrected to: {corrected}")
         self.l3.update(corrected, True, f"Correct form of: {original}")
 
+    def add_grammar_rule(self, rule_name: str, rule: dict):
+        """Add a grammar rule to cross-session memory."""
+        self.l4.add_pattern('grammar_rule', rule_name, confidence=1.0)
+
     def get_stats(self) -> dict:
         return {
             'l1_turns': len(self.l1.turns),
