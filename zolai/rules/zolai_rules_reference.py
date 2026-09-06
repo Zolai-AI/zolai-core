@@ -51,6 +51,41 @@ class ZolaiRules:
         'leh': 'and/if',
     }
 
+    # Particle grammar rules — how particles change word meaning
+    PARTICLE_RULES = {
+        'na': {
+            'as_possessive': 'your (2nd person singular)',
+            'as_noun_maker': 'makes abstract nouns from verbs/adjectives',
+            'examples': {
+                'lungdam': 'thank you (verb)',
+                'lungdam na': 'gratitude (noun)',
+                'kum': 'year',
+                'kum na': 'age',
+                'lawm': 'friend',
+                'lawm na': 'friendship',
+                'dam': 'healthy',
+                'dam na': 'health',
+            }
+        },
+    }
+
+    # Correct greeting/usage — what to say vs what NOT to say
+    CORRECT_GREETINGS = {
+        'ka dam hi': 'I am well',
+        'lungdam': 'thank you (when thanking someone)',
+        'lungdam na': 'gratitude (the concept, NOT for thanking)',
+        'lungdam mahmah': 'thank you very much',
+    }
+
+    # Greeting usage warnings — common mistakes
+    GREETING_WARNINGS = {
+        'lungdam na': {
+            'wrong_for': 'thanking someone',
+            'reason': '"na" makes it a noun (gratitude), not a greeting',
+            'correct': 'Use "Lungdam!" when thanking someone',
+        },
+    }
+
     # Pronouns
     PRONOUNS = {
         'ka': '1st person singular (I/my)',
@@ -78,6 +113,8 @@ class ZolaiRules:
             "5. Negation: lo/general, kei/before verb, si/imperative\n"
             "6. Questions: hiam at end\n"
             "7. Possessive: ka(my), na(your), a(his/her)\n"
+            "8. 'na' particle: possessive (na=your) or noun-maker (lungdam=thank, lungdam na=gratitude)\n"
+            "9. Greetings: Say 'Lungdam!' (NOT 'Lungdam na!') when thanking someone\n"
         )
 
     @classmethod
