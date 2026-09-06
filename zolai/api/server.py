@@ -417,6 +417,115 @@ def create_app() -> FastAPI:
             "index_path": str(config.paths.data_knowledge / "knowledge_vectors.jsonl"),
         }
 
+    # === Zolai Bilingual Chat ===
+
+    class ZolaiChatRequest(BaseModel):
+        message: str
+        session_id: str = "default"
+        model: str = DEFAULT_MODEL
+
+    class ZolaiChatResponse(BaseModel):
+        zolai_response: str
+        english_gloss: str = ""
+        context_source: str = ""
+        zvs_compliant: bool = True
+        vocabulary: list[str] = []
+
+    @app.post("/chat/zolai", response_model=ZolaiChatResponse)
+    async def zolai_chat(req: ZolaiChatRequest):
+        """Zolai bilingual chat with RAG context injection."""
+        from .conversation_memory import get_conversation_memory
+        from .rag_context import build_zolai_context
+        from .zvs_checker import check_zvs_compliance
+
+        memory = get_conversation_memory()
+
+        # Build RAG context
+        rag_context = build_zolai_context(req.message)
+
+        # Get conversation history
+        history = memory.get_history(req.session_id)
+        history_text = ""
+        if history:
+            turns = [f"{t['role']}: {t['text'][:100]}" for t in history[-3:]]
+            history_text = "Previous conversation:\n" + "\n".join(turns) + "\n\n"
+
+        # Bilingual system prompt with context
+        bilingual_prompt = (
+            "You are a Zolai (Tedim) language teacher and conversation partner.\n\n"
+            "RULES:\n"
+            "1. ALWAYS respond in Zolai first, then provide English gloss\n"
+            "2. Use ZVS 2018 orthography: pasian (NOT pathian), gam (NOT ram), "
+            "tapa (NOT fapa), topa (NOT bawipa), kumpipa (NOT siangpahrang), "
+            "tua (NOT cu/cun), chuak (NOT suah), suahtakna (NOT zalenna), "
+            "nuntakna (NOT nunnak)\n"
+            "3. Use SOV word order\n"
+            "4. Use ergative 'in' for transitive subjects\n"
+            "5. Be encouraging and helpful\n"
+            "6. If you don't know a word, say so honestly — don't guess\n\n"
+            f"{history_text}"
+            f"CONTEXT FROM DICTIONARY AND BIBLE:\n{rag_context}\n\n"
+            "RESPONSE FORMAT:\n"
+            "Zolai: [your response in Zolai]\n"
+            "English: [English translation]\n"
+        )
+
+        # Call Ollama
+        messages = [ChatMessage(role="user", content=req.message)]
+        prompt = build_prompt(messages, bilingual_prompt)
+
+        try:
+            async with httpx.AsyncClient(timeout=120) as client:
+                resp = await client.post(
+                    f"{OLLAMA_URL}/api/generate",
+                    json={
+                        "model": req.model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "options": {"temperature": 0.7, "num_predict": 512},
+                    },
+                )
+                data = resp.json()
+                raw_response = data.get("response", "").strip()
+        except Exception as e:
+            raw_response = (
+                "Sorry, I cannot reach the language model right now. "
+                f"Error: {e}"
+            )
+
+        # Check ZVS compliance
+        zvs_result = check_zvs_compliance(raw_response)
+        final_response = (
+            zvs_result['corrected_text']
+            if not zvs_result['is_compliant']
+            else raw_response
+        )
+
+        # Extract English gloss (look for "English:" line)
+        english_gloss = ""
+        for line in final_response.split("\n"):
+            if line.strip().startswith("English:"):
+                english_gloss = line.replace("English:", "").strip()
+                break
+
+        # Extract vocabulary used
+        from .rag_context import get_rag_context
+        rag = get_rag_context()
+        vocabulary = rag.extract_zolai_words(req.message)
+
+        # Save to memory
+        memory.add_turn(req.session_id, "user", req.message)
+        memory.add_turn(req.session_id, "assistant", final_response)
+        memory.add_vocabulary(req.session_id, vocabulary)
+
+        return ZolaiChatResponse(
+            zolai_response=final_response,
+            english_gloss=english_gloss,
+            context_source=rag_context[:200] if rag_context else "No context",
+            zvs_compliant=zvs_result['is_compliant'],
+            vocabulary=vocabulary,
+        )
+
     # --- WebSocket ---
 
     @app.websocket("/ws")
