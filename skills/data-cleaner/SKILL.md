@@ -29,7 +29,7 @@ python pipelines/clean.py -i raw/ -o clean/
 ### Step 4: Quality Check
 - Verify UTF-8 encoding
 - Check minimum length
-- No HTML残留
+- No HTML residue
 
 ## Output
 Save cleaned data to `clean/monolingual/` or `clean/bilingual/`
