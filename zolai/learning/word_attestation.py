@@ -22,7 +22,6 @@ class WordAttestation:
         self.dict_words: set[str] = set()
         self.corpus_words: set[str] = set()
         self._words: set[str] = set()
-        self.glosbe_words: set[str] = set()
         self._loaded = False
 
     def _ensure_loaded(self) -> None:
