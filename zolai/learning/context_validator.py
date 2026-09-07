@@ -5,7 +5,6 @@ CRITICAL: Grammar correctness ≠ Context correctness.
 The AI must learn from real context (Bible), not isolated sentences.
 """
 import json
-from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
@@ -16,59 +15,34 @@ class ContextValidator:
     """Validate if sentences make sense together in context."""
 
     def __init__(self):
-        self.bible_contexts: dict[str, list[str]] = defaultdict(list)
+        self.bible_verses: list[dict] = []
         self.conversation_history: list[dict] = []
         self._load_bible_contexts()
 
     def _load_bible_contexts(self):
-        """Load Bible passages as context examples."""
+        """Load Bible verses as context."""
         bible_path = DATA_DIR / "bible" / "parallel_corpus_v1.jsonl"
         if not bible_path.exists():
             return
 
-        # Group verses by book+chapter for context
-        current_ref = None
-        current_passage = []
-
-        with open(bible_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                try:
-                    entry = json.loads(line)
-                    zo = entry.get('zo_tdb77') or ''
-                    ref = entry.get('ref', '')
-
-                    if not zo.strip():
-                        continue
-
-                    # Extract book+chapter
-                    parts = ref.split()
-                    if len(parts) >= 1:
-                        book_chapter = ' '.join(parts[:2]) if len(parts) > 1 else parts[0]
-
-                        # If same chapter, add to passage
-                        if book_chapter == current_ref:
-                            current_passage.append({
+        try:
+            with open(bible_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line)
+                        zo = (entry.get('zo_tdb77') or '').strip()
+                        en = (entry.get('en_kJV') or '').strip()
+                        ref = entry.get('ref', '')
+                        if zo and ref:
+                            self.bible_verses.append({
                                 'ref': ref,
                                 'zolai': zo,
-                                'english': entry.get('en_kJV') or '',
+                                'english': en,
                             })
-                        else:
-                            # Save previous passage if 2+ verses
-                            if len(current_passage) >= 2:
-                                self.bible_contexts[current_ref] = current_passage
-                            # Start new passage
-                            current_ref = book_chapter
-                            current_passage = [{
-                                'ref': ref,
-                                'zolai': zo,
-                                'english': entry.get('en_kJV') or '',
-                            }]
-                except (json.JSONDecodeError, KeyError, TypeError):
-                    continue
-
-        # Save last passage
-        if len(current_passage) >= 2:
-            self.bible_contexts[current_ref] = current_passage
+                    except json.JSONDecodeError:
+                        continue
+        except Exception:
+            pass
 
     def add_to_conversation(self, role: str, text: str):
         """Add a turn to conversation history."""
@@ -118,18 +92,21 @@ class ContextValidator:
         }
 
     def get_relevant_passage(self, text: str) -> Optional[dict]:
-        """Find a Bible passage relevant to the text."""
+        """Find a Bible verse relevant to the text."""
         text_lower = text.lower()
 
-        # Search for passage with matching words
-        for ref, passage in self.bible_contexts.items():
-            for verse in passage:
-                if any(word in verse['zolai'].lower() for word in text_lower.split() if len(word) > 3):
-                    return {
-                        'reference': ref,
-                        'verses': passage,
-                        'relevance': 'high',
-                    }
+        # Search for verse with matching words
+        for verse in self.bible_verses:
+            if any(
+                word in verse['zolai'].lower()
+                for word in text_lower.split()
+                if len(word) > 3
+            ):
+                return {
+                    'reference': verse['ref'],
+                    'verses': [verse],
+                    'relevance': 'high',
+                }
 
         return None
 
@@ -141,7 +118,7 @@ class ContextValidator:
         # Validate context
         validation = self.validate_context(user_input)
 
-        # Find relevant passage
+        # Find relevant verse
         passage = self.get_relevant_passage(user_input)
 
         # Build response
@@ -158,7 +135,7 @@ class ContextValidator:
     def get_stats(self) -> dict:
         """Get context validation statistics."""
         return {
-            'bible_passages': len(self.bible_contexts),
+            'bible_verses': len(self.bible_verses),
             'conversation_turns': len(self.conversation_history),
         }
 

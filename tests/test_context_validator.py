@@ -11,8 +11,15 @@ class TestContextValidator:
     def test_init_loads(self):
         validator = ContextValidator()
         # Should not crash even if bible data missing
-        assert isinstance(validator.bible_contexts, dict)
+        assert isinstance(validator.bible_verses, list)
         assert isinstance(validator.conversation_history, list)
+
+    def test_bible_verses_loaded(self):
+        validator = ContextValidator()
+        # If parallel_corpus_v1.jsonl exists, should load thousands of verses
+        stats = validator.get_stats()
+        assert isinstance(stats['bible_verses'], int)
+        assert isinstance(stats['conversation_turns'], int)
 
     def test_add_to_conversation(self):
         validator = ContextValidator()
@@ -69,7 +76,7 @@ class TestContextValidator:
     def test_get_stats(self):
         validator = ContextValidator()
         stats = validator.get_stats()
-        assert 'bible_passages' in stats
+        assert 'bible_verses' in stats
         assert 'conversation_turns' in stats
-        assert isinstance(stats['bible_passages'], int)
+        assert isinstance(stats['bible_verses'], int)
         assert isinstance(stats['conversation_turns'], int)

@@ -18,6 +18,7 @@ class WordAttestation:
         self.bible_words: set[str] = set()
         self.dict_words: set[str] = set()
         self.corpus_words: set[str] = set()
+        self._words: set[str] = set()
         self._load_data()
 
     def _load_data(self) -> None:
@@ -61,6 +62,45 @@ class WordAttestation:
                     except (json.JSONDecodeError, AttributeError):
                         continue
 
+        #  corpus words
+        self._load_corpus()
+
+        #  trilingual dictionary words
+        self._load_()
+
+    def _load_corpus(self) -> None:
+        """Load corpus words from  data."""
+        corpus_dir = DATA_DIR / "online" / "-corpus"
+        if not corpus_dir.exists():
+            return
+        for txt_file in corpus_dir.glob("zomi_clean_p*.txt"):
+            try:
+                with open(txt_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        words = line.strip().split()
+                        self.corpus_words.update(w.lower() for w in words if len(w) > 1)
+            except Exception:
+                continue
+
+    def _load_(self) -> None:
+        """Load  trilingual dictionary."""
+        _path = DATA_DIR / "online" / "-zolai-dictionary" / "words.json"
+        if not _path.exists():
+            return
+        try:
+            with open(_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    words_list = data.get("words", [])
+                    if isinstance(words_list, list):
+                        for entry in words_list:
+                            if isinstance(entry, dict):
+                                word = entry.get("word", "").strip().lower()
+                                if word:
+                                    self._words.add(word)
+        except Exception:
+            pass
+
     def attest_word(self, word: str) -> dict:
         """Check if a word is attested in any source."""
         word_lower = word.lower().strip()
@@ -68,8 +108,9 @@ class WordAttestation:
         in_bible = word_lower in self.bible_words
         in_dict = word_lower in self.dict_words
         in_corpus = word_lower in self.corpus_words
+        in_ = word_lower in self._words
 
-        sources = sum([in_bible, in_dict, in_corpus])
+        sources = sum([in_bible, in_dict, in_corpus, in_])
         if sources >= 2:
             confidence = "VERIFIED"
         elif sources == 1:
@@ -83,6 +124,7 @@ class WordAttestation:
             "in_bible": in_bible,
             "in_dict": in_dict,
             "in_corpus": in_corpus,
+            "in_": in_,
             "source_count": sources,
         }
 
@@ -170,6 +212,7 @@ class WordAttestation:
             "bible_words": len(self.bible_words),
             "dict_words": len(self.dict_words),
             "corpus_words": len(self.corpus_words),
+            "_words": len(self._words),
         }
 
 
