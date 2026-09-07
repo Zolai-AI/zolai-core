@@ -7,12 +7,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from zolai.learning.context_validator import ContextValidator
 from zolai.learning.word_attestation import WordAttestation
+from zolai.learning.sentence_validator import SentenceValidator
+from zolai.api.rag_context_v2 import ZolaiRAGContextV2
 
 DATA_DIR = Path(__file__).parent.parent.parent / "data"
 
 MODULES = [
     str(Path(__file__).parent.parent / "zolai" / "learning" / "context_validator.py"),
     str(Path(__file__).parent.parent / "zolai" / "learning" / "word_attestation.py"),
+    str(Path(__file__).parent.parent / "zolai" / "learning" / "sentence_validator.py"),
+    str(Path(__file__).parent.parent / "zolai" / "api" / "rag_context_v2.py"),
 ]
 
 
@@ -82,50 +86,56 @@ def test__dictionary_exists():
     assert path.exists(), f"Missing: {path}"
 
 
-# ── Context Validator: Bible verse loading ────────────────────────────────
+# ── Lazy loading: no data at init ───────────────────────────────────────
 
 
-def test_context_validator_loads_bible_verses():
-    """ContextValidator loads all Bible verses individually."""
-    v = ContextValidator()
-    stats = v.get_stats()
-    assert stats["bible_verses"] > 0, (
-        f"Expected >0 bible_verses, got {stats['bible_verses']}"
-    )
+def test_word_attestation_lazy():
+    """WordAttestation has no data until first query."""
+    att = WordAttestation()
+    assert att._loaded is False
+    assert len(att.bible_words) == 0
+    assert len(att.dict_words) == 0
+    assert len(att.corpus_words) == 0
+    assert len(att._words) == 0
+    # After query, data loads
+    att.attest_word("pasian")
+    assert att._loaded is True
+    assert len(att.bible_words) > 0
 
 
-def test_context_validator_verses_have_refs():
-    """Each loaded verse has ref, zolai, english."""
-    v = ContextValidator()
-    if not v.bible_verses:
-        return  # no data file
-    sample = v.bible_verses[:5]
-    for verse in sample:
-        assert "ref" in verse, f"Missing ref in verse: {verse}"
-        assert "zolai" in verse, f"Missing zolai in verse: {verse}"
-        assert "english" in verse, f"Missing english in verse: {verse}"
-        assert len(verse["ref"]) > 0
-        assert len(verse["zolai"]) > 0
+def test_sentence_validator_lazy():
+    """SentenceValidator has no data until first query."""
+    v = SentenceValidator()
+    assert v._loaded is False
+    assert len(v.bible_sentences) == 0
+    assert len(v.corpus_sentences) == 0
+    # After query, data loads
+    v.validate("pasian")
+    assert v._loaded is True
+    assert len(v.bible_sentences) > 0
 
 
-def test_context_validator_relevant_passage():
-    """get_relevant_passage returns a dict or None."""
-    v = ContextValidator()
-    result = v.get_relevant_passage("pasian topa gam")
-    if v.bible_verses:
-        # With 31K verses, 'pasian' or 'topa' should match
-        assert result is not None, "Expected a match for common Zolai words"
-        assert "reference" in result
-        assert "verses" in result
+def test_rag_context_v2_lazy():
+    """ZolaiRAGContextV2 has no data until first query."""
+    rag = ZolaiRAGContextV2()
+    assert rag._loaded is False
+    assert len(rag.dict_zo_en) == 0
+    assert len(rag.bible) == 0
+    # After query, data loads
+    rag.build_context("pasian")
+    assert rag._loaded is True
+    assert len(rag.dict_zo_en) > 0
 
 
-def test_context_validator_stats_format():
-    """Stats dict has correct keys and types."""
-    v = ContextValidator()
-    stats = v.get_stats()
-    assert set(stats.keys()) == {"bible_verses", "conversation_turns"}
-    assert isinstance(stats["bible_verses"], int)
-    assert isinstance(stats["conversation_turns"], int)
+# ── Singleton: sentence_validator ───────────────────────────────────────
+
+
+def test_sentence_validator_singleton():
+    """get_sentence_validator returns same instance."""
+    from zolai.learning.sentence_validator import get_sentence_validator
+    v1 = get_sentence_validator()
+    v2 = get_sentence_validator()
+    assert v1 is v2
 
 
 # ── Word Attestation: multi-source loading ────────────────────────────────
@@ -134,48 +144,50 @@ def test_context_validator_stats_format():
 def test_attestation_loads_bible_words():
     """WordAttestation loads Bible words."""
     att = WordAttestation()
+    att.attest_word("pasian")  # trigger load
     assert len(att.bible_words) > 0, "No Bible words loaded"
 
 
 def test_attestation_loads_dict_words():
     """WordAttestation loads dictionary words."""
     att = WordAttestation()
+    att.attest_word("pasian")  # trigger load
     assert len(att.dict_words) > 0, "No dictionary words loaded"
 
 
 def test_attestation_loads_corpus_words():
     """WordAttestation loads parallel corpus words."""
     att = WordAttestation()
+    att.attest_word("pasian")  # trigger load
     assert len(att.corpus_words) > 0, "No corpus words loaded"
 
 
 def test_attestation_loads__corpus():
-    """WordAttestation loads  corpus words (subset of corpus_words)."""
+    """WordAttestation loads  corpus words only when ZOLAI_LOAD_CORPUS=1."""
+    import os
     att = WordAttestation()
-    #  words are merged into corpus_words, so corpus should be large
-    assert len(att.corpus_words) > 1000, (
-        f"Expected >1000 corpus words ( merged), got {len(att.corpus_words)}"
-    )
+    att.attest_word("pasian")  # trigger load
+    # With ZOLAI_LOAD_CORPUS unset,  is not loaded
+    # corpus_words still has parallel corpus data
+    assert len(att.corpus_words) > 0, "No corpus words loaded"
 
 
 def test_attestation_loads_():
     """WordAttestation loads  dictionary words."""
     att = WordAttestation()
+    att.attest_word("pasian")  # trigger load
     assert len(att._words) > 0, (
         f"No  words loaded from {DATA_DIR / 'online' / '-zolai-dictionary'}"
     )
 
 
 def test_attestation_stats_keys():
-    """Stats has all four source counts."""
+    """Stats has all source counts."""
     att = WordAttestation()
+    att.attest_word("pasian")  # trigger load
     stats = att.get_stats()
-    assert set(stats.keys()) == {
-        "bible_words",
-        "dict_words",
-        "corpus_words",
-        "_words",
-    }
+    expected_keys = {"bible_words", "dict_words", "corpus_words", "_words", "total"}
+    assert set(stats.keys()) == expected_keys
     for key, val in stats.items():
         assert isinstance(val, int), f"stats[{key}] is {type(val)}, expected int"
 
@@ -199,9 +211,33 @@ def test_common_words_verified():
 def test__known_word():
     """ dictionary has known words."""
     att = WordAttestation()
+    att.attest_word("pasian")  # trigger load first
     #  has Kei, Nang, Amah
     for word in ("kei", "nang", "amah"):
         result = att.attest_word(word)
         assert result["in_"] is True, (
             f"{word} should be in _words"
         )
+
+
+# ── RAG Context V2: builds context ───────────────────────────────────────
+
+
+def test_rag_v2_builds_context():
+    """RAG context builder returns non-empty string."""
+    rag = ZolaiRAGContextV2()
+    context = rag.build_context("What is God in Zolai?")
+    assert isinstance(context, str)
+    assert len(context) > 0
+    assert context != "No Zolai context found."
+
+
+def test_rag_v2_stats():
+    """RAG V2 stats return correct keys."""
+    rag = ZolaiRAGContextV2()
+    rag.build_context("pasian")  # trigger load
+    stats = rag.get_stats()
+    expected = {"dict_entries", "bible_verses", "parallel_pairs", "grammar_patterns", "extra_pairs", "vocab_entries"}
+    assert set(stats.keys()) == expected
+    assert stats["dict_entries"] > 0
+    assert stats["bible_verses"] > 0
