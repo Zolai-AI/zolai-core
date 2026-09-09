@@ -1,10 +1,11 @@
 """Zolai Knowledge Brain — pure-Python RAG layer (embeddings-first, no fine-tuning).
 
 Modules:
-  ingest  : chunk wiki/*.md (+ optional txt) into newline-delimited JSONL with embeddings
-  retrieve: cosine retrieval over the JSONL index (no external vector DB required)
-  ngram   : word-frequency + bigram prediction tables from wordlists/dictionary
-  pdf     : PDF OCR ingestion into the same vector index
+  ingest      : chunk wiki/*.md (+ optional txt) into newline-delimited JSONL with embeddings
+  retrieve    : cosine retrieval over the JSONL index (no external vector DB required)
+  ngram       : word-frequency + bigram prediction tables from wordlists/dictionary
+  pdf         : PDF OCR ingestion into the same vector index
+  rag_contract: structured layered retrieval (vocabulary, grammar, phrases, Bible, ZVS)
 
 Primary artifact layout (gitignored, local-only):
   data/knowledge/*.jsonl   — indexed knowledge chunks + embeddings + ngram tables
@@ -18,6 +19,7 @@ from .ngram import (
     suggest_corrections,
 )
 from .pdf import extract_pdf_text, iter_ocr_markdown
+from .rag_contract import Evidence, EvidencePack, ZolaiRAG, retrieve as rag_retrieve
 from .retrieve import format_context, load_index, retrieve
 
 __all__ = [
@@ -34,4 +36,8 @@ __all__ = [
     "predict_next",
     "predict_completion",
     "suggest_corrections",
+    "Evidence",
+    "EvidencePack",
+    "ZolaiRAG",
+    "rag_retrieve",
 ]
