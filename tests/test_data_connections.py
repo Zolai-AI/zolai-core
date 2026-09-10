@@ -58,8 +58,8 @@ def test_parallel_corpus_exists():
 
 
 def test_dictionary_exists():
-    """dict_zo_en_clean.jsonl exists and has data."""
-    path = DATA_DIR / "dictionary" / "processed" / "dict_zo_en_clean.jsonl"
+    """dict_zo_en_master_v1.jsonl exists and has data."""
+    path = DATA_DIR / "dictionary" / "processed" / "dict_zo_en_master_v1.jsonl"
     assert path.exists(), f"Missing: {path}"
     with open(path, "r", encoding="utf-8") as f:
         first_line = f.readline()

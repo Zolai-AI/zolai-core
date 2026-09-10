@@ -20,9 +20,9 @@ class DictCleaner:
     def clean_zo_en_dict(self, input_path: str = None, output_path: str = None) -> dict:
         """Clean ZO→EN dictionary."""
         if input_path is None:
-            input_path = DATA_DIR / "dictionary" / "processed" / "dict_zo_en_clean.jsonl"
+            input_path = DATA_DIR / "dictionary" / "processed" / "dict_zo_en_master_v1.jsonl"
         if output_path is None:
-            output_path = DATA_DIR / "dictionary" / "processed" / "dict_zo_en_clean_v2.jsonl"
+            output_path = DATA_DIR / "dictionary" / "processed" / "dict_zo_en_master_v1.jsonl"
 
         entries = []
         issues = []
