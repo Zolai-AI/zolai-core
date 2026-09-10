@@ -138,10 +138,10 @@ class ZolaiRAG:
             path = bible_dir / "parallel_corpus_v1.jsonl"
             self._bible = self._load_jsonl_list(path)
 
-        # Load vocab index
+        # Load vocab index (keyed on "headword")
         if self._vocab_index is None:
             path = bible_dir / "vocab_index_full.jsonl"
-            self._vocab_index = self._load_jsonl_index(path, "word", None)
+            self._vocab_index = self._load_jsonl_index(path, "headword", None)
 
     @staticmethod
     def _load_jsonl_index(path: Path, key: str, fallback: str | None) -> dict[str, dict]:
@@ -205,10 +205,15 @@ class ZolaiRAG:
             # ZO→EN
             if self._dict_zo_en and word in self._dict_zo_en:
                 entry = self._dict_zo_en[word]
+                en_val = entry.get(
+                    "english_clean", entry.get("english", "")
+                )
+                if isinstance(en_val, list):
+                    en_val = ", ".join(str(v) for v in en_val)
                 pack.vocabulary.append(
                     Evidence(
                         id=f"dict_zo_en:{word}",
-                        text=f"{word} = {entry.get('english', entry.get('meaning', ''))}",
+                        text=f"{word} = {en_val}",
                         source="dictionary",
                         type="vocabulary",
                         confidence=0.95,
@@ -218,10 +223,15 @@ class ZolaiRAG:
             # EN→ZO
             if self._dict_en_zo and word in self._dict_en_zo:
                 entry = self._dict_en_zo[word]
+                zo_val = entry.get(
+                    "zolai", entry.get("headword", "")
+                )
+                if isinstance(zo_val, list):
+                    zo_val = ", ".join(str(v) for v in zo_val)
                 pack.vocabulary.append(
                     Evidence(
                         id=f"dict_en_zo:{word}",
-                        text=f"{word} = {entry.get('zolai', entry.get('translation', ''))}",
+                        text=f"{word} = {zo_val}",
                         source="dictionary",
                         type="vocabulary",
                         confidence=0.95,
@@ -283,17 +293,18 @@ class ZolaiRAG:
                     if len(pack.phrases) >= 3:
                         break
 
-        # 4. Bible verse search
+        # 4. Bible verse search (data uses zo_tdb77/zo_tedim2010/en_kJV)
         if self._bible:
             for verse in self._bible[:500]:
-                zo = (verse.get("zo", "") or "").lower()
-                en = (verse.get("en", "") or "").lower()
+                zo = (verse.get("zo_tdb77") or verse.get("zo_tedim2010") or "") .lower()
+                en = (verse.get("en_kJV") or "") .lower()
                 if any(w in zo or w in en for w in words):
                     pack.bible.append(
                         Evidence(
                             id=f"bible:{verse.get('ref', '')}",
                             text=f"{verse.get('ref', '')}: "
-                            f"{verse.get('zo', '')} / {verse.get('en', '')}",
+                            f"{verse.get('zo_tdb77', '')} / "
+                            f"{verse.get('en_kJV', '')}",
                             source="bible",
                             type="verse",
                             confidence=0.75,
