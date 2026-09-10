@@ -51,7 +51,7 @@ class WordAttestation:
                     continue
 
     def _load_dict(self) -> None:
-        dict_path = DATA_DIR / "dictionary" / "processed" / "dict_zo_en_clean.jsonl"
+        dict_path = DATA_DIR / "dictionary" / "processed" / "dict_zo_en_master_v1.jsonl"
         if not dict_path.exists():
             return
         with open(dict_path, "r", encoding="utf-8") as f:
