@@ -11,10 +11,10 @@ from typing import Optional
 
 # Data paths (shared across repos)
 DATA_DIR = Path(__file__).parent.parent.parent.parent.parent / "data"
-DICT_ZO_EN = DATA_DIR / "dictionary" / "dict_zo_en_clean.jsonl"
-BIBLE_CORPUS = DATA_DIR / "bible" / "parallel_corpus.jsonl"
-WIKI_PHRASES = DATA_DIR / "wiki" / "common_phrases.json"
-GRAMMAR_PATTERNS = DATA_DIR / "wiki" / "grammar_patterns.json"
+DICT_ZO_EN = DATA_DIR / "dictionary" / "processed" / "dict_zo_en_master_v1.jsonl"
+BIBLE_CORPUS = DATA_DIR / "bible" / "parallel_corpus_v1.jsonl"
+WIKI_PHRASES = DATA_DIR / "bible" / "phrases_v1.jsonl"
+GRAMMAR_PATTERNS = DATA_DIR / "bible" / "grammar_patterns_v2.jsonl"
 
 class ZolaiRAGContext:
     """Lightweight RAG context injector for Zolai conversations."""

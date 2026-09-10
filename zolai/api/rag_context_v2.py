@@ -27,7 +27,7 @@ class ZolaiRAGContextV2:
         if self._loaded:
             return
         self._loaded = True
-        self.dict_zo_en = self._load_jsonl(DATA_DIR / "dictionary" / "processed" / "dict_zo_en_clean.jsonl")
+        self.dict_zo_en = self._load_jsonl(DATA_DIR / "dictionary" / "processed" / "dict_zo_en_master_v1.jsonl")
         self.bible = self._load_jsonl(DATA_DIR / "bible" / "parallel_corpus_v1.jsonl")
         self.parallel = self._load_jsonl(DATA_DIR / "parallel" / "zo_en_pairs_combined_v1.jsonl")
         grammar_path = DATA_DIR / "bible" / "grammar_patterns_v2.jsonl"
