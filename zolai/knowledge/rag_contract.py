@@ -108,6 +108,7 @@ class ZolaiRAG:
             "cu": "tua",
             "cun": "tua",
         }
+        self._book_knowledge: dict[str, dict] | None = None
         self._feedback: FeedbackStore | None = None
 
     def _ensure_loaded(self) -> None:
@@ -144,6 +145,21 @@ class ZolaiRAG:
         if self._vocab_index is None:
             path = bible_dir / "vocab_index_full.jsonl"
             self._vocab_index = self._load_jsonl_index(path, "headword", None)
+
+        # Load per-book knowledge
+        if self._book_knowledge is None:
+            self._book_knowledge = {}
+            book_dir = self.data_dir / "bible" / "book_knowledge"
+            if book_dir.exists():
+                for f in book_dir.glob("*.json"):
+                    if f.name == "_master_summary.json":
+                        continue
+                    try:
+                        data = json.loads(f.read_text())
+                        code = data.get("book", f.stem)
+                        self._book_knowledge[code.upper()] = data
+                    except Exception:
+                        continue
 
     @staticmethod
     def _load_jsonl_index(path: Path, key: str, fallback: str | None) -> dict[str, dict]:
@@ -353,6 +369,124 @@ class ZolaiRAG:
                         },
                     )
                 )
+
+        # 6. Per-book knowledge (if a Bible book is referenced)
+        BOOK_CODES: dict[str, str] = {
+            "gen": "GENESIS", "exo": "EXODUS", "lev": "LEVITICUS",
+            "num": "NUMBERS", "deu": "DEUTERONOMY", "jos": "JOSHUA",
+            "jdg": "JUDGES", "rut": "RUTH", "1sa": "1SAMUEL",
+            "2sa": "2SAMUEL", "1ki": "1KINGS", "2ki": "2KINGS",
+            "1ch": "1CHRONICLES", "2ch": "2CHRONICLES",
+            "ezr": "EZRA", "neh": "NEHEMIAH", "est": "ESTHER",
+            "job": "JOB", "psa": "PSALMS", "pro": "PROVERBS",
+            "ecc": "ECCLESIASTES", "sng": "SONGOFSOLOMON",
+            "isa": "ISAIAH", "jer": "JEREMIAH",
+            "lam": "LAMENTATIONS", "ezk": "EZEKIEL",
+            "dan": "DANIEL", "hos": "HOSEA", "jol": "JOEL",
+            "amo": "AMOS", "oba": "OBADIAH", "jon": "JONAH",
+            "mic": "MICAH", "nah": "NAHUM", "hab": "HABAKKUK",
+            "zep": "ZEPHANIAH", "hag": "HAGGAI",
+            "zec": "ZECHARIAH", "mal": "MALACHI",
+            "mat": "MATTHEW", "mrk": "MARK", "luk": "LUKE",
+            "jhn": "JOHN", "act": "ACTS", "rom": "ROMANS",
+            "1co": "1CORINTHIANS", "2co": "2CORINTHIANS",
+            "gal": "GALATIANS", "eph": "EPHESIANS",
+            "php": "PHILIPPIANS", "col": "COLOSSIANS",
+            "1th": "1THESSALONIANS", "2th": "2THESSALONIANS",
+            "1ti": "1TIMOTHY", "2ti": "2TIMOTHY", "tit": "TITUS",
+            "phm": "PHILEMON", "heb": "HEBREWS", "jas": "JAMES",
+            "1pe": "1PETER", "2pe": "2PETER", "1jn": "1JOHN",
+            "2jn": "2JOHN", "3jn": "3JOHN", "jud": "JUDE",
+            "rev": "REVELATION",
+        }
+        BOOK_NAMES_TO_CODES = {
+            v.lower(): k for k, v in BOOK_CODES.items()
+        }
+
+        if self._book_knowledge:
+            # Detect book reference in query
+            detected_book: str | None = None
+            for word in words:
+                if word.upper() in self._book_knowledge:
+                    detected_book = word.upper()
+                    break
+                if word in BOOK_NAMES_TO_CODES:
+                    detected_book = BOOK_NAMES_TO_CODES[
+                        word
+                    ].upper()
+                    break
+            # Also check for patterns like "genesis" or "psalms"
+            for name, code in BOOK_NAMES_TO_CODES.items():
+                if name in query_lower:
+                    detected_book = code.upper()
+                    break
+
+            if (
+                detected_book
+                and detected_book in self._book_knowledge
+            ):
+                book = self._book_knowledge[detected_book]
+                # Add book overview
+                pack.context.append(
+                    Evidence(
+                        id=f"book:{detected_book}",
+                        text=f"{book.get('name', detected_book)}: "
+                        f"{book.get('verses', 0)} verses, "
+                        f"{book.get('unique_words', 0)} unique words",
+                        source="book_knowledge",
+                        type="book_overview",
+                        confidence=0.95,
+                        metadata={"book": book},
+                    )
+                )
+                # Add top words for this book
+                top_words = book.get(
+                    "top_50_words", []
+                )[:10]
+                if top_words:
+                    word_list = ", ".join(
+                        f"{w}({c})"
+                        for w, c in top_words
+                    )
+                    pack.context.append(
+                        Evidence(
+                            id=f"book_words:{detected_book}",
+                            text=(
+                                f"Top words in "
+                                f"{book.get('name', detected_book)}: "
+                                f"{word_list}"
+                            ),
+                            source="book_knowledge",
+                            type="book_vocabulary",
+                            confidence=0.90,
+                            metadata={
+                                "top_words": top_words
+                            },
+                        )
+                    )
+                # Add grammar patterns for this book
+                patterns = book.get("grammar_patterns", {})
+                if patterns:
+                    pattern_list = ", ".join(
+                        f"{k}: {v}"
+                        for k, v in list(patterns.items())[:5]
+                    )
+                    pack.context.append(
+                        Evidence(
+                            id=(
+                                f"book_grammar:{detected_book}"
+                            ),
+                            text=(
+                                f"Grammar patterns in "
+                                f"{book.get('name', detected_book)}: "
+                                f"{pattern_list}"
+                            ),
+                            source="book_knowledge",
+                            type="book_grammar",
+                            confidence=0.85,
+                            metadata={"patterns": patterns},
+                        )
+                    )
 
         return pack
 
