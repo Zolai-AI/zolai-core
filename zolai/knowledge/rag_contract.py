@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import config
+from ..learning.feedback import FeedbackStore
 
 
 @dataclass
@@ -107,6 +108,7 @@ class ZolaiRAG:
             "cu": "tua",
             "cun": "tua",
         }
+        self._feedback: FeedbackStore | None = None
 
     def _ensure_loaded(self) -> None:
         """Lazy-load all data sources on first query."""
@@ -250,6 +252,26 @@ class ZolaiRAG:
                         type="vocabulary",
                         confidence=0.85,
                         metadata={"entry": entry},
+                    )
+                )
+
+        # 1b. Feedback overrides — user corrections override dict results
+        if self._feedback is None:
+            self._feedback = FeedbackStore()
+        for word in words:
+            override = self._feedback.get_override(word)
+            if override:
+                pack.vocabulary.append(
+                    Evidence(
+                        id=f"feedback:{word}",
+                        text=f"{word} = {override} (user correction)",
+                        source="feedback",
+                        type="vocabulary",
+                        confidence=0.99,
+                        metadata={
+                            "direction": "feedback_override",
+                            "corrected": override,
+                        },
                     )
                 )
 
