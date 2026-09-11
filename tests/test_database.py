@@ -1,7 +1,7 @@
-"""Tests for zolai.data database layer — 25 tests.
+"""Tests for zolai.data database layer — 30 tests.
 
 Covers: schema creation, CRUD, search, migration, export,
-round-trip, performance, and edge cases.
+round-trip, performance, edge cases, FTS5, backup/restore, health check.
 """
 
 from __future__ import annotations
@@ -11,6 +11,8 @@ import os
 import tempfile
 import time
 import threading
+from pathlib import Path
+
 from pathlib import Path
 
 import pytest
@@ -446,3 +448,109 @@ class TestModelImports:
         actual = {m.__tablename__ for m in models}
         assert actual == table_names
         assert len(MODEL_REGISTRY) == 8
+
+
+class TestFTS5:
+    def test_fts5_search_dictionary(self, tmp_db, sample_dict):
+        """26. FTS5 search finds dictionary entries."""
+        tmp_db.insert_many("dictionary", [sample_dict])
+        tmp_db.create_fts5()
+        tmp_db._populate_fts5()
+        results = tmp_db.search_text("pasian")
+        dict_results = [r for r in results if r.get("table") == "dictionary"]
+        assert len(dict_results) >= 1
+        assert dict_results[0]["zolai"] == "pasian"
+
+    def test_fts5_search_bible(self, tmp_db, sample_verse):
+        """27. FTS5 search finds Bible verses."""
+        tmp_db.insert_many("bible_verses", [sample_verse])
+        tmp_db.create_fts5()
+        tmp_db._populate_fts5()
+        results = tmp_db.search_text("heaven")
+        bible_results = [r for r in results if r.get("table") == "bible_verses"]
+        assert len(bible_results) >= 1
+
+
+class TestBackupRestore:
+    def test_backup_and_restore(self, tmp_db, sample_dict):
+        """28. Backup and restore preserves data."""
+        tmp_db.insert_many("dictionary", [sample_dict])
+        assert tmp_db.count("dictionary") == 1
+
+        # Backup
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            backup_path = Path(tmpdir) / "test_backup.db"
+            result = tmp_db.backup(backup_path)
+            assert result.exists()
+            assert result.stat().st_size > 0
+
+            # Insert more data, then restore
+            tmp_db.insert_many("dictionary", [{
+                "zolai": "gam", "english": "land",
+                "english_clean": "land", "source": "test", "pos": "noun",
+            }])
+            assert tmp_db.count("dictionary") == 2
+
+            tmp_db.restore(backup_path)
+            assert tmp_db.count("dictionary") == 1
+
+
+class TestCLIStatus:
+    def test_cli_status(self, tmp_db, sample_dict):
+        """29. CLI status command returns structured output."""
+        tmp_db.insert_many("dictionary", [sample_dict])
+        status = tmp_db.status()
+        assert "Backend: sqlite" in status
+        assert "dictionary:" in status
+        assert "Total rows:" in status
+        assert "1" in status  # at least 1 row in dictionary
+
+
+class TestHealthCheck:
+    def test_health_check(self, tmp_db, sample_dict):
+        """30. Health check returns all required fields."""
+        tmp_db.insert_many("dictionary", [sample_dict])
+        info = tmp_db.health_check()
+        assert "backend" in info
+        assert "table_counts" in info
+        assert "total_rows" in info
+        assert "db_size_bytes" in info
+        assert "db_size_human" in info
+        assert "fts5_available" in info
+        assert "query_latency_ms" in info
+        assert "tables" in info
+        assert info["backend"] == "sqlite"
+        assert isinstance(info["table_counts"], dict)
+        assert info["total_rows"] >= 1
+        assert info["query_latency_ms"] >= 0
+
+
+class TestPostgresAutoDetect:
+    def test_postgres_auto_detect_from_env(self, monkeypatch):
+        """31. ZOLAI_PG_URL env var triggers PostgreSQL manager creation."""
+        monkeypatch.setenv(
+            "ZOLAI_PG_URL",
+            "postgresql://user:pass@localhost:5432/zolai",
+        )
+        # Reset singleton so get_manager reads the env var
+        import zolai.data.database as db_mod
+        db_mod._manager = None
+        try:
+            mgr = get_manager()
+            assert mgr._db_url == "postgresql://user:pass@localhost:5432/zolai"
+            assert "postgresql" in mgr._db_url
+        finally:
+            db_mod._manager = None
+
+    def test_sqlite_default_when_no_env(self, monkeypatch):
+        """32. Without ZOLAI_PG_URL, get_manager defaults to SQLite."""
+        monkeypatch.delenv("ZOLAI_PG_URL", raising=False)
+        import zolai.data.database as db_mod
+        db_mod._manager = None
+        try:
+            mgr = get_manager()
+            assert mgr._db_url == "sqlite:///zolai.db"
+            assert mgr._db_url.startswith("sqlite")
+        finally:
+            db_mod._manager = None
