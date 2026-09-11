@@ -29,3 +29,4 @@ test-results/
 
 # ZVS scan reports
 report/zvs-scan*
+!zolai/data/
