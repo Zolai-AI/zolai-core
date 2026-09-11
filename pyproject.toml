@@ -42,6 +42,7 @@ dependencies = [
     "lxml>=5.1",
     # Database
     "sqlalchemy>=2.0",
+    "psycopg2-binary>=2.9",
     # Data processing
     "pandas>=2.0",
     "numpy>=2.4",
