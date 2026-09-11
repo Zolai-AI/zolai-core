@@ -1,0 +1,127 @@
+{"id": "qa_001", "category": "vocabulary", "input": "pasian", "expected": "God", "difficulty": "A1"}
+{"id": "qa_002", "category": "vocabulary", "input": "gam", "expected": "earth", "difficulty": "A1"}
+{"id": "qa_003", "category": "vocabulary", "input": "vantung", "expected": "heaven", "difficulty": "A1"}
+{"id": "qa_004", "category": "vocabulary", "input": "leitung", "expected": "earth", "difficulty": "A1"}
+{"id": "qa_005", "category": "vocabulary", "input": "tapa", "expected": "life", "difficulty": "A1"}
+{"id": "qa_006", "category": "vocabulary", "input": "topa", "expected": "Lord", "difficulty": "A1"}
+{"id": "qa_007", "category": "vocabulary", "input": "kumpipa", "expected": "Savior", "difficulty": "A1"}
+{"id": "qa_008", "category": "vocabulary", "input": "tui", "expected": "water", "difficulty": "A1"}
+{"id": "qa_009", "category": "vocabulary", "input": "khuavak", "expected": "light", "difficulty": "A1"}
+{"id": "qa_010", "category": "vocabulary", "input": "khuamial", "expected": "darkness", "difficulty": "A1"}
+{"id": "qa_011", "category": "vocabulary", "input": "sun", "expected": "day", "difficulty": "A1"}
+{"id": "qa_012", "category": "vocabulary", "input": "zan", "expected": "night", "difficulty": "A1"}
+{"id": "qa_013", "category": "vocabulary", "input": "ni", "expected": "sun", "difficulty": "A1"}
+{"id": "qa_014", "category": "vocabulary", "input": "mi", "expected": "person", "difficulty": "A1"}
+{"id": "qa_015", "category": "vocabulary", "input": "numei", "expected": "woman", "difficulty": "A1"}
+{"id": "qa_016", "category": "vocabulary", "input": "sing", "expected": "tree", "difficulty": "A1"}
+{"id": "qa_017", "category": "vocabulary", "input": "nek", "expected": "eat", "difficulty": "A1"}
+{"id": "qa_018", "category": "vocabulary", "input": "pai", "expected": "go", "difficulty": "A1"}
+{"id": "qa_019", "category": "vocabulary", "input": "mu", "expected": "see", "difficulty": "A1"}
+{"id": "qa_020", "category": "vocabulary", "input": "gen", "expected": "speak", "difficulty": "A1"}
+{"id": "qa_021", "category": "vocabulary", "input": "ci", "expected": "say", "difficulty": "A1"}
+{"id": "qa_022", "category": "vocabulary", "input": "bawl", "expected": "create", "difficulty": "A1"}
+{"id": "qa_023", "category": "vocabulary", "input": "piangsak", "expected": "created", "difficulty": "A1"}
+{"id": "qa_024", "category": "vocabulary", "input": "om", "expected": "exist", "difficulty": "A1"}
+{"id": "qa_025", "category": "vocabulary", "input": "hiam", "expected": "question", "difficulty": "A1"}
+{"id": "qa_026", "category": "vocabulary", "input": "kei", "expected": "not", "difficulty": "A1"}
+{"id": "qa_027", "category": "vocabulary", "input": "lo", "expected": "not", "difficulty": "A1"}
+{"id": "qa_028", "category": "vocabulary", "input": "ding", "expected": "will", "difficulty": "A1"}
+{"id": "qa_029", "category": "vocabulary", "input": "ta", "expected": "past", "difficulty": "A1"}
+{"id": "qa_030", "category": "vocabulary", "input": "zo", "expected": "completed", "difficulty": "A1"}
+{"id": "qa_031", "category": "vocabulary", "input": "lai", "expected": "book", "difficulty": "A2"}
+{"id": "qa_032", "category": "vocabulary", "input": "inn", "expected": "house", "difficulty": "A2"}
+{"id": "qa_033", "category": "vocabulary", "input": "khua", "expected": "village", "difficulty": "A2"}
+{"id": "qa_034", "category": "vocabulary", "input": "kum", "expected": "year", "difficulty": "A2"}
+{"id": "qa_035", "category": "vocabulary", "input": "ni", "expected": "two", "difficulty": "A2"}
+{"id": "qa_036", "category": "vocabulary", "input": "khat", "expected": "one", "difficulty": "A2"}
+{"id": "qa_037", "category": "vocabulary", "input": "nih", "expected": "two", "difficulty": "A2"}
+{"id": "qa_038", "category": "vocabulary", "input": "thum", "expected": "three", "difficulty": "A2"}
+{"id": "qa_039", "category": "vocabulary", "input": "li", "expected": "four", "difficulty": "A2"}
+{"id": "qa_040", "category": "vocabulary", "input": "nga", "expected": "five", "difficulty": "A2"}
+{"id": "trans_001", "category": "translation", "input": "God created the heaven and earth.", "expected": "Pasian in vantung leh leitung a piangsak hi.", "difficulty": "B1"}
+{"id": "trans_002", "category": "translation", "input": "The sun rises.", "expected": "Ni a suak hi.", "difficulty": "A2"}
+{"id": "trans_003", "category": "translation", "input": "Come in.", "expected": "Hong pai in.", "difficulty": "A1"}
+{"id": "trans_004", "category": "translation", "input": "Let there be light.", "expected": "Khuavak om hen.", "difficulty": "A2"}
+{"id": "trans_005", "category": "translation", "input": "God called the light Day.", "expected": "Pasian in khuavak pen Sun ci hi.", "difficulty": "B1"}
+{"id": "trans_006", "category": "translation", "input": "God called the dry land Earth.", "expected": "Pasian in lei keu pen Leitung ci hi.", "difficulty": "B1"}
+{"id": "trans_007", "category": "translation", "input": "I don't go.", "expected": "Ka pai kei hi.", "difficulty": "A2"}
+{"id": "trans_008", "category": "translation", "input": "He doesn't eat.", "expected": "A nek kei hi.", "difficulty": "A2"}
+{"id": "trans_009", "category": "translation", "input": "Do you go?", "expected": "Na pai hiam?", "difficulty": "A2"}
+{"id": "trans_010", "category": "translation", "input": "He went.", "expected": "A pai ta hi.", "difficulty": "A2"}
+{"id": "trans_011", "category": "translation", "input": "He will go.", "expected": "A pai ding hi.", "difficulty": "A2"}
+{"id": "trans_012", "category": "translation", "input": "He finished going.", "expected": "A pai zo hi.", "difficulty": "A2"}
+{"id": "trans_013", "category": "translation", "input": "I have seen.", "expected": "Ka mu khin hi.", "difficulty": "B1"}
+{"id": "trans_014", "category": "translation", "input": "He is eating.", "expected": "A nek lai hi.", "difficulty": "B1"}
+{"id": "trans_015", "category": "translation", "input": "I see the land.", "expected": "Gam ka mu hi.", "difficulty": "A1"}
+{"id": "trans_016", "category": "translation", "input": "God exists.", "expected": "Pasian om hi.", "difficulty": "A1"}
+{"id": "trans_017", "category": "translation", "input": "The tree is tall.", "expected": "Sing a lian hi.", "difficulty": "A1"}
+{"id": "trans_018", "category": "translation", "input": "The water is deep.", "expected": "Tui a thuk hi.", "difficulty": "A1"}
+{"id": "trans_019", "category": "translation", "input": "He is a good person.", "expected": "Mi hoih khat ahi hi.", "difficulty": "A2"}
+{"id": "trans_020", "category": "translation", "input": "She is a woman.", "expected": "Numei ahi hi.", "difficulty": "A1"}
+{"id": "trans_021", "category": "translation", "input": "They are children.", "expected": "Pianpih ahi uh hi.", "difficulty": "A2"}
+{"id": "trans_022", "category": "translation", "input": "We are friends.", "expected": "Kawng ahi amau hi.", "difficulty": "A2"}
+{"id": "trans_023", "category": "translation", "input": "I am a teacher.", "expected": "Ka sipil khat ahi hi.", "difficulty": "A2"}
+{"id": "trans_024", "category": "translation", "input": "He is a doctor.", "expected": "Dokta ahi hi.", "difficulty": "A2"}
+{"id": "trans_025", "category": "translation", "input": "She is a nurse.", "expected": "Naus ahi hi.", "difficulty": "A2"}
+{"id": "trans_026", "category": "translation", "input": "They are students.", "expected": "Zirtu ahi uh hi.", "difficulty": "A2"}
+{"id": "trans_027", "category": "translation", "input": "We are farmers.", "expected": "Zawlte ahi amau hi.", "difficulty": "A2"}
+{"id": "trans_028", "category": "translation", "input": "I am happy.", "expected": "Ka dam hi.", "difficulty": "A1"}
+{"id": "trans_029", "category": "translation", "input": "He is sad.", "expected": "A hah hi.", "difficulty": "A1"}
+{"id": "trans_030", "category": "translation", "input": "She is beautiful.", "expected": "A kim hi.", "difficulty": "A1"}
+{"id": "trans_031", "category": "translation", "input": "They are strong.", "expected": "A te sak hi.", "difficulty": "A2"}
+{"id": "trans_032", "category": "translation", "input": "We are tired.", "expected": "Amau hah hi.", "difficulty": "A2"}
+{"id": "grammar_001", "category": "grammar", "input": "I don't go.", "expected": "Ka pai kei hi.", "difficulty": "A2"}
+{"id": "grammar_002", "category": "grammar", "input": "You don't go.", "expected": "Na pai kei hi.", "difficulty": "A2"}
+{"id": "grammar_003", "category": "grammar", "input": "He doesn't go.", "expected": "A pai kei hi.", "difficulty": "A2"}
+{"id": "grammar_004", "category": "grammar", "input": "We don't go.", "expected": "Amau pai kei hi.", "difficulty": "A2"}
+{"id": "grammar_005", "category": "grammar", "input": "They don't go.", "expected": "Ate pai kei uh hi.", "difficulty": "A2"}
+{"id": "grammar_006", "category": "grammar", "input": "Do you go?", "expected": "Na pai hiam?", "difficulty": "A2"}
+{"id": "grammar_007", "category": "grammar", "input": "Does he go?", "expected": "A pai hiam?", "difficulty": "A2"}
+{"id": "grammar_008", "category": "grammar", "input": "Do they go?", "expected": "Ate pai uh hiam?", "difficulty": "A2"}
+{"id": "grammar_009", "category": "grammar", "input": "I will not go.", "expected": "Ka pai kei ding.", "difficulty": "B1"}
+{"id": "grammar_010", "category": "grammar", "input": "He will not go.", "expected": "A pai kei ding.", "difficulty": "B1"}
+{"id": "grammar_011", "category": "grammar", "input": "They will not go.", "expected": "Ate pai kei uh ding.", "difficulty": "B1"}
+{"id": "grammar_012", "category": "grammar", "input": "I went.", "expected": "Ka pai ta hi.", "difficulty": "A2"}
+{"id": "grammar_013", "category": "grammar", "input": "He went.", "expected": "A pai ta hi.", "difficulty": "A2"}
+{"id": "grammar_014", "category": "grammar", "input": "They went.", "expected": "Ate pai ta uh hi.", "difficulty": "A2"}
+{"id": "grammar_015", "category": "grammar", "input": "I will go.", "expected": "Ka pai ding hi.", "difficulty": "A2"}
+{"id": "grammar_016", "category": "grammar", "input": "He will go.", "expected": "A pai ding hi.", "difficulty": "A2"}
+{"id": "grammar_017", "category": "grammar", "input": "They will go.", "expected": "Ate pai uh ding hi.", "difficulty": "A2"}
+{"id": "grammar_018", "category": "grammar", "input": "I finished eating.", "expected": "Ka nek zo hi.", "difficulty": "B1"}
+{"id": "grammar_019", "category": "grammar", "input": "He finished eating.", "expected": "A nek zo hi.", "difficulty": "B1"}
+{"id": "grammar_020", "category": "grammar", "input": "They finished eating.", "expected": "Ate nek zo uh hi.", "difficulty": "B1"}
+{"id": "zvs_001", "category": "zvs_compliance", "input": "pathian", "expected_correction": "pasian", "difficulty": "A1"}
+{"id": "zvs_002", "category": "zvs_compliance", "input": "ram", "expected_correction": "gam", "difficulty": "A1"}
+{"id": "zvs_003", "category": "zvs_compliance", "input": "fapa", "expected_correction": "tapa", "difficulty": "A1"}
+{"id": "zvs_004", "category": "zvs_compliance", "input": "bawipa", "expected_correction": "topa", "difficulty": "A1"}
+{"id": "zvs_005", "category": "zvs_compliance", "input": "siangpahrang", "expected_correction": "kumpipa", "difficulty": "A1"}
+{"id": "zvs_006", "category": "zvs_compliance", "input": "cu", "expected_correction": "tua", "difficulty": "A1"}
+{"id": "zvs_007", "category": "zvs_compliance", "input": "cun", "expected_correction": "tua", "difficulty": "A1"}
+{"id": "zvs_008", "category": "zvs_compliance", "input": "suah", "expected_correction": "chuak", "difficulty": "A2"}
+{"id": "zvs_009", "category": "zvs_compliance", "input": "nunnak", "expected_correction": "nuntakna", "difficulty": "A2"}
+{"id": "zvs_010", "category": "zvs_compliance", "input": "suah", "expected_correction": "chuak", "difficulty": "A2"}
+{"id": "zvs_011", "category": "zvs_compliance", "input": "ram", "expected_correction": "gam", "difficulty": "A1"}
+{"id": "zvs_012", "category": "zvs_compliance", "input": "pathian", "expected_correction": "pasian", "difficulty": "A1"}
+{"id": "zvs_013", "category": "zvs_compliance", "input": "fapa", "expected_correction": "tapa", "difficulty": "A1"}
+{"id": "zvs_014", "category": "zvs_compliance", "input": "bawipa", "expected_correction": "topa", "difficulty": "A1"}
+{"id": "zvs_015", "category": "zvs_compliance", "input": "siangpahrang", "expected_correction": "kumpipa", "difficulty": "A1"}
+{"id": "zvs_016", "category": "zvs_compliance", "input": "cu", "expected_correction": "tua", "difficulty": "A1"}
+{"id": "zvs_017", "category": "zvs_compliance", "input": "cun", "expected_correction": "tua", "difficulty": "A1"}
+{"id": "zvs_018", "category": "zvs_compliance", "input": "nunnak", "expected_correction": "nuntakna", "difficulty": "A2"}
+{"id": "zvs_019", "category": "zvs_compliance", "input": "ram", "expected_correction": "gam", "difficulty": "A1"}
+{"id": "zvs_020", "category": "zvs_compliance", "input": "pathian", "expected_correction": "pasian", "difficulty": "A1"}
+{"id": "ctx_001", "category": "context", "input": "vantung leh leitung", "expected": "heaven and earth", "difficulty": "B1"}
+{"id": "ctx_002", "category": "context", "input": "khuavak leh khuamial", "expected": "light and darkness", "difficulty": "B1"}
+{"id": "ctx_003", "category": "context", "input": "sun leh zan", "expected": "day and night", "difficulty": "B1"}
+{"id": "ctx_004", "category": "context", "input": "sing leh lei", "expected": "tree and ground", "difficulty": "B1"}
+{"id": "ctx_005", "category": "context", "input": "tui leh lei", "expected": "water and earth", "difficulty": "B1"}
+{"id": "ctx_006", "category": "context", "input": "pasian in vantung a piangsak hi", "expected": "God created the heaven", "difficulty": "B1"}
+{"id": "ctx_007", "category": "context", "input": "pasian in lei a piangsak hi", "expected": "God created the earth", "difficulty": "B1"}
+{"id": "ctx_008", "category": "context", "input": "pasian in khuavak a bawl hi", "expected": "God made light", "difficulty": "B1"}
+{"id": "ctx_009", "category": "context", "input": "pasian in ni a bawl hi", "expected": "God made the sun", "difficulty": "B1"}
+{"id": "ctx_010", "category": "context", "input": "pasian in zan a bawl hi", "expected": "God made the night", "difficulty": "B1"}
+{"id": "ctx_011", "category": "context", "input": "pasian in aksite a bawl hi", "expected": "God made the stars", "difficulty": "B1"}
+{"id": "ctx_012", "category": "context", "input": "pasian in tui a bawl hi", "expected": "God made water", "difficulty": "B1"}
+{"id": "ctx_013", "category": "context", "input": "pasian in mi a bawl hi", "expected": "God made people", "difficulty": "B1"}
+{"id": "ctx_014", "category": "context", "input": "pasian in numei a bawl hi", "expected": "God made woman", "difficulty": "B1"}
+{"id": "ctx_015", "category": "context", "input": "pasian in sing a bawl hi", "expected": "God made trees", "difficulty": "B1"}
