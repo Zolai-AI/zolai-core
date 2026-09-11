@@ -25,14 +25,14 @@ class DictionaryEntry(BaseModel):
     """Schema for Zolai→English dictionary entries (dict_zo_en_master_v1.jsonl)."""
 
     zolai: str = Field(description="Zolai headword")
-    english: list[str] = Field(description="English translations")
+    english: str | list[str] = Field(description="English translations")
     source: str = Field(description="Source dictionary identifier")
-    english_clean: str = Field(description="Short clean English translation")
+    english_clean: str | None = Field(default=None, description="Short clean English translation")
 
     @field_validator("english")
     @classmethod
-    def english_not_empty(cls, v: list[str]) -> list[str]:
-        if not v:
+    def english_not_empty(cls, v: str | list[str]) -> str | list[str]:
+        if isinstance(v, list) and not v:
             raise ValueError("english translations list must not be empty")
         return v
 
@@ -55,9 +55,9 @@ class BibleVerse(BaseModel):
     chapter: str = Field(description="Chapter number as string")
     verse: str = Field(description="Verse number as string")
     ref: str = Field(description="Canonical reference (e.g. GEN 1:1)")
-    zo_tdb77: str = Field(description="Zolai TDB77 version text")
-    zo_tedim2010: str = Field(description="Zolai Tedim 2010 version text")
-    en_kJV: str = Field(description="English KJV text")
+    zo_tdb77: str | None = Field(default=None, description="Zolai TDB77 version text")
+    zo_tedim2010: str | None = Field(default=None, description="Zolai Tedim 2010 version text")
+    en_kJV: str | None = Field(default=None, description="English KJV text")
 
     @field_validator("ref")
     @classmethod
@@ -77,15 +77,15 @@ class GrammarPattern(BaseModel):
 
     id: str = Field(description="Unique pattern identifier (e.g. pat_0001)")
     pattern: str = Field(description="Pattern category name")
-    description: str = Field(description="Human-readable description")
+    description: str | None = Field(default=None, description="Human-readable description")
     structure: str = Field(description="Syntactic structure formula")
-    function: str = Field(description="Grammatical function")
+    function: str = Field(default="", description="Grammatical function")
     frequency: int = Field(description="Occurrence count in corpus", ge=0)
     confidence: float = Field(
         description="Confidence score 0.0–1.0", ge=0.0, le=1.0
     )
-    examples: list[str] = Field(description="Example verse references")
-    source: str = Field(description="Data source version")
+    examples: list[str] = Field(default_factory=list, description="Example verse references")
+    source: str = Field(default="", description="Data source version")
     book: str = Field(default="", description="Applicable book (empty = all)")
 
 
@@ -124,7 +124,7 @@ class VocabEntry(BaseModel):
     frequency: int = Field(description="Total frequency in Bible corpus", ge=0)
     books: list[str] = Field(description="Book codes where word appears")
     book_count: int = Field(description="Number of books", ge=0)
-    examples: list[str] = Field(description="Example verse references")
+    examples: list[str | dict] = Field(description="Example verse references")
     pos: str = Field(default="", description="Part of speech")
     notes: str = Field(default="", description="Usage notes")
     source: str = Field(default="", description="Data source")
@@ -172,9 +172,9 @@ class WordUsageProfile(BaseModel):
     per_book_distribution: list[BookDistribution] = Field(
         description="Per-book frequency distribution"
     )
-    meaning_shifts: list[str] = Field(
+    meaning_shifts: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="Detected meaning shifts across books",
+        description="Detected meaning shifts across books (dict with translation + books keys)",
     )
     all_translations: list[str] = Field(
         default_factory=list,
@@ -300,13 +300,14 @@ def validate_file(
 
 
 # Canonical file → schema mapping (for bulk validation)
-CANONICAL_SCHEMAS: dict[str, Type[BaseModel]] = {
-    "dict_zo_en_master_v1.jsonl": DictionaryEntry,
-    "parallel_corpus_v1.jsonl": BibleVerse,
-    "grammar_patterns_v2.jsonl": GrammarPattern,
-    "phrases_v1.jsonl": PhraseEntry,
-    "vocab_index_full.jsonl": VocabEntry,
-    "translation_pairs_v1.jsonl": TranslationPair,
-    "word_usage_profiles.jsonl": WordUsageProfile,
-    "provenance.json": ProvenanceEntry,
+# Keys are filenames; values are (schema, subdir) tuples for resolving actual paths.
+CANONICAL_SCHEMAS: dict[str, tuple[Type[BaseModel], str]] = {
+    "dict_zo_en_master_v1.jsonl": (DictionaryEntry, "dictionary/processed"),
+    "parallel_corpus_v1.jsonl": (BibleVerse, "bible"),
+    "grammar_patterns_v2.jsonl": (GrammarPattern, "bible"),
+    "phrases_v1.jsonl": (PhraseEntry, "bible"),
+    "vocab_index_full.jsonl": (VocabEntry, "bible"),
+    "translation_pairs_v1.jsonl": (TranslationPair, "bible"),
+    "word_usage_profiles.jsonl": (WordUsageProfile, "bible/context"),
+    "provenance.json": (ProvenanceEntry, ""),
 }
