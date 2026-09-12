@@ -108,10 +108,10 @@ _KNOWN_ROOTS: dict[str, dict[str, str]] = {
     "kam": {"pos": "NOUN", "meaning": "work/deed"},
     "lam": {"pos": "NOUN", "meaning": "road/path"},
     "khua": {"pos": "NOUN", "meaning": "village/home"},
-    "lungdam": {"pos": "NOUN", "meaning": "happiness/joy"},
+    "lungdam": {"pos": "NOUN", "meaning": "heart/mind"},
     "nuntakna": {"pos": "NOUN", "meaning": "life"},
-    "hehpihna": {"pos": "NOUN", "meaning": "salvation"},
-    "suahtakna": {"pos": "NOUN", "meaning": "holiness"},
+    "hehpihna": {"pos": "NOUN", "meaning": "grace/mercy"},
+    "suahtakna": {"pos": "NOUN", "meaning": "independence/autonomy"},
     "itna": {"pos": "NOUN", "meaning": "love"},
     "gupna": {"pos": "NOUN", "meaning": "faith"},
     "zu": {"pos": "NOUN", "meaning": "distillate (alcohol)"},
@@ -122,7 +122,12 @@ _KNOWN_ROOTS: dict[str, dict[str, str]] = {
     "sian": {"pos": "NOUN", "meaning": "great (in compounds); cleanse (standalone)"},
     "van": {"pos": "NOUN", "meaning": "sky/heaven; thing/goods"},
     # === DET ===
-    "khempeuh": {"pos": "DET", "meaning": "all/every/whole", "compound": ["khem", "peuh"]},
+    "khempeuh": {"pos": "DET", "meaning": "all/every/whole"},
+    "laisiangtho": {"pos": "NOUN", "meaning": "Bible"},
+    "khuapi": {"pos": "NOUN", "meaning": "town/city"},
+    "singgui": {"pos": "NOUN", "meaning": "root"},
+    "thagui": {"pos": "NOUN", "meaning": "artery"},
+    "guihna": {"pos": "NOUN", "meaning": "inebriety"},
     # === PARTICLES ===
     "ta": {"pos": "PART", "meaning": "completive/realized aspect"},
 }
@@ -197,9 +202,9 @@ _HIGH_FREQ_ROOTS: dict[str, dict[str, str]] = {
      "lai": {"pos": "NOUN", "meaning": "book/text"},
      "thu": {"pos": "NOUN", "meaning": "word/matter"},
      "kam": {"pos": "NOUN", "meaning": "work/deed"},
-     "lungdam": {"pos": "NOUN", "meaning": "happiness/joy"},
-     "hehpihna": {"pos": "NOUN", "meaning": "salvation"},
-     "suahtakna": {"pos": "NOUN", "meaning": "holiness"},
+     "lungdam": {"pos": "NOUN", "meaning": "heart/mind"},
+     "hehpihna": {"pos": "NOUN", "meaning": "grace/mercy"},
+     "suahtakna": {"pos": "NOUN", "meaning": "independence/autonomy"},
      "itna": {"pos": "NOUN", "meaning": "love"},
      "gupna": {"pos": "NOUN", "meaning": "faith"},
      "kumpipa": {"pos": "NOUN", "meaning": "Savior"},
@@ -613,15 +618,10 @@ class ZolaiMorphology:
             meaning = _KNOWN_ROOTS[word].get("meaning", "")
         if not meaning and root in _KNOWN_ROOTS:
             meaning = _KNOWN_ROOTS[root].get("meaning", "")
-        # Dynamic dictionary lookup (lazy-loaded)
+        # Dynamic dictionary lookup (headwords set)
         if not meaning and self._dict_words:
-            for entry in self._dict_words:
-                zolai = entry.get("zolai", "").lower()
-                if zolai == word or zolai == root:
-                    en = entry.get("english_clean", "")
-                    if en and len(en) < 60:
-                        meaning = en
-                        break
+            if word in self._dict_words or root in self._dict_words:
+                meaning = f"{word or root} (from dictionary)"
         return meaning
 
     def _split_particle(self, word: str) -> tuple[str, str]:
