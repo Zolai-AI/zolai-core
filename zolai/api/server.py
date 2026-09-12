@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -481,6 +481,56 @@ def create_app() -> FastAPI:
                     except json.JSONDecodeError:
                         continue
             return {"query": q, "version": version, "count": len(results), "results": results}
+
+    # --- Myanmar / Burmese endpoints ---
+
+    @app.get("/dictionary/search/my")
+    async def search_myanmar_dictionary(
+        q: str = Query(..., description="Myanmar search query"),
+    ):
+        """Search Myanmar dictionary + Bible for matching text."""
+        from ..data.database import get_manager
+
+        db = get_manager()
+        results = db.lookup_myanmar(q)
+        return {"query": q, "results": results, "count": len(results)}
+
+    @app.get("/dictionary/translate/zo-my")
+    async def translate_zolai_to_myanmar(
+        word: str = Query(..., description="Zolai word"),
+    ):
+        """Translate Zolai → Myanmar via dictionary."""
+        from ..data.database import get_manager
+
+        db = get_manager()
+        result = db.translate_zo_my(word)
+        if result:
+            return result
+        return {"error": f"No Myanmar translation found for '{word}'"}
+
+    @app.get("/dictionary/translate/my-zo")
+    async def translate_myanmar_to_zolai(
+        word: str = Query(..., description="Myanmar word"),
+    ):
+        """Translate Myanmar → Zolai via dictionary."""
+        from ..data.database import get_manager
+
+        db = get_manager()
+        result = db.translate_my_zo(word)
+        if result:
+            return result
+        return {"error": f"No Zolai translation found for '{word}'"}
+
+    @app.get("/bible/search/my")
+    async def search_judson_bible(
+        q: str = Query(..., description="Myanmar search text"),
+    ):
+        """Search Judson Bible by Myanmar text."""
+        from ..data.database import get_manager
+
+        db = get_manager()
+        results = db.search_judson(q)
+        return {"query": q, "results": results, "count": len(results)}
 
     # --- Knowledge Brain (RAG) ---
 

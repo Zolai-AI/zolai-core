@@ -243,6 +243,146 @@ class DatabaseManager:
         return [self._row_to_dict(row, table) for row in rows]
 
     # ------------------------------------------------------------------
+    # Myanmar / Burmese lookups
+    # ------------------------------------------------------------------
+    def lookup_myanmar(
+        self, query: str, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Search dictionary + bible_verses by Myanmar text.
+
+        Returns combined results from both tables.
+        """
+        results: list[dict[str, Any]] = []
+        pattern = f"%{query}%"
+
+        # Search dictionary (myanmar column)
+        dict_table = Table(
+            "dictionary", self.metadata, autoload_with=self.engine
+        )
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                dict_table.select().where(
+                    dict_table.c.myanmar.ilike(pattern)
+                ).limit(limit)
+            ).fetchall()
+            for row in rows:
+                results.append({
+                    "type": "dictionary",
+                    "zolai": getattr(row, "zolai", None),
+                    "myanmar": getattr(row, "myanmar", None),
+                    "english": getattr(row, "english", None),
+                    "source": getattr(row, "source", None),
+                })
+
+        # Search bible_verses (myanmar column)
+        bible_table = Table(
+            "bible_verses", self.metadata, autoload_with=self.engine
+        )
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                bible_table.select().where(
+                    bible_table.c.myanmar.ilike(pattern)
+                ).limit(limit)
+            ).fetchall()
+            for row in rows:
+                results.append({
+                    "type": "bible",
+                    "ref": getattr(row, "ref", None),
+                    "myanmar": getattr(row, "myanmar", None),
+                    "zo_tdb77": getattr(row, "zo_tdb77", None),
+                    "en_kjv": getattr(row, "en_kjv", None),
+                })
+        return results
+
+    def translate_zo_my(self, word: str) -> dict[str, Any] | None:
+        """Translate Zolai → Myanmar via dictionary."""
+        table = Table(
+            "dictionary", self.metadata, autoload_with=self.engine
+        )
+        with self.engine.connect() as conn:
+            # Exact match first
+            row = conn.execute(
+                table.select().where(
+                    func.lower(table.c.zolai) == word.lower()
+                )
+            ).first()
+            if row and getattr(row, "myanmar", None):
+                return {
+                    "zolai": getattr(row, "zolai", None),
+                    "myanmar": getattr(row, "myanmar", None),
+                    "english": getattr(row, "english", None),
+                }
+            # LIKE fallback
+            row = conn.execute(
+                table.select().where(
+                    table.c.zolai.ilike(f"%{word}%")
+                ).limit(1)
+            ).first()
+            if row and getattr(row, "myanmar", None):
+                return {
+                    "zolai": getattr(row, "zolai", None),
+                    "myanmar": getattr(row, "myanmar", None),
+                    "english": getattr(row, "english", None),
+                }
+        return None
+
+    def translate_my_zo(self, word: str) -> dict[str, Any] | None:
+        """Translate Myanmar → Zolai via dictionary."""
+        table = Table(
+            "dictionary", self.metadata, autoload_with=self.engine
+        )
+        with self.engine.connect() as conn:
+            # Exact match first
+            row = conn.execute(
+                table.select().where(
+                    func.lower(table.c.myanmar) == word.lower()
+                )
+            ).first()
+            if row:
+                return {
+                    "myanmar": getattr(row, "myanmar", None),
+                    "zolai": getattr(row, "zolai", None),
+                    "english": getattr(row, "english", None),
+                }
+            # LIKE fallback
+            row = conn.execute(
+                table.select().where(
+                    table.c.myanmar.ilike(f"%{word}%")
+                ).limit(1)
+            ).first()
+            if row:
+                return {
+                    "myanmar": getattr(row, "myanmar", None),
+                    "zolai": getattr(row, "zolai", None),
+                    "english": getattr(row, "english", None),
+                }
+        return None
+
+    def search_judson(
+        self, query: str, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Search Judson Bible by Myanmar text."""
+        table = Table(
+            "bible_verses", self.metadata, autoload_with=self.engine
+        )
+        pattern = f"%{query}%"
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                table.select().where(
+                    table.c.myanmar.ilike(pattern)
+                ).limit(limit)
+            ).fetchall()
+        return [
+            {
+                "ref": getattr(r, "ref", None),
+                "myanmar": getattr(r, "myanmar", None),
+                "zo_tdb77": getattr(r, "zo_tdb77", None),
+                "en_kjv": getattr(r, "en_kjv", None),
+            }
+            for r in rows
+        ]
+
+    # ------------------------------------------------------------------
     # Count / aggregate
     # ------------------------------------------------------------------
     def count(self, table_name: str) -> int:
