@@ -22,9 +22,45 @@ import re
 from pathlib import Path
 from typing import Optional
 
+# ── Zolai Tone System (4 tones like Chinese) ──────────────────────────────────
+# T1 = High, T2 = High Falling (sandhi only), T3 = Low, T4 = Creaky
+# Written Zolai does NOT mark tones. Same spelling can have different meanings.
+# Tone sandhi rules change tones in compound words (19 rules).
+# Reference: data/reference/grammar/lesson_02_Tone_Sandhi_Tedim_Zomi_Toponyms.md
+
+_TONE_NOTES: dict[str, str] = {
+    "khem": "T1=lie/deceive, T3=thin/weak (after illness)",
+    "nam": "T1=smell, T3=odoriferous",
+    "zu": "T1=alcohol/distillate, T4=rain (with guah-)",
+    "ta": "T1=completive/realized, T3=beginning",
+    "ci": "T1=say/speak",
+    "ne": "T1=eat/drink",
+    "pai": "T1=go/move",
+    "om": "T1=exist/stay",
+}
+
 log = logging.getLogger(__name__)
 
 _DATA_DIR = Path(__file__).parent.parent.parent.parent / "data"
+
+# ── Zolai Tone System (4 tones like Chinese) ──────────────────────────────────
+# T1 = High, T2 = High Falling (sandhi only), T3 = Low, T4 = Creaky
+# Written Zolai does NOT mark tones. Same spelling can have different meanings.
+# Tone sandhi rules change tones in compound words.
+# Reference: data/reference/grammar/lesson_02_Tone_Sandhi_Tedim_Zomi_Toponyms.md
+#            zolai-wiki/grammar/tone_system.md
+_TONE_NOTES: dict[str, str] = {
+    "khem": "T1=lie/deceive, T3=thin/weak",
+    "nam": "T1=smell, T3=odoriferous",
+    "zu": "T1=alcohol/distillate, T4=rain (with guah-)",
+    "ta": "T1=completive aspect, T3=beginning",
+    "van": "T1=sky/heaven, T3=thing/goods",
+    "gu": "T1=bone, T4=steal",
+    "sa": "T1=meat/flesh, T4=hot/feeling hot",
+    "siang": "T1=call/summon, T3=clean/holy (in compounds)",
+    "ci": "T1=say/speak",
+    "ne": "T1=eat/drink",
+}
 
 # ── Prefixes (person agreement / valency) ─────────────────────────────────────
 _PREFIXES: dict[str, dict[str, str]] = {
@@ -316,6 +352,7 @@ class ZolaiMorphology:
         # 1. Check if whole word is a known particle
         if clean in _KNOWN_PARTICLES:
             info = _KNOWN_PARTICLES[clean]
+            meaning = self._apply_tone_note(info["meaning"], clean, clean)
             return {
                 "word": word,
                 "stem": clean,
@@ -324,7 +361,7 @@ class ZolaiMorphology:
                 "root": clean,
                 "POS": info["pos"],
                 "morphemes": [clean],
-                "meaning": info["meaning"],
+                "meaning": meaning,
                 "particle": clean,
             }
 
@@ -341,6 +378,8 @@ class ZolaiMorphology:
                 root_parts.append(f"{part}({meaning.split(';')[0].split('(')[0].strip()})"
                 )
             # Primary root is the last part (head of compound)
+            compound_meaning = "; ".join(meanings)
+            compound_meaning = self._apply_tone_note(compound_meaning, clean, clean)
             return {
                 "word": word,
                 "stem": clean,
@@ -349,7 +388,7 @@ class ZolaiMorphology:
                 "root": "+".join(parts),
                 "POS": "NOUN",
                 "morphemes": morphemes,
-                "meaning": "; ".join(meanings),
+                "meaning": compound_meaning,
                 "particle": "",
             }
 
@@ -361,6 +400,8 @@ class ZolaiMorphology:
                 # Check if base is in _KNOWN_ROOTS or dictionary
                 if base in _KNOWN_ROOTS:
                     root_info = _KNOWN_ROOTS[base]
+                    redup_meaning = root_info.get("meaning", "") + " (reduplicated)"
+                    redup_meaning = self._apply_tone_note(redup_meaning, base, base)
                     return {
                         "word": word,
                         "stem": clean,
@@ -369,7 +410,7 @@ class ZolaiMorphology:
                         "root": base,
                         "POS": root_info.get("pos", "X"),
                         "morphemes": [base, base],
-                        "meaning": root_info.get("meaning", "") + " (reduplicated)",
+                        "meaning": redup_meaning,
                         "particle": "",
                     }
 
@@ -382,6 +423,7 @@ class ZolaiMorphology:
             root = self._find_root(stem_no_suffix)
             pos = self._determine_pos(root_part, suffix_info, root)
             meaning = self._get_meaning(root_part, root)
+            meaning = self._apply_tone_note(meaning, root_part, root)
             morphemes: list[str] = []
             if prefix:
                 morphemes.append(prefix)
@@ -409,6 +451,8 @@ class ZolaiMorphology:
         #     (e.g. mahmah should not be split into mahm + ah)
         if stem in _KNOWN_ROOTS:
             root_info = _KNOWN_ROOTS[stem]
+            root_meaning = root_info.get("meaning", "")
+            root_meaning = self._apply_tone_note(root_meaning, stem, stem)
             return {
                 "word": word,
                 "stem": stem,
@@ -417,7 +461,7 @@ class ZolaiMorphology:
                 "root": stem,
                 "POS": root_info.get("pos", "X"),
                 "morphemes": [prefix, stem] if prefix else [stem],
-                "meaning": root_info.get("meaning", ""),
+                "meaning": root_meaning,
                 "particle": "",
             }
 
@@ -425,6 +469,7 @@ class ZolaiMorphology:
         root = self._find_root(stem_without_suffix)
         pos = self._determine_pos(clean, suffix_info, root)
         meaning = self._get_meaning(clean, root)
+        meaning = self._apply_tone_note(meaning, clean, root)
 
         morphemes_std: list[str] = []
         if prefix:
@@ -432,6 +477,11 @@ class ZolaiMorphology:
         morphemes_std.append(stem_without_suffix)
         if suffix:
             morphemes_std.append(suffix)
+
+        # Add tone note if available
+        tone_note = _TONE_NOTES.get(root, "")
+        if tone_note and tone_note not in meaning:
+            meaning = f"{meaning} [tones: {tone_note}]" if meaning else f"[tones: {tone_note}]"
 
         return {
             "word": word,
@@ -622,6 +672,29 @@ class ZolaiMorphology:
         if not meaning and self._dict_words:
             if word in self._dict_words or root in self._dict_words:
                 meaning = f"{word or root} (from dictionary)"
+        return meaning
+
+    def _apply_tone_note(self, meaning: str, word: str, root: str) -> str:
+        """Append tone-dependency note if the word/root is tone-dependent.
+
+        Zolai has 4 tones (T1=High, T2=HighFalling, T3=Low, T4=Creaky).
+        Written Zolai does not mark tones, so the same spelling can have
+        different meanings. This method tags tone-dependent words so callers
+        know disambiguation is needed.
+
+        Args:
+            meaning: Current meaning string.
+            word: The full word analyzed.
+            root: The root morpheme.
+
+        Returns:
+            Meaning with tone note appended, if applicable.
+        """
+        tone_note = _TONE_NOTES.get(word, "") or _TONE_NOTES.get(root, "")
+        if tone_note and tone_note not in meaning:
+            if meaning:
+                return f"{meaning} [tones: {tone_note}]"
+            return f"[tones: {tone_note}]"
         return meaning
 
     def _split_particle(self, word: str) -> tuple[str, str]:
