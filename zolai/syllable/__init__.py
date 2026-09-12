@@ -23,6 +23,7 @@ __all__ = [
     "ZolaiSyllabifier",
     "segment",
     "segment_with_boundaries",
+    "CRFSyllableSegmenter",
 ]
 
 
@@ -101,10 +102,11 @@ class ZolaiSyllabifier:
 
     def _create_segmenter(self, mode: str):
         """Create the underlying segmenter implementation."""
-        from .segmenter import CRFBasedSegmenter, RuleBasedSegmenter
         if mode == "rule":
+            from .segmenter import RuleBasedSegmenter
             return RuleBasedSegmenter()
-        return CRFBasedSegmenter()
+        from .crf_segmenter import CRFSyllableSegmenter
+        return CRFSyllableSegmenter()
 
     def segment(self, word: str) -> list[str]:
         """Segment a word into syllables.
