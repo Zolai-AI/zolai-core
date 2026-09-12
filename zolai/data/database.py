@@ -79,6 +79,8 @@ class DatabaseManager:
             if self._db_url.startswith("sqlite"):
                 with self._engine.connect() as conn:
                     conn.execute(text("PRAGMA journal_mode=WAL"))
+                    conn.execute(text("PRAGMA busy_timeout=5000"))
+                    conn.execute(text("PRAGMA synchronous=NORMAL"))
                     conn.commit()
         return self._engine
 
@@ -868,6 +870,73 @@ class DatabaseManager:
         """Convert a Row to a plain dict, skipping internal id."""
         cols = [c.name for c in table.columns if c.name != "id"]
         return {col: getattr(row, col, None) for col in cols}
+
+    # ------------------------------------------------------------------
+    # Provenance tracking
+    # ------------------------------------------------------------------
+    def track_ingestion(
+        self,
+        source_file: str,
+        table_name: str,
+        rows_added: int,
+        rows_updated: int,
+        method: str,
+        notes: str = "",
+    ) -> int:
+        """Record data ingestion in the audit log.
+
+        Returns the audit log row id.
+        """
+        from datetime import datetime, timezone
+
+        table = Table("data_audit_log", self.metadata, autoload_with=self.engine)
+        payload = json.dumps({
+            "source": source_file,
+            "rows_added": rows_added,
+            "rows_updated": rows_updated,
+            "method": method,
+            "notes": notes,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }, ensure_ascii=False)
+        with self.engine.connect() as conn:
+            result = conn.execute(
+                table.insert(),
+                {
+                    "table_name": table_name,
+                    "row_id": 0,
+                    "field": "ingestion",
+                    "old_value": None,
+                    "new_value": payload,
+                    "changed_at": datetime.now(timezone.utc).isoformat(),
+                    "reason": f"bulk_ingestion:{method}",
+                },
+            )
+            conn.commit()
+            return result.inserted_primary_key[0]
+
+    def ensure_myanmar_columns(self) -> list[str]:
+        """Add myanmar column to tables that don't have it yet.
+
+        Returns list of tables that were altered.
+        """
+        tables_needing_my = [
+            "dictionary_en_zo", "grammar_patterns", "translations",
+            "word_alignments", "word_collocations", "word_usage",
+        ]
+        from sqlalchemy import inspect as sa_inspect
+
+        inspector = sa_inspect(self.engine)
+        altered: list[str] = []
+        with self.engine.connect() as conn:
+            for table in tables_needing_my:
+                existing = {c["name"] for c in inspector.get_columns(table)}
+                if "myanmar" not in existing:
+                    conn.execute(
+                        text(f"ALTER TABLE [{table}] ADD COLUMN myanmar TEXT")
+                    )
+                    altered.append(table)
+            conn.commit()
+        return altered
 
     # ------------------------------------------------------------------
     # FTS5 full-text search
