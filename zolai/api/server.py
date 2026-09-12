@@ -278,7 +278,27 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     
-    app.include_router(desktop_router, prefix="/desktop", tags=["desktop"])
+    app.include_router(desktop_router, prefix="/desktop", tags=["desktop"])    
+    # --- Static File Serving for Desktop App ---
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.responses import FileResponse
+    _FRONTEND_DIR = Path(__file__).parent.parent.parent / "tauri" / "frontend"
+    
+    @app.get("/")
+    async def serve_frontend():
+        """Serve the desktop app HTML."""
+        html_path = _FRONTEND_DIR / "index.html"
+        if html_path.exists():
+            return FileResponse(str(html_path))
+        return {"status": "ok", "version": "0.3.0", "api": "running"}
+    
+    @app.get("/{path:path}")
+    async def serve_static(path: str):
+        """Serve static files."""
+        file_path = _FRONTEND_DIR / path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(str(file_path))
+        return {"error": "Not found"}
 
     app.add_middleware(
         CORSMiddleware,
