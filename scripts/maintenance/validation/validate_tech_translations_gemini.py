@@ -6,12 +6,12 @@ import json
 from pathlib import Path
 
 try:
-    from gemini_webapi import GeminiClient
+    from gemini_cookies import get_gemini_client
 except ImportError:
     print("Installing gemini_webapi...")
     import subprocess
     subprocess.run(["pip", "install", "gemini_webapi"], check=True)
-    from gemini_webapi import GeminiClient
+    from gemini_cookies import get_gemini_client
 
 SYSTEM_PROMPT = """You are a Tedim Zolai (Chin) linguistics expert.
 Provide accurate Zolai meanings and translations for technical terms.
@@ -38,7 +38,7 @@ TRANSLATIONS = {
 
 async def validate_with_gemini():
     """Validate translations using Gemini Web API."""
-    client = GeminiClient()
+    client = get_gemini_client()
 
     results = {
         "loan_words": {},
