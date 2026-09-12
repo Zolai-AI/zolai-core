@@ -22,7 +22,7 @@ while true; do
   echo -e "  ${G}5${NC}) 📊 DB health check"
   echo -e "  ${G}6${NC}) 🔍 CLI info"
   echo -e "  ${G}7${NC}) 📖 Bible study menu (datasets)"
-  echo -e "  ${G}8${NC}) 🔧 Install dev dependencies"
+  echo -e "  ${G}8${NC}) 🔧 Smart install (auto-detect system)"
   echo -e "  ${G}9${NC}) 🔨 Build desktop app"
   echo -e "  ${G}0${NC}) Exit"
   echo ""
@@ -88,9 +88,16 @@ conn.close()
       bash "$WORKSPACE/zolai-datasets/scripts/bible/menu.sh"
       ;;
     8)
-      echo -e "${G}Installing dependencies...${NC}"
-      source "$DIR/.venv/bin/activate" 2>/dev/null || true
-      cd "$DIR" && pip install -e ".[dev]"
+      echo -e "${G}Running smart installer...${NC}"
+      echo -e "  ${YELL}This will detect your system and install only what's needed.${NC}"
+      echo -e "  ${YELL}No NVIDIA GPU? → CPU-only packages (~300MB).${NC}"
+      echo -e "  ${YELL}Have NVIDIA GPU? → GPU packages (~5GB).${NC}"
+      echo ""
+      read -p "  Continue? (y/N): " confirm
+      if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+        source "$DIR/.venv/bin/activate" 2>/dev/null || true
+        python "$DIR/scripts/smart_install.py"
+      fi
       read -p "Press Enter..."
       ;;
     9)
