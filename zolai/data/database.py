@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 # JSON column name → Python json.loads before returning
 _JSON_COLS: dict[str, set[str]] = {
     "dictionary": {"english"},
+    "dictionary_en_zo": {"translations"},
     "bible_verses": set(),
     "grammar_patterns": {"examples"},
     "phrases": {"examples"},
@@ -95,7 +96,40 @@ class DatabaseManager:
     def init_db(self) -> None:
         """Create all tables (idempotent)."""
         Base.metadata.create_all(self.engine)
+        self._ensure_columns()
         logger.info("Database initialized: %s", self._db_url)
+
+    def _ensure_columns(self) -> None:
+        """Add missing columns to existing tables (SQLite safe)."""
+        from sqlalchemy import inspect as sa_inspect
+
+        inspector = sa_inspect(self.engine)
+
+        # Provenance: add version, status, updated_at, change_log
+        existing = {c["name"] for c in inspector.get_columns("provenance")}
+        alters = {
+            "version": (
+                "ALTER TABLE provenance ADD COLUMN version "
+                "VARCHAR NOT NULL DEFAULT '1.0'"
+            ),
+            "status": (
+                "ALTER TABLE provenance ADD COLUMN status "
+                "VARCHAR NOT NULL DEFAULT 'active'"
+            ),
+            "updated_at": (
+                "ALTER TABLE provenance ADD COLUMN updated_at "
+                "VARCHAR NOT NULL DEFAULT ''"
+            ),
+            "change_log": (
+                "ALTER TABLE provenance ADD COLUMN change_log "
+                "TEXT NOT NULL DEFAULT '[]'"
+            ),
+        }
+        with self.engine.connect() as conn:
+            for col, sql in alters.items():
+                if col not in existing:
+                    conn.execute(text(sql))
+            conn.commit()
 
     def table_names(self) -> list[str]:
         """Return sorted list of table names."""
@@ -190,6 +224,24 @@ class DatabaseManager:
             ).fetchall()
         return [self._row_to_dict(row, table) for row in rows]
 
+    def lookup_english(self, word: str) -> list[dict[str, Any]]:
+        """Search EN→ZO dictionary by English headword — exact match first, then LIKE."""
+        table = Table("dictionary_en_zo", self.metadata, autoload_with=self.engine)
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                table.select().where(
+                    func.lower(table.c.headword) == word.lower()
+                )
+            ).fetchall()
+            if rows:
+                return [self._row_to_dict(row, table) for row in rows]
+            rows = conn.execute(
+                table.select().where(
+                    table.c.headword.ilike(f"%{word}%")
+                ).limit(10)
+            ).fetchall()
+        return [self._row_to_dict(row, table) for row in rows]
+
     # ------------------------------------------------------------------
     # Count / aggregate
     # ------------------------------------------------------------------
@@ -256,6 +308,417 @@ class DatabaseManager:
                         pass
             result.append(d)
         return result
+
+    # ------------------------------------------------------------------
+    # Audit log
+    # ------------------------------------------------------------------
+    def _log_change(
+        self,
+        table_name: str,
+        row_id: int,
+        field: str,
+        old_value: str | None,
+        new_value: str | None,
+        reason: str = "",
+    ) -> None:
+        """Log a single data change to the audit_log table."""
+        from datetime import datetime, timezone
+
+        table = Table("data_audit_log", self.metadata, autoload_with=self.engine)
+        with self.engine.connect() as conn:
+            conn.execute(
+                table.insert(),
+                {
+                    "table_name": table_name,
+                    "row_id": row_id,
+                    "field": field,
+                    "old_value": old_value,
+                    "new_value": new_value,
+                    "changed_at": datetime.now(timezone.utc).isoformat(),
+                    "reason": reason,
+                },
+            )
+            conn.commit()
+
+    def get_audit_log(
+        self,
+        table_name: str | None = None,
+        row_id: int | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Retrieve audit log entries, optionally filtered by table/row."""
+        table = Table("data_audit_log", self.metadata, autoload_with=self.engine)
+        with self.engine.connect() as conn:
+            q = table.select()
+            if table_name:
+                q = q.where(table.c.table_name == table_name)
+            if row_id is not None:
+                q = q.where(table.c.row_id == row_id)
+            q = q.order_by(table.c.changed_at.desc()).limit(limit)
+            rows = conn.execute(q).fetchall()
+        return [self._row_to_dict(row, table) for row in rows]
+
+    def quality_report(self) -> dict[str, dict[str, Any]]:
+        """Generate a quality report for all tables.
+
+        Returns per-table: row_count, columns with null counts.
+        """
+        from sqlalchemy import inspect as sa_inspect
+
+        report: dict[str, dict[str, Any]] = {}
+        inspector = sa_inspect(self.engine)
+        for table_name in inspector.get_table_names():
+            table = Table(table_name, self.metadata, autoload_with=self.engine)
+            with self.engine.connect() as conn:
+                row_count = conn.execute(
+                    text(f"SELECT COUNT(*) FROM {table_name}")
+                ).scalar()
+                cols = inspector.get_columns(table_name)
+                null_counts: dict[str, int] = {}
+                for col in cols:
+                    nc = conn.execute(
+                        text(
+                            f"SELECT COUNT(*) FROM {table_name} "
+                            f"WHERE {col['name']} IS NULL "
+                            f"OR TRIM(CAST({col['name']} AS TEXT)) = ''"
+                        )
+                    ).scalar()
+                    null_counts[col["name"]] = nc
+            report[table_name] = {
+                "row_count": row_count,
+                "null_counts": null_counts,
+            }
+        return report
+
+    # ------------------------------------------------------------------
+    # Phase 2: Fix noise data
+    # ------------------------------------------------------------------
+    def fix_word_usage_books(self, jsonl_path: str | Path) -> int:
+        """Re-read word_usage JSONL and populate the empty book field.
+
+        Extracts the most frequent book from per_book_distribution[0].book.
+        Logs each change to audit_log.
+        Returns number of rows fixed.
+        """
+        from pathlib import Path
+
+        path = Path(jsonl_path)
+        if not path.exists():
+            return 0
+
+        # Build word->book map from JSONL
+        word_book: dict[str, str] = {}
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                d = json.loads(line)
+                word = d.get("word", "")
+                per_book = d.get("per_book_distribution", [])
+                if (
+                    per_book
+                    and isinstance(per_book, list)
+                    and len(per_book) > 0
+                ):
+                    book = per_book[0].get("book", "")
+                    if book:
+                        word_book[word] = book
+
+        # Collect fixes first, then apply in one connection
+        fixes: list[tuple[int, str, str]] = []  # (row_id, old, new)
+        table = Table("word_usage", self.metadata, autoload_with=self.engine)
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                table.select().where(
+                    (table.c.book == None) | (table.c.book == "")  # noqa: E711
+                )
+            ).fetchall()
+            for row in rows:
+                row_dict = self._row_to_dict(row, table)
+                word = row_dict.get("word", "")
+                if word in word_book:
+                    row_id = row.id if hasattr(row, "id") else None
+                    if row_id is not None:
+                        fixes.append(
+                            (row_id, row_dict.get("book", ""), word_book[word])
+                        )
+            # Apply all updates
+            for row_id, old_book, new_book in fixes:
+                conn.execute(
+                    table.update()
+                    .where(table.c.id == row_id)
+                    .values(book=new_book)
+                )
+            conn.commit()
+
+        # Log changes (separate connection)
+        for row_id, old_book, new_book in fixes:
+            self._log_change(
+                "word_usage", row_id, "book",
+                old_book, new_book,
+                "Phase 2: backfill book from JSONL per_book_distribution",
+            )
+        return len(fixes)
+
+    def fix_phrases_english(self, jsonl_path: str | Path) -> int:
+        """Re-read phrases JSONL and populate empty english from examples[0].en.
+
+        Logs each change to audit_log.
+        Returns number of rows fixed.
+        """
+        from pathlib import Path
+
+        path = Path(jsonl_path)
+        if not path.exists():
+            return 0
+
+        # Build zo->english map from JSONL
+        zo_english: dict[str, str] = {}
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                d = json.loads(line)
+                zo = d.get("zo", "")
+                examples = d.get("examples", [])
+                if (
+                    examples
+                    and isinstance(examples, list)
+                    and len(examples) > 0
+                ):
+                    en = examples[0].get("en", "")
+                    if en and en.strip():
+                        zo_english[zo] = en.strip()
+
+        # Collect fixes first
+        fixes: list[tuple[int, str]] = []  # (row_id, new_en)
+        table = Table("phrases", self.metadata, autoload_with=self.engine)
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                table.select().where(
+                    (table.c.english == None) | (table.c.english == "")  # noqa: E711
+                )
+            ).fetchall()
+            for row in rows:
+                row_dict = self._row_to_dict(row, table)
+                zo = row_dict.get("zo", "")
+                if zo in zo_english:
+                    row_id = row.id if hasattr(row, "id") else None
+                    if row_id is not None:
+                        fixes.append((row_id, zo_english[zo]))
+            # Apply all updates
+            for row_id, new_en in fixes:
+                conn.execute(
+                    table.update()
+                    .where(table.c.id == row_id)
+                    .values(english=new_en)
+                )
+            conn.commit()
+
+        # Log changes
+        for row_id, new_en in fixes:
+            self._log_change(
+                "phrases", row_id, "english",
+                "", new_en,
+                "Phase 2: backfill english from "
+                "phrases_v1.jsonl examples[0].en",
+            )
+        return len(fixes)
+
+    def dedup_bible_verses(self) -> int:
+        """Remove duplicate bible verses, keeping the most complete row per ref.
+
+        Logs each deletion to audit_log.
+        Returns number of rows deleted.
+        """
+        # Collect deletions first
+        deletions: list[tuple[int, str, int]] = []  # (del_id, ref, keep_id)
+        with self.engine.connect() as conn:
+            dups = conn.execute(text("""
+                SELECT ref, COUNT(*) as cnt FROM bible_verses
+                GROUP BY ref HAVING cnt > 1
+            """)).fetchall()
+
+            for ref, cnt in dups:
+                rows = conn.execute(text("""
+                    SELECT id, ref,
+                        LENGTH(COALESCE(zo_tdb77, '')) +
+                        LENGTH(COALESCE(en_kJV, '')) as content_len
+                    FROM bible_verses WHERE ref = :ref
+                    ORDER BY content_len DESC
+                """), {"ref": ref}).fetchall()
+
+                keep_id = rows[0][0]
+                for row in rows[1:]:
+                    del_id = row[0]
+                    conn.execute(
+                        text("DELETE FROM bible_verses WHERE id = :id"),
+                        {"id": del_id},
+                    )
+                    deletions.append((del_id, ref, keep_id))
+            conn.commit()
+
+        # Log changes
+        for del_id, ref, keep_id in deletions:
+            self._log_change(
+                "bible_verses", del_id, "ref",
+                ref, None,
+                f"Phase 2: dedup — removed duplicate of "
+                f"ref {ref} (kept id={keep_id})",
+            )
+        return len(deletions)
+
+    def backfill_en_zo_translations_clean(self) -> int:
+        """Backfill empty translations_clean from translations JSON field.
+
+        Logs each change to audit_log.
+        Returns number of rows fixed.
+        """
+        # Collect fixes first
+        fixes: list[tuple[int, str]] = []  # (row_id, clean_value)
+        table = Table(
+            "dictionary_en_zo", self.metadata, autoload_with=self.engine
+        )
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                table.select().where(
+                    (table.c.translations_clean == None)  # noqa: E711
+                    | (table.c.translations_clean == "")
+                )
+            ).fetchall()
+
+            for row in rows:
+                row_dict = self._row_to_dict(row, table)
+                translations = row_dict.get("translations", "")
+                try:
+                    if isinstance(translations, str):
+                        trans_list = json.loads(translations)
+                    else:
+                        trans_list = translations
+                    if (
+                        trans_list
+                        and isinstance(trans_list, list)
+                        and len(trans_list) > 0
+                    ):
+                        clean = trans_list[0]
+                        if clean and str(clean).strip():
+                            row_id = row.id if hasattr(row, "id") else None
+                            if row_id is not None:
+                                fixes.append(
+                                    (row_id, str(clean).strip())
+                                )
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+            # Apply all updates
+            for row_id, clean_val in fixes:
+                conn.execute(
+                    table.update()
+                    .where(table.c.id == row_id)
+                    .values(translations_clean=clean_val)
+                )
+            conn.commit()
+
+        # Log changes
+        for row_id, clean_val in fixes:
+            self._log_change(
+                "dictionary_en_zo", row_id,
+                "translations_clean",
+                "", clean_val,
+                "Phase 2: backfill from translations JSON field[0]",
+            )
+        return len(fixes)
+
+    # ------------------------------------------------------------------
+    # Phase 4: Export to JSONL
+    # ------------------------------------------------------------------
+    def export_table_to_jsonl(
+        self,
+        table_name: str,
+        output_path: str | Path,
+        fields: list[str] | None = None,
+    ) -> int:
+        """Export a table to JSONL format.
+
+        Args:
+            table_name: Name of the table to export
+            output_path: Path to write the JSONL file
+            fields: Optional list of fields to include (all if None)
+
+        Returns:
+            Number of rows exported
+        """
+        from pathlib import Path
+
+        table = Table(table_name, self.metadata, autoload_with=self.engine)
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+
+        count = 0
+        with self.engine.connect() as conn:
+            rows = conn.execute(table.select()).fetchall()
+            columns = [c.name for c in table.columns]
+            use_fields = fields if fields else columns
+
+            with open(out, "w", encoding="utf-8") as f:
+                for row in rows:
+                    row_dict = self._row_to_dict(row, table)
+                    export = {
+                        k: row_dict[k]
+                        for k in use_fields
+                        if k in row_dict
+                    }
+                    f.write(json.dumps(export, ensure_ascii=False) + "\n")
+                    count += 1
+        return count
+
+    # ------------------------------------------------------------------
+    # Phase 5: Version history
+    # ------------------------------------------------------------------
+    def version_history(
+        self, table_name: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Get version history from audit log, grouped by change session."""
+        return self.get_audit_log(table_name=table_name, limit=1000)
+
+    # ------------------------------------------------------------------
+    # Phase 6: Seed training exercises
+    # ------------------------------------------------------------------
+    def seed_training_exercises(
+        self, exercise_type: str, jsonl_path: str | Path
+    ) -> int:
+        """Import training exercises from JSONL into the training_exercises
+        table."""
+        from pathlib import Path
+
+        path = Path(jsonl_path)
+        if not path.exists():
+            return 0
+
+        count = 0
+        table = Table(
+            "training_exercises", self.metadata, autoload_with=self.engine
+        )
+        with self.engine.connect() as conn:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    d = json.loads(line)
+                    # Extract zolai/english from common field patterns
+                    zolai = d.get(
+                        "zolai", d.get("zo", d.get("input", ""))
+                    )
+                    english = d.get(
+                        "english", d.get("en", d.get("output", ""))
+                    )
+                    if zolai and english:
+                        conn.execute(
+                            table.insert(),
+                            {
+                                "exercise_type": exercise_type,
+                                "zolai": str(zolai),
+                                "english": str(english),
+                                "source": str(path.name),
+                            },
+                        )
+                        count += 1
+            conn.commit()
+        return count
 
     # ------------------------------------------------------------------
     # Helpers

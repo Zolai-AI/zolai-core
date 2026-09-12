@@ -51,6 +51,29 @@ class DictionaryEntry(Base):
         return f"<DictionaryEntry(zolai={self.zolai!r})>"
 
 
+class DictionaryEnZoEntry(Base):
+    """English→Zolai dictionary entries.
+
+    Source: dict_canonical_clean.jsonl
+    """
+
+    __tablename__ = "dictionary_en_zo"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    headword: str = Column(String, nullable=False, index=True)
+    translations: str = Column(Text, nullable=False)  # JSON list
+    translations_clean: str | None = Column(String, nullable=True)
+    pos: str | None = Column(String, nullable=True)
+    source: str = Column(String, nullable=False, default="")
+
+    __table_args__ = (
+        Index("idx_en_zo_headword", "headword"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<DictionaryEnZoEntry(headword={self.headword!r})>"
+
+
 class BibleVerse(Base):
     """Parallel Bible verse data.
 
@@ -194,9 +217,108 @@ class ProvenanceFile(Base):
     row_count: int = Column(Integer, nullable=False, default=0)
     source: str = Column(String, nullable=False, default="")
     generator_script: str = Column(String, nullable=False, default="")
+    version: str = Column(String, nullable=False, default="1.0")
+    status: str = Column(String, nullable=False, default="active")
+    updated_at: str = Column(String, nullable=False, default="")
+    change_log: str = Column(Text, nullable=False, default="[]")  # JSON array
 
     def __repr__(self) -> str:
         return f"<ProvenanceFile(filename={self.filename!r})>"
+
+
+class DataAuditLog(Base):
+    """Tracks every change to data tables.
+
+    Records: table_name, row_id, field, old_value, new_value, changed_at, reason.
+    """
+
+    __tablename__ = "data_audit_log"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    table_name: str = Column(String, nullable=False, index=True)
+    row_id: int = Column(Integer, nullable=False)
+    field: str = Column(String, nullable=False)
+    old_value: str | None = Column(Text, nullable=True)
+    new_value: str | None = Column(Text, nullable=True)
+    changed_at: str = Column(String, nullable=False)
+    reason: str = Column(Text, nullable=False, default="")
+
+    __table_args__ = (
+        Index("idx_audit_table_row", "table_name", "row_id"),
+    )
+
+
+class TrainingExercise(Base):
+    """Training exercises (negation, question, pronoun, error correction)."""
+
+    __tablename__ = "training_exercises"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    exercise_type: str = Column(String, nullable=False, index=True)
+    zolai: str = Column(Text, nullable=False)
+    english: str = Column(Text, nullable=False)
+    source: str = Column(String, nullable=False, default="")
+    difficulty: str = Column(String, nullable=False, default="medium")
+
+    __table_args__ = (
+        Index("idx_exercise_type", "exercise_type"),
+    )
+
+
+class BibleContextAnalysis(Base):
+    """Per-book and per-chapter Bible context analysis."""
+
+    __tablename__ = "bible_context"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    book: str = Column(String, nullable=False, index=True)
+    chapter: int | None = Column(Integer, nullable=True)
+    analysis_type: str = Column(String, nullable=False)
+    data: str = Column(Text, nullable=False)
+
+    __table_args__ = (
+        Index("idx_bible_context_book", "book"),
+    )
+
+
+class WordAlignment(Base):
+    """Word-level alignments between Zolai and English."""
+
+    __tablename__ = "word_alignments"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    ref: str = Column(String, nullable=False, index=True)
+    zolai_word: str = Column(String, nullable=False)
+    english_word: str = Column(String, nullable=False)
+    position: int = Column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        Index("idx_alignment_ref", "ref"),
+    )
+
+
+class WordCollocation(Base):
+    """Word co-occurrence pairs."""
+
+    __tablename__ = "word_collocations"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    word1: str = Column(String, nullable=False, index=True)
+    word2: str = Column(String, nullable=False)
+    frequency: int = Column(Integer, nullable=False, default=0)
+    pmiproxy: float = Column(Float, nullable=False, default=0.0)
+
+
+class Proverb(Base):
+    """Proverbs and sayings."""
+
+    __tablename__ = "proverbs"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    zolai: str = Column(Text, nullable=False)
+    english: str | None = Column(Text, nullable=True)
+    source: str = Column(String, nullable=False, default="")
+    category: str | None = Column(String, nullable=True)
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +326,7 @@ class ProvenanceFile(Base):
 # ---------------------------------------------------------------------------
 MODEL_REGISTRY: dict[str, type[Base]] = {
     "dictionary": DictionaryEntry,
+    "dictionary_en_zo": DictionaryEnZoEntry,
     "bible_verses": BibleVerse,
     "grammar_patterns": GrammarPattern,
     "phrases": PhraseEntry,
@@ -211,4 +334,10 @@ MODEL_REGISTRY: dict[str, type[Base]] = {
     "translations": TranslationPair,
     "word_usage": WordUsageProfile,
     "provenance": ProvenanceFile,
+    "data_audit_log": DataAuditLog,
+    "training_exercises": TrainingExercise,
+    "bible_context": BibleContextAnalysis,
+    "word_alignments": WordAlignment,
+    "word_collocations": WordCollocation,
+    "proverbs": Proverb,
 }

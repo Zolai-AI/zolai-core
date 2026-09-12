@@ -23,13 +23,20 @@ from zolai.data.database import DatabaseManager, get_manager, init_db
 from zolai.data.models import (
     MODEL_REGISTRY,
     Base,
+    BibleContextAnalysis,
     BibleVerse,
+    DataAuditLog,
+    DictionaryEnZoEntry,
     DictionaryEntry,
     GrammarPattern,
     PhraseEntry,
     ProvenanceFile,
+    Proverb,
+    TrainingExercise,
     TranslationPair,
     VocabEntry,
+    WordAlignment,
+    WordCollocation,
     WordUsageProfile,
 )
 
@@ -145,12 +152,14 @@ def sample_provenance():
 # ---------------------------------------------------------------------------
 class TestSchemaCreation:
     def test_init_db_creates_tables(self, tmp_db):
-        """1. init_db creates all 8 tables."""
+        """1. init_db creates all 15 tables."""
         names = tmp_db.table_names()
         expected = {
-            "dictionary", "bible_verses", "grammar_patterns",
+            "dictionary", "dictionary_en_zo", "bible_verses", "grammar_patterns",
             "phrases", "vocab", "translations", "word_usage",
-            "provenance",
+            "provenance", "data_audit_log",
+            "training_exercises", "bible_context", "word_alignments",
+            "word_collocations", "proverbs",
         }
         assert expected.issubset(set(names))
 
@@ -158,7 +167,7 @@ class TestSchemaCreation:
         """20. Calling init_db twice does not raise."""
         tmp_db.init_db()
         tmp_db.init_db()
-        assert len(tmp_db.table_names()) == 8
+        assert len(tmp_db.table_names()) == 15
 
 
 class TestDictionaryCRUD:
@@ -435,19 +444,28 @@ class TestPostgresSkip:
 
 class TestModelImports:
     def test_all_models_importable(self):
-        """25. All 8 ORM models are importable and have correct table names."""
+        """25. All 15 ORM models are importable and have correct table names."""
+        from zolai.data.models import (
+            BibleContextAnalysis, DataAuditLog, Proverb, TrainingExercise,
+            WordAlignment, WordCollocation,
+        )
+
         models = [
-            DictionaryEntry, BibleVerse, GrammarPattern, PhraseEntry,
-            VocabEntry, TranslationPair, WordUsageProfile, ProvenanceFile,
+            DictionaryEntry, DictionaryEnZoEntry, BibleVerse, GrammarPattern,
+            PhraseEntry, VocabEntry, TranslationPair, WordUsageProfile,
+            ProvenanceFile, DataAuditLog, TrainingExercise, BibleContextAnalysis,
+            WordAlignment, WordCollocation, Proverb,
         ]
         table_names = {
-            "dictionary", "bible_verses", "grammar_patterns",
+            "dictionary", "dictionary_en_zo", "bible_verses", "grammar_patterns",
             "phrases", "vocab", "translations", "word_usage",
-            "provenance",
+            "provenance", "data_audit_log",
+            "training_exercises", "bible_context", "word_alignments",
+            "word_collocations", "proverbs",
         }
         actual = {m.__tablename__ for m in models}
         assert actual == table_names
-        assert len(MODEL_REGISTRY) == 8
+        assert len(MODEL_REGISTRY) == 15
 
 
 class TestFTS5:
@@ -524,6 +542,70 @@ class TestHealthCheck:
         assert isinstance(info["table_counts"], dict)
         assert info["total_rows"] >= 1
         assert info["query_latency_ms"] >= 0
+
+
+class TestAuditLog:
+    def test_audit_log_table_exists(self, tmp_db):
+        """33. Audit log table is created."""
+        assert "data_audit_log" in tmp_db.table_names()
+
+    def test_log_change(self, tmp_db):
+        """34. Log a change and retrieve it."""
+        tmp_db._log_change("dictionary", 1, "english", "old", "new", "test fix")
+        logs = tmp_db.get_audit_log("dictionary", 1)
+        assert len(logs) == 1
+        assert logs[0]["field"] == "english"
+        assert logs[0]["old_value"] == "old"
+        assert logs[0]["new_value"] == "new"
+        assert logs[0]["reason"] == "test fix"
+
+    def test_get_audit_log_filters(self, tmp_db):
+        """35. Audit log filtering works."""
+        tmp_db._log_change("dictionary", 1, "f1", "o1", "n1", "r1")
+        tmp_db._log_change("dictionary", 2, "f2", "o2", "n2", "r2")
+        tmp_db._log_change("bible_verses", 1, "f3", "o3", "n3", "r3")
+
+        dict_logs = tmp_db.get_audit_log("dictionary")
+        assert len(dict_logs) == 2
+
+        row_logs = tmp_db.get_audit_log("dictionary", 1)
+        assert len(row_logs) == 1
+
+    def test_provenance_new_columns(self, tmp_db):
+        """36. Provenance has version, status, updated_at, change_log columns."""
+        from sqlalchemy import inspect
+
+        inspector = inspect(tmp_db.engine)
+        cols = {c["name"] for c in inspector.get_columns("provenance")}
+        assert "version" in cols
+        assert "status" in cols
+        assert "updated_at" in cols
+        assert "change_log" in cols
+
+
+class TestQualityReport:
+    def test_quality_report_structure(self, tmp_db):
+        """37. Quality report returns data for all tables."""
+        report = tmp_db.quality_report()
+        assert len(report) >= 9  # at least 9 tables
+        for table_name, info in report.items():
+            assert "row_count" in info
+            assert "null_counts" in info
+
+    def test_quality_report_with_data(self, tmp_db, sample_dict):
+        """38. Quality report counts nulls correctly."""
+        tmp_db.insert_many("dictionary", [sample_dict])
+        report = tmp_db.quality_report()
+        assert report["dictionary"]["row_count"] == 1
+
+
+class TestExportExtended:
+    def test_export_table(self, tmp_db, sample_dict):
+        """39. Export table returns all rows as dicts."""
+        tmp_db.insert_many("dictionary", [sample_dict])
+        rows = tmp_db.export_table("dictionary")
+        assert len(rows) == 1
+        assert rows[0]["zolai"] == sample_dict["zolai"]
 
 
 class TestPostgresAutoDetect:
