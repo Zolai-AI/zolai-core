@@ -264,8 +264,8 @@ class Agent4_WebResearcher:
 
         validated = 0
         try:
-            from gemini_webapi import GeminiClient
-            client = GeminiClient()
+            from gemini_cookies import get_gemini_client
+            client = get_gemini_client()
             await client.init(timeout=30, auto_close=True, close_delay=120)
 
             for en, expected_zo in test_cases[:3]:  # Test 3 per cycle

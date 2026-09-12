@@ -71,9 +71,9 @@ class TranslationValidator:
     async def validate_translation(self, en, expected_zo, category):
         """Validate a single translation using Gemini Web API"""
         try:
-            from gemini_webapi import GeminiClient
+            from gemini_cookies import get_gemini_client
 
-            client = GeminiClient()
+            client = get_gemini_client()
             await client.init(timeout=30, auto_close=True, close_delay=120)
 
             prompt = f"""You are a Tedim Zolai ZVS language expert. Evaluate this translation:

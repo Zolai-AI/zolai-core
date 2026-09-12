@@ -10,7 +10,7 @@ Usage:
 import argparse
 import asyncio
 
-from gemini_webapi import GeminiClient
+from gemini_cookies import get_gemini_client
 
 
 async def test_basic(client: GeminiClient):
@@ -29,7 +29,7 @@ async def fix_zvs(client: GeminiClient, sentence: str):
 
 async def main(zvs_sentence: str | None = None):
     # Auto-import cookies from Chrome (browser-cookie3)
-    client = GeminiClient()
+    client = get_gemini_client()
     await client.init(timeout=30, auto_close=True, close_delay=60, auto_refresh=True)
 
     if zvs_sentence:
