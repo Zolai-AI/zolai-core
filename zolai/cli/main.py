@@ -633,3 +633,64 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# ============================================================
+# SERVER + DESKTOP
+# ============================================================
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("0.0.0.0", "--host", "-h"),
+    port: int = typer.Option(8000, "--port", "-p"),
+    reload: bool = typer.Option(False, "--reload", "-r"),
+):
+    """🌐 Start the Zolai API server."""
+    import subprocess
+    import sys
+
+    rprint(f"[green]Starting API server on {host}:{port}...[/green]")
+    cmd = [sys.executable, "-m", "uvicorn", "zolai.api.server:app",
+           "--host", host, "--port", str(port)]
+    if reload:
+        cmd.append("--reload")
+    subprocess.run(cmd, cwd=str(config.paths.data.parent))
+
+
+@app.command()
+def desktop():
+    """🖥️ Launch the Zolai desktop app."""
+    import subprocess
+    import os
+
+    workspace = Path(__file__).parent.parent.parent.parent
+    tauri_dir = workspace / "zolai-tauri"
+    api_url = f"http://localhost:{config.api_port}"
+
+    # 1. Check if API is running
+    import urllib.request
+    try:
+        urllib.request.urlopen(f"{api_url}/health", timeout=2)
+        rprint("[green]✅ API already running[/green]")
+    except Exception:
+        rprint("[yellow]Starting API server...[/yellow]")
+        subprocess.Popen(
+            [os.sys.executable, "-m", "uvicorn", "zolai.api.server:app",
+             "--host", "0.0.0.0", "--port", str(config.api_port)],
+            cwd=str(config.paths.data.parent),
+            stdout=open("/tmp/zolai-api.log", "w"),
+            stderr=subprocess.STDOUT,
+        )
+        import time
+        time.sleep(2)
+        rprint(f"[green]✅ API started on :{config.api_port}[/green]")
+
+    # 2. Launch desktop app
+    bin_path = tauri_dir / "src-tauri/target/release/zolai-desktop"
+    if bin_path.exists():
+        rprint("[green]Launching compiled desktop app...[/green]")
+        subprocess.Popen([str(bin_path)])
+    else:
+        rprint("[yellow]No compiled binary — building and running dev mode...[/yellow]")
+        subprocess.Popen(["bunx", "tauri", "dev"], cwd=str(tauri_dir))
