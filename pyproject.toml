@@ -77,9 +77,20 @@ dev = [
     "ruff>=0.3",
     "mypy>=1.8",
 ]
+# GPU/CUDA training dependencies (requires NVIDIA GPU + CUDA driver)
+gpu = [
+    "torch>=2.10",
+    "bitsandbytes>=0.43.0",
+    "accelerate>=1.13",
+    "peft>=0.19",
+    "trl>=1.1",
+    "scipy>=1.10",
+]
+# Full with GPU support
 full = [
     "zolai[gui]",
     "zolai[dev]",
+    "zolai[gpu]",
 ]
 
 [project.scripts]
