@@ -1,0 +1,190 @@
+// zolai-core/prisma/schema.prisma
+// Shared schema — mirrors SQLAlchemy models in zolai/data/models.py
+// Use: npx prisma generate (generates Python client via prisma-client-py)
+// Or:  prisma migrate dev (for PostgreSQL)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Dictionary {
+  id          Int      @id @default(autoincrement())
+  zolai       String   @unique
+  english     String
+  englishClean String? @map("english_clean")
+  source      String
+  pos         String
+
+  @@map("dictionary")
+}
+
+model DictionaryEnZo {
+  id                Int     @id @default(autoincrement())
+  headword          String
+  translations      String
+  translationsClean String? @map("translations_clean")
+  pos               String?
+  source            String
+
+  @@index([headword])
+  @@map("dictionary_en_zo")
+}
+
+model BibleVerse {
+  id          Int     @id @default(autoincrement())
+  ref         String
+  book        String
+  chapter     Int
+  verse       Int
+  zoTdb77     String? @map("zo_tdb77")
+  zoTedim2010 String? @map("zo_tedim2010")
+  enKjv       String? @map("en_kJV")
+
+  @@index([ref])
+  @@index([book])
+  @@map("bible_verses")
+}
+
+model GrammarPattern {
+  id          Int     @id @default(autoincrement())
+  patternId   String  @map("pattern_id")
+  pattern     String
+  description String?
+  function    String
+  examples    String
+  frequency   Int
+
+  @@map("grammar_patterns")
+}
+
+model Phrase {
+  id       Int    @id @default(autoincrement())
+  zo       String
+  english  String
+  frequency Int
+  examples String
+
+  @@map("phrases")
+}
+
+model Vocab {
+  id        Int    @id @default(autoincrement())
+  headword  String
+  english   String
+  frequency Int
+  books     String
+  examples  String
+
+  @@map("vocab")
+}
+
+model Translation {
+  id         Int     @id @default(autoincrement())
+  source     String
+  target     String
+  direction  String
+  reference  String
+  confidence Float
+
+  @@map("translations")
+}
+
+model WordUsage {
+  id              Int    @id @default(autoincrement())
+  word            String
+  book            String
+  totalFreq       Int    @map("total_freq")
+  meaningShifts   String @map("meaning_shifts")
+  coOccurringWords String @map("co_occurring_words")
+
+  @@map("word_usage")
+}
+
+model TrainingExercise {
+  id            Int    @id @default(autoincrement())
+  exerciseType  String @map("exercise_type")
+  zolai         String
+  english       String
+  source        String
+  difficulty    String
+
+  @@index([exerciseType])
+  @@map("training_exercises")
+}
+
+model BibleContext {
+  id           Int     @id @default(autoincrement())
+  book         String
+  chapter      Int?
+  analysisType String  @map("analysis_type")
+  data         String
+
+  @@index([book])
+  @@map("bible_context")
+}
+
+model WordAlignment {
+  id          Int    @id @default(autoincrement())
+  ref         String
+  zolaiWord   String @map("zolai_word")
+  englishWord String @map("english_word")
+  position    Int
+
+  @@index([ref])
+  @@map("word_alignments")
+}
+
+model WordCollocation {
+  id        Int    @id @default(autoincrement())
+  word1     String
+  word2     String
+  frequency Int
+  pmiproxy  Float
+
+  @@map("word_collocations")
+}
+
+model Proverb {
+  id       Int     @id @default(autoincrement())
+  zolai    String
+  english  String?
+  source   String
+  category String?
+
+  @@map("proverbs")
+}
+
+model Provenance {
+  id              Int    @id @default(autoincrement())
+  filename        String
+  sizeBytes       Int    @map("size_bytes")
+  sha256          String
+  rowCount        Int    @map("row_count")
+  source          String
+  generatorScript String @map("generator_script")
+  version         String
+  status          String
+  updatedAt       String @map("updated_at")
+  changeLog       String @map("change_log")
+
+  @@map("provenance")
+}
+
+model DataAuditLog {
+  id        Int    @id @default(autoincrement())
+  tableName String @map("table_name")
+  rowId     Int    @map("row_id")
+  field     String
+  oldValue  String? @map("old_value")
+  newValue  String? @map("new_value")
+  changedAt String  @map("changed_at")
+  reason    String
+
+  @@index([tableName, rowId])
+  @@map("data_audit_log")
+}
