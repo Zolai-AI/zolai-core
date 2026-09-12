@@ -1,5 +1,7 @@
 # zolai-core — Zolai Python toolkit + RAG Knowledge Brain
 
+<p align="center"><img src="logo.png" alt="Zolai AI" width="120"></p>
+
 Bilingual (Tedim Zolai ⇄ English) AI toolkit for the Zomi people. Python package,
 FastAPI services, and the **RAG-first Knowledge Brain** (embeddings over wiki + PDF,
 no raw fine-tuning).
