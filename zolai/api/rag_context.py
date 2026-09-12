@@ -9,6 +9,9 @@ import re
 from pathlib import Path
 from typing import Optional
 
+from ..config import config
+from ..data.database import get_manager
+
 # Data paths (shared across repos)
 DATA_DIR = Path(__file__).parent.parent.parent.parent.parent / "data"
 DICT_ZO_EN = DATA_DIR / "dictionary" / "processed" / "dict_zo_en_master_v1.jsonl"
@@ -20,6 +23,15 @@ class ZolaiRAGContext:
     """Lightweight RAG context injector for Zolai conversations."""
 
     def __init__(self):
+        self._db = None
+        # Try database first (fast, indexed)
+        db_path = config.paths.data / "zolai.db"
+        if db_path.exists():
+            try:
+                self._db = get_manager(f"sqlite:///{db_path}")
+            except Exception:
+                self._db = None
+        # JSONL fallback (legacy)
         self.dict_zo_en = self._load_jsonl(DICT_ZO_EN)
         self.bible_verses = self._load_jsonl(BIBLE_CORPUS)
         self.wiki_phrases = self._load_json(WIKI_PHRASES) if WIKI_PHRASES.exists() else {}
@@ -56,6 +68,10 @@ class ZolaiRAGContext:
 
     def lookup_dictionary(self, word: str, limit: int = 3) -> list[dict]:
         """Look up a word in the Zolai→English dictionary."""
+        if self._db:
+            results = self._db.lookup_word(word)
+            return results[:limit]
+        # JSONL fallback
         results = []
         for entry in self.dict_zo_en:
             zolai = entry.get('zolai', '').lower()
@@ -68,6 +84,17 @@ class ZolaiRAGContext:
 
     def find_bible_examples(self, word: str, limit: int = 3) -> list[dict]:
         """Find Bible verses containing the word."""
+        if self._db:
+            results = self._db.search_bible(word)
+            return [
+                {
+                    'reference': r.get('ref', ''),
+                    'zolai': r.get('zo_tdb77', ''),
+                    'english': r.get('en_kJV', ''),
+                }
+                for r in results[:limit]
+            ]
+        # JSONL fallback
         results = []
         for verse in self.bible_verses:
             zo = verse.get('zo', '').lower()
@@ -81,6 +108,20 @@ class ZolaiRAGContext:
                 if len(results) >= limit:
                     break
         return results
+
+    def search_phrases(self, word: str, limit: int = 3) -> list[dict]:
+        """Search phrases containing the word."""
+        if self._db:
+            results = self._db.match_phrase(word)
+            return results[:limit]
+        # JSONL fallback (wiki_phrases is a dict)
+        matches = []
+        for phrase, meaning in self.wiki_phrases.items():
+            if word in phrase.lower():
+                matches.append({'zolai': phrase, 'english': meaning})
+                if len(matches) >= limit:
+                    break
+        return matches
 
     def get_grammar_hint(self, word: str) -> Optional[str]:
         """Get grammar pattern for a word."""

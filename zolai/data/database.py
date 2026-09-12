@@ -26,9 +26,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import MetaData, Table, create_engine, text
+from sqlalchemy import MetaData, Table, create_engine, func, text
 from sqlalchemy.engine import Engine
 
+from ..config import config
 from .models import MODEL_REGISTRY, Base
 
 logger = logging.getLogger(__name__)
@@ -104,13 +105,22 @@ class DatabaseManager:
     # Lookup methods
     # ------------------------------------------------------------------
     def lookup_word(self, word: str) -> list[dict[str, Any]]:
-        """Search dictionary by Zolai headword (case-insensitive)."""
+        """Search dictionary by Zolai headword — exact match first, then LIKE fallback."""
         table = Table("dictionary", self.metadata, autoload_with=self.engine)
         with self.engine.connect() as conn:
+            # Try exact match first (case-insensitive)
+            rows = conn.execute(
+                table.select().where(
+                    func.lower(table.c.zolai) == word.lower()
+                )
+            ).fetchall()
+            if rows:
+                return [self._row_to_dict(row, table) for row in rows]
+            # Fallback: substring match
             rows = conn.execute(
                 table.select().where(
                     table.c.zolai.ilike(f"%{word}%")
-                )
+                ).limit(10)
             ).fetchall()
         return [self._row_to_dict(row, table) for row in rows]
 
@@ -593,14 +603,17 @@ def get_manager(db_url: str | None = None) -> DatabaseManager:
 
     If db_url is provided, creates a new manager (replaces any existing).
     If not provided and no singleton exists, checks ZOLAI_PG_URL env var.
-    If ZOLAI_PG_URL is set, uses PostgreSQL; otherwise uses SQLite.
+    If ZOLAI_PG_URL is set, uses PostgreSQL; otherwise uses SQLite
+    at config.paths.data / "zolai.db".
     """
     global _manager
     if db_url is not None or _manager is None:
         if _manager is not None:
             _manager.dispose()
         if db_url is None:
-            db_url = os.environ.get("ZOLAI_PG_URL") or "sqlite:///zolai.db"
+            db_url = os.environ.get("ZOLAI_PG_URL") or (
+                f"sqlite:///{config.paths.data / 'zolai.db'}"
+            )
         _manager = DatabaseManager(db_url)
     return _manager
 
@@ -632,7 +645,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--db",
-        default="sqlite:///zolai.db",
+        default=f"sqlite:///{config.paths.data / 'zolai.db'}",
         help="Database URL",
     )
     sub = parser.add_subparsers(dest="command")

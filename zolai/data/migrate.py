@@ -18,6 +18,8 @@ from typing import Any
 from .database import DatabaseManager, get_manager
 from .models import MODEL_REGISTRY
 
+from ..config import config
+
 # Map of table_name → (jsonl_relative_path_under_data_dir, json_columns)
 迁移_MAP: dict[str, tuple[str, set[str]]] = {
     "dictionary": ("dictionary/processed/dict_zo_en_master_v1.jsonl", {"english"}),
@@ -222,8 +224,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--db",
-        default="sqlite:///zolai.db",
-        help="Database URL (default: sqlite:///zolai.db)",
+        default=f"sqlite:///{config.paths.data / 'zolai.db'}",
+        help="Database URL (default: <data_dir>/zolai.db)",
     )
     args = parser.parse_args()
     migrate_jsonl_to_db(args.data_dir, args.db)
