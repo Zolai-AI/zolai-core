@@ -89,9 +89,9 @@ conn.close()
       ;;
     8)
       echo -e "${G}Running smart installer...${NC}"
-      echo -e "  ${YELL}This will detect your system and install only what's needed.${NC}"
-      echo -e "  ${YELL}No NVIDIA GPU? → CPU-only packages (~300MB).${NC}"
-      echo -e "  ${YELL}Have NVIDIA GPU? → GPU packages (~5GB).${NC}"
+      echo -e "  ${Y}This will detect your system and install only what's needed.${NC}"
+      echo -e "  ${Y}No NVIDIA GPU? → CPU-only packages (~300MB).${NC}"
+      echo -e "  ${Y}Have NVIDIA GPU? → GPU packages (~5GB).${NC}"
       echo ""
       read -p "  Continue? (y/N): " confirm
       if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
