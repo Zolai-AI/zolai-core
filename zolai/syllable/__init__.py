@@ -18,6 +18,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# Version info
+__version__ = "1.0.0"
+__author__ = "Zolai-AI Community"
+__license__ = "MIT"
+
 # NLP Pipeline Integration (SylBreak4All M7)
 from .integration import SyllableAwarePOS, SyllableEmbeddings, ZolaiTokenizer
 
