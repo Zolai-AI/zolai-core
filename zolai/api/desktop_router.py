@@ -1,27 +1,28 @@
 """Desktop Router — handles all 14 tool categories for the Zolai Desktop UI.
 Routes desktop UI calls to the appropriate zolai-core functions and scripts."""
-import json, os, subprocess, sys
-from pathlib import Path
-from typing import Optional
-from fastapi import APIRouter, Query, Request
-from pydantic import BaseModel
+import json
+import subprocess
+import sys
+
+from fastapi import APIRouter, Query
+
+from ..config import config
 
 router = APIRouter(prefix="/desktop", tags=["desktop"])
 
-BASE_DIR = Path(__file__).parent.parent.parent
-DATA_DIR = BASE_DIR.parent / "data"
-ZOLAI_CORE = str(BASE_DIR)
+SCRIPTS_DIR = config.paths.root / "scripts"
+ZOLAI_CORE = str(config.paths.root)
 
 def run_script(name: str, *args: str, timeout: int = 120):
     """Run a zolai script and return parsed JSON output."""
-    script = BASE_DIR / "scripts" / name
+    script = SCRIPTS_DIR / name
     if not script.exists():
         return {"error": f"Script not found: {name}"}
     try:
         r = subprocess.run(
             [sys.executable, str(script), *args],
             capture_output=True, text=True, timeout=timeout,
-            cwd=str(ZOLAI_CORE)
+            cwd=ZOLAI_CORE
         )
         if r.returncode != 0:
             return {"error": f"Script failed: {r.stderr[:500]}"}
@@ -35,9 +36,9 @@ def run_script(name: str, *args: str, timeout: int = 120):
         return {"error": str(e)}
 
 def get_db():
-    """Get SQLite connection."""
+    """Get SQLite connection to the canonical DB."""
     import sqlite3
-    db_path = DATA_DIR / "zolai.db"
+    db_path = config.paths.zolai_db
     return sqlite3.connect(str(db_path), timeout=5)
 
 def serialize_row(row):
@@ -67,7 +68,8 @@ async def db_tables():
             cur.execute(f"SELECT COUNT(*) FROM [{t}]")
             count = cur.fetchone()[0]
             result.append({"table": t, "rows": count})
-        cur.close(); conn.close()
+        cur.close()
+        conn.close()
         return {"tables": result, "total": len(result)}
     except Exception as e:
         return {"error": str(e)}
@@ -83,34 +85,70 @@ async def db_query(sql: str = Query(...)):
         cur.execute(sql)
         rows = cur.fetchall()
         cols = [d[0] for d in cur.description]
-        cur.close(); conn.close()
+        cur.close()
+        conn.close()
         return {"columns": cols, "rows": [serialize_row(r) for r in rows], "count": len(rows)}
     except Exception as e:
         return {"error": str(e)}
 
 @router.get("/stats")
 async def db_stats():
-    """Get database statistics."""
+    """Get database statistics (dashboard shape)."""
     try:
         conn = get_db()
         cur = conn.cursor()
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         tables = [r[0] for r in cur.fetchall() if r[0] != 'sqlite_sequence']
+
+        def n(name: str) -> int:
+            try:
+                cur.execute(f"SELECT COUNT(*) FROM [{name}]")
+                return cur.fetchone()[0]
+            except Exception:
+                return 0
+
         result = {}
         total = 0
         for t in tables:
-            cur.execute(f"SELECT COUNT(*) FROM [{t}]")
-            c = cur.fetchone()[0]
+            c = n(t)
             result[t] = c
             total += c
+
+        # Capture specific counts before touching pragma (avoids cursor issues)
+        dict_total = n("dictionary")
+        my_count = 0
+        try:
+            cur.execute(
+                "SELECT COUNT(*) FROM dictionary WHERE myanmar IS NOT NULL AND myanmar != ''"
+            )
+            my_count = cur.fetchone()[0]
+        except Exception:
+            my_count = 0
+        pct = round(my_count / dict_total * 100, 1) if dict_total else 0.0
+
+        # DB size — pragma query can contaminate cursor, so do it LAST
         cur.execute("SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()")
         size_bytes = cur.fetchone()[0]
-        cur.close(); conn.close()
+        cur.close()
+        conn.close()
         return {
-            "tables": len(tables),
+            "total_tables": len(tables),
             "total_rows": total,
-            "db_size_mb": round(size_bytes / 1024 / 1024, 1),
-            "table_details": result
+            "database_size_mb": round(size_bytes / 1024 / 1024, 1),
+            "dictionary": {"total": result.get("dictionary", 0), "coverage_myanmar_pct": pct},
+            "bible": {"total_verses": result.get("bible_verses", 0)},
+            "training": {
+                "translation_pairs": result.get("translations", 0),
+                "training_exercises": result.get("training_exercises", 0),
+                "vocabulary_entries": result.get("vocab", 0),
+                "phrases": result.get("phrases", 0),
+                "grammar_patterns": result.get("grammar_patterns", 0),
+                "proverbs": result.get("proverbs", 0),
+                "word_alignments": result.get("word_alignments", 0),
+                "word_usage_profiles": result.get("word_usage", 0),
+            },
+            "provenance": {"audit_log_entries": result.get("data_audit_log", 0)},
+            "table_details": result,
         }
     except Exception as e:
         return {"error": str(e)}
@@ -126,10 +164,14 @@ async def dict_browse(limit: int = 50):
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT zolai, english_clean, myanmar, pos, source FROM dictionary ORDER BY zolai LIMIT ?", (limit,))
+        cur.execute(
+            "SELECT zolai, english_clean, myanmar, pos, source FROM dictionary ORDER BY zolai LIMIT ?",
+            (limit,),
+        )
         rows = cur.fetchall()
         cols = [d[0] for d in cur.description]
-        cur.close(); conn.close()
+        cur.close()
+        conn.close()
         return {"results": [dict(zip(cols, r)) for r in rows]}
     except Exception as e:
         return {"error": str(e)}
@@ -148,7 +190,8 @@ async def dict_stats():
         my_count = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM dictionary WHERE english_clean IS NOT NULL")
         en_clean = cur.fetchone()[0]
-        cur.close(); conn.close()
+        cur.close()
+        conn.close()
         return {"total": total, "with_myanmar": my_count, "english_clean": en_clean, "pos_breakdown": pos_counts}
     except Exception as e:
         return {"error": str(e)}
@@ -197,6 +240,11 @@ async def bible_context_topics():
 async def gemini_fill_en(limit: int = Query(50)):
     """Fill missing English translations."""
     return run_script("gemini_translate.py", "--fill-en", "--limit", str(limit))
+
+@ router.get("/gemini/fill-my")
+async def gemini_fill_my(limit: int = Query(50)):
+    """Fill missing Myanmar translations."""
+    return run_script("gemini_translate.py", "--fill-my", "--limit", str(limit))
 
 @ router.get("/gemini/coverage")
 async def gemini_coverage():
