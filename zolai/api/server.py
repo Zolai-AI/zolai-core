@@ -3,7 +3,6 @@
 import logging
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -13,12 +12,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..analyzer.corpus import CorpusAnalyzer
+from ..api.desktop_router import router as desktop_router
 from ..cleaner.pipeline import CleanPipeline
 from ..config import config
 from ..crawler.engine import CrawlEngine
 from ..dictionary.manager import DictionaryManager
 from ..trainer.dataset import DatasetBuilder
-from ..api.desktop_router import router as desktop_router
 
 logger = logging.getLogger(__name__)
 
@@ -277,12 +276,12 @@ def create_app() -> FastAPI:
         version="1.0.0",
         lifespan=lifespan,
     )
-    
-    app.include_router(desktop_router)    
+
+    app.include_router(desktop_router)
     # --- Static File Serving for Desktop App ---
     from fastapi.responses import FileResponse
-    _FRONTEND_DIR = Path(__file__).parent.parent.parent / "tauri" / "frontend"
-    
+    _FRONTEND_DIR = config.paths.frontend
+
     @app.get("/")
     async def serve_frontend():
         """Serve the desktop app HTML."""
@@ -290,14 +289,6 @@ def create_app() -> FastAPI:
         if html_path.exists():
             return FileResponse(str(html_path))
         return {"status": "ok", "version": "0.3.0", "api": "running"}
-    
-    @app.get("/{path:path}")
-    async def serve_static(path: str):
-        """Serve static files (CSS/JS/images only)."""
-        file_path = _FRONTEND_DIR / path
-        if file_path.exists() and file_path.is_file():
-            return FileResponse(str(file_path))
-        return {"error": "Not found"}
 
     app.add_middleware(
         CORSMiddleware,
@@ -427,7 +418,7 @@ def create_app() -> FastAPI:
             return DictSearchResponse(
                 status="ok", results=results[:20]
             )
-        except Exception as e:
+        except Exception:
             # Fallback to DictionaryManager if DB fails
             try:
                 manager = DictionaryManager()
@@ -473,10 +464,10 @@ def create_app() -> FastAPI:
                 "count": len(results),
                 "results": results,
             }
-        except Exception as e:
+        except Exception:
             # Fallback to JSONL if DB fails
             import json
-            parallel_dir = Path("/home/peter/Documents/Projects/zolai-ai/data/parallel")
+            parallel_dir = config.paths.data / "parallel"
             version_map = {
                 "tdb77": "bible_parallel_tdb77_kjv.jsonl",
                 "tbr17": "bible_parallel_tbr17_kjv.jsonl",
@@ -861,17 +852,19 @@ def create_app() -> FastAPI:
         messages = [ChatMessage(role="user", content=q)]
         return await chat(ChatRequest(messages=messages, model=model))
 
-    # === Web UI ===
+    # --- Web UI ---
 
-    @app.get("/")
-    async def web_ui():
-        """Serve web chat UI."""
-        from fastapi.responses import HTMLResponse
+    # (No duplicate "/" route — serve_frontend above handles "/" for the desktop app.)
 
-        html_path = Path(__file__).parent / "templates" / "index.html"
-        if html_path.exists():
-            return HTMLResponse(html_path.read_text(encoding="utf-8"))
-        return HTMLResponse("<h1>Zolai API</h1><p>Go to /docs for API docs</p>")
+
+    # === Static File Serving (last route - catch-all) ===
+    @app.get("/{path:path}")
+    async def serve_static(path: str):
+        """Serve static files (CSS/JS/images only)."""
+        file_path = _FRONTEND_DIR / path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(str(file_path))
+        return {"error": "Not found"}
 
     return app
 

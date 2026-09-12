@@ -63,7 +63,7 @@ class Paths:
     db: Path = field(
         default_factory=lambda: _env_path(
             "ZOLAI_DB_PATH",
-            _env_path("ZOLAI_DATA_ROOT", _TOOLKIT_ROOT.parent / "data") / "crawler.db",
+            _env_path("ZOLAI_DATA_ROOT", _TOOLKIT_ROOT.parent / "data") / "zolai.db",
         )
     )
 
@@ -71,6 +71,19 @@ class Paths:
     external_data: Path = field(
         default_factory=lambda: _env_path("ZOLAI_EXTERNAL_DATA", _TOOLKIT_ROOT.parent / "data")
     )
+
+    @property
+    def zolai_db(self) -> Path:
+        """Canonical DB path — data/zolai.db (env-overridable)."""
+        return self.data / "zolai.db"
+
+    @property
+    def frontend(self) -> Path:
+        """Path to the desktop frontend directory (zolai-tauri/frontend)."""
+        return _env_path(
+            "ZOLAI_FRONTEND_DIR",
+            self.root.parent / "zolai-tauri" / "frontend",
+        )
 
     def ensure_dirs(self):
         for p in [self.data_raw, self.data_cleaned, self.data_training, self.data_knowledge, self.data_archive]:
