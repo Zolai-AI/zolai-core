@@ -9,6 +9,21 @@ WORKSPACE="$(cd "$DIR/.." && pwd)"
 
 R='\033[0;31m' G='\033[0;32m' Y='\033[1;33m' C='\033[0;36m' M='\033[0;35m' NC='\033[0m'
 
+stop_server() {
+  PID=$(pgrep -f "uvicorn zolai.api.server" | head -1)
+  if [ -n "$PID" ]; then
+    kill "$PID" 2>/dev/null
+    sleep 1
+    if pgrep -f "uvicorn zolai.api.server" >/dev/null 2>&1; then
+      echo -e "  ${Y}Process still running, forcing...${NC}"
+      kill -9 "$PID" 2>/dev/null
+    fi
+    echo -e "  ${G}✅ Server stopped${NC}"
+  else
+    echo -e "  ${Y}No server running${NC}"
+  fi
+}
+
 while true; do
   clear
   echo -e "${C}╔══════════════════════════════════════════╗${NC}"
@@ -35,31 +50,43 @@ while true; do
       python -m uvicorn zolai.api.server:app --host 0.0.0.0 --port 8000
       ;;
     2)
+      echo -e "${G}Stopping API server...${NC}"
+      stop_server
+      read -p "Press Enter..."
+      ;;
+    3)
+      echo -e "${G}Force stopping API server...${NC}"
+      pkill -9 -f "uvicorn zolai.api.server" 2>/dev/null
+      sleep 1
+      echo -e "  ${G}✅ Server force stopped${NC}"
+      read -p "Press Enter..."
+      ;;
+    4)
       echo -e "${G}Launching desktop app...${NC}"
       source "$DIR/.venv/bin/activate" 2>/dev/null || true
       cd "$DIR" && zolai desktop
       ;;
-    3)
+    5)
       echo -e "${G}Starting server + desktop...${NC}"
       source "$DIR/.venv/bin/activate" 2>/dev/null || true
       cd "$DIR"
       nohup python -m uvicorn zolai.api.server:app --host 0.0.0.0 --port 8000 > /tmp/zolai-api.log 2>&1 &
       echo "$!" > /tmp/zolai-api.pid
       sleep 2
-      if curl -s http://localhost:8000/health >/dev/null 2>&1; then
+      if curl -s http://localhost:8000/ >/dev/null 2>&1; then
         echo -e "  ${G}✅ API running${NC}"
         cd "$DIR" && zolai desktop
       else
         echo -e "  ${R}❌ API failed${NC}"
       fi
       ;;
-    4)
+    6)
       echo -e "${G}Running tests...${NC}"
       source "$DIR/.venv/bin/activate" 2>/dev/null || true
       cd "$DIR" && python -m pytest tests/ -q --tb=short
       read -p "Press Enter..."
       ;;
-    5)
+    7)
       echo -e "${G}DB Health Check...${NC}"
       source "$DIR/.venv/bin/activate" 2>/dev/null || true
       cd "$DIR" && python -c "
@@ -79,15 +106,16 @@ conn.close()
 "
       read -p "Press Enter..."
       ;;
-    6)
+    8)
+      echo -e "${G}CLI info...${NC}"
       source "$DIR/.venv/bin/activate" 2>/dev/null || true
       cd "$DIR" && zolai info
       read -p "Press Enter..."
       ;;
-    7)
+    9)
       bash "$WORKSPACE/zolai-datasets/scripts/bible/menu.sh"
       ;;
-    8)
+    A)
       echo -e "${G}Running smart installer...${NC}"
       echo -e "  ${Y}This will detect your system and install only what's needed.${NC}"
       echo -e "  ${Y}No NVIDIA GPU? → CPU-only packages (~300MB).${NC}"
@@ -100,7 +128,7 @@ conn.close()
       fi
       read -p "Press Enter..."
       ;;
-    9)
+    B)
       echo -e "${G}Building desktop app...${NC}"
       cd "$WORKSPACE/zolai-tauri/src-tauri" && cargo build --release
       read -p "Press Enter..."

@@ -278,7 +278,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     
-    app.include_router(desktop_router, prefix="/desktop", tags=["desktop"])    
+    app.include_router(desktop_router)    
     # --- Static File Serving for Desktop App ---
     from fastapi.responses import FileResponse
     _FRONTEND_DIR = Path(__file__).parent.parent.parent / "tauri" / "frontend"
