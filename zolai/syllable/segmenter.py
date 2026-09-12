@@ -5,6 +5,7 @@ Provides complete onset-nucleus-coda segmentation with:
 - Exception handling for known compounds
 - Fast lookup using pre-built dictionaries
 - CLI for single words, batch files, and validation
+- Gold dataset support (SylBreak4All M4): load, validate, train CRF
 
 Also provides the SyllableSegmenter protocol and concrete implementations
 (RuleBasedSegmenter, CRFBasedSegmenter) for backward compatibility.
@@ -36,6 +37,7 @@ class SyllableSegmenterProtocol(Protocol):
             List of syllable strings.
         """
         ...
+
 
 # --- Zolai Phoneme Inventories -----------------------------------------------
 
@@ -197,6 +199,15 @@ class CRFBasedSegmenter:
         )
         self._model.fit(features, tag_sequences)
 
+    def train_from_gold_jsonl(self, gold_path: str | Path) -> None:
+        """Train CRF model from gold dataset JSONL file.
+
+        Args:
+            gold_path: Path to gold dataset JSONL file.
+        """
+        gold_data = self._load_gold_jsonl(gold_path)
+        self.train(gold_data)
+
     def save(self, path: str) -> None:
         """Serialize the trained CRF model to disk.
 
@@ -236,6 +247,24 @@ class CRFBasedSegmenter:
         if current:
             syllables.append("".join(current))
         return syllables if syllables else [word]
+
+    def _load_gold_jsonl(self, path: str | Path) -> list[tuple[str, list[str]]]:
+        """Load gold data from JSONL file."""
+        gold_data: list[tuple[str, list[str]]] = []
+        with Path(path).open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    word = data.get("word", "").lower().strip()
+                    syllables = data.get("syllables", [])
+                    if word and syllables:
+                        gold_data.append((word, syllables))
+                except json.JSONDecodeError:
+                    continue
+        return gold_data
 
 
 # --- Syllable Segmenter Class ------------------------------------------------
@@ -354,6 +383,45 @@ class SyllableSegmenter:
                                 self.known_roots.add(syl)
                 except json.JSONDecodeError:
                     continue
+
+    def load_from_gold_jsonl(self, gold_path: str | Path) -> int:
+        """Load known compounds from gold standard dataset JSONL.
+
+        Gold dataset format: {"word": "...", "syllables": [...], "source": "...", ...}
+
+        Args:
+            gold_path: Path to gold dataset JSONL file.
+
+        Returns:
+            Number of compounds loaded.
+        """
+        path = Path(gold_path)
+        if not path.exists():
+            return 0
+
+        loaded = 0
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    word = data.get("word", "").lower().strip()
+                    syllables = data.get("syllables", [])
+                    if word and syllables and len(syllables) > 1:
+                        if word not in self.known_compounds:
+                            self.known_compounds.add(word)
+                            self._compound_map[word] = syllables
+                            loaded += 1
+                        # Add individual syllables as roots
+                        for syl in syllables:
+                            if len(syl) >= 2:
+                                self.known_roots.add(syl)
+                except json.JSONDecodeError:
+                    continue
+
+        return loaded
 
     # --- Core Segmentation Logic ---------------------------------------------
 
@@ -528,6 +596,97 @@ class SyllableSegmenter:
 
         return correct, total, errors
 
+    def validate_gold(self, gold_path: str | Path) -> tuple[int, int, list[dict]]:
+        """Validate segmenter against gold standard dataset.
+
+        Gold dataset format: {"word": "...", "syllables": [...], "source": "...", ...}
+
+        Returns:
+            (correct, total, errors) where errors is list of mismatch dicts
+        """
+        path = Path(gold_path)
+        correct = 0
+        total = 0
+        errors = []
+
+        with path.open("r", encoding="utf-8") as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    word = data.get("word", "").lower().strip()
+                    expected = data.get("syllables", [])
+                    source = data.get("source", "unknown")
+                    if word and expected:
+                        total += 1
+                        actual = self.segment(word)
+                        if actual == expected:
+                            correct += 1
+                        else:
+                            errors.append({
+                                "line": line_num,
+                                "word": word,
+                                "expected": expected,
+                                "actual": actual,
+                                "source": source,
+                            })
+                except json.JSONDecodeError:
+                    errors.append({"line": line_num, "error": "JSON decode error"})
+
+        return correct, total, errors
+
+    def validate_gold_detailed(
+        self, gold_path: str | Path
+    ) -> dict:
+        """Run detailed validation against gold dataset with per-source breakdown.
+
+        Returns:
+            Dict with overall and per-source metrics.
+        """
+        from .eval import evaluate
+
+        path = Path(gold_path)
+        all_predicted = []
+        all_gold = []
+        by_source: dict[str, list[tuple[list[str], list[str]]]] = {}
+
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    word = data.get("word", "").lower().strip()
+                    expected = data.get("syllables", [])
+                    source = data.get("source", "unknown")
+                    if word and expected:
+                        actual = self.segment(word)
+                        all_predicted.append(actual)
+                        all_gold.append(expected)
+                        if source not in by_source:
+                            by_source[source] = []
+                        by_source[source].append((actual, expected))
+                except json.JSONDecodeError:
+                    continue
+
+        # Overall evaluation
+        overall = evaluate(all_predicted, all_gold)
+
+        # Per-source evaluation
+        per_source = {}
+        for source, pairs in by_source.items():
+            pred = [p for p, _ in pairs]
+            gold = [g for _, g in pairs]
+            per_source[source] = evaluate(pred, gold)
+
+        return {
+            "overall": overall,
+            "per_source": per_source,
+        }
+
 
 # --- CLI --------------------------------------------------------------------
 
@@ -535,7 +694,7 @@ class SyllableSegmenter:
 def _build_cli() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m zolai.syllable.segmenter",
-        description="Zolai rule-based syllable segmenter (SylBreak4All M3)",
+        description="Zolai rule-based syllable segmenter (SylBreak4All M3+M4)",
     )
     parser.add_argument(
         "--word", "-w", type=str, help="Segment a single word"
@@ -547,9 +706,19 @@ def _build_cli() -> argparse.ArgumentParser:
         "--validate", "-v", action="store_true", help="Validate against corpus"
     )
     parser.add_argument(
+        "--validate-gold",
+        action="store_true",
+        help="Validate against gold standard dataset (detailed metrics)",
+    )
+    parser.add_argument(
+        "--load-gold",
+        type=str,
+        help="Load compounds from gold dataset JSONL before processing",
+    )
+    parser.add_argument(
         "--corpus", "-c", type=str,
-        default="/home/peter/Documents/Projects/zolai-ai/data/syllable/corpus.jsonl",
-        help="Path to corpus JSONL (default: data/syllable/corpus.jsonl)"
+        default="/home/peter/Documents/Projects/zolai-ai/data/syllable/gold.jsonl",
+        help="Path to corpus/gold JSONL (default: data/syllable/gold.jsonl)"
     )
     parser.add_argument(
         "--output", "-o", type=str, help="Output file for batch results (JSON)"
@@ -563,6 +732,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     seg = SyllableSegmenter()
+
+    # Load gold dataset for compounds if requested
+    if args.load_gold:
+        loaded = seg.load_from_gold_jsonl(args.load_gold)
+        print(f"Loaded {loaded} compounds from gold dataset")
 
     # Load corpus for compounds if validating or batch processing
     if args.validate or args.file:
@@ -619,6 +793,22 @@ def main(argv: list[str] | None = None) -> int:
             if len(errors) > 10:
                 print(f"    ... and {len(errors) - 10} more errors")
         return 0 if correct == total else 1
+
+    if args.validate_gold:
+        results = seg.validate_gold_detailed(args.corpus)
+        overall = results["overall"]
+        print("Gold Dataset Validation Results:")
+        print(f"  Total words: {overall.total_words}")
+        print(f"  Boundary Precision: {overall.boundary_precision:.4f}")
+        print(f"  Boundary Recall: {overall.boundary_recall:.4f}")
+        print(f"  Boundary F1: {overall.boundary_f1:.4f}")
+        print(f"  Syllable Accuracy: {overall.syllable_acc:.4f}")
+        print(f"  Word Accuracy: {overall.word_acc:.4f}")
+        print()
+        print("Per-Source Breakdown:")
+        for source, report in results["per_source"].items():
+            print(f"  {source}: F1={report.boundary_f1:.4f}, WordAcc={report.word_acc:.4f}, n={report.total_words}")
+        return 0 if overall.word_acc == 1.0 else 1
 
     # No args: show help
     parser.print_help()
