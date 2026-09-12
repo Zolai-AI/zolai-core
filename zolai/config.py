@@ -106,7 +106,7 @@ class AppConfig:
     crawler: CrawlerConfig = field(default_factory=CrawlerConfig)
     cleaner: CleanerConfig = field(default_factory=CleanerConfig)
     api_host: str = os.environ.get("ZOLAI_API_HOST", "127.0.0.1")
-    api_port: int = int(os.environ.get("ZOLAI_API_PORT", "8300"))
+    api_port: int = int(os.environ.get("ZOLAI_API_PORT", "8000"))
     gui_theme: str = os.environ.get("ZOLAI_GUI_THEME", "dark")
 
 
