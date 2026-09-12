@@ -69,6 +69,7 @@ _SUFFIXES: list[tuple[str, str, str]] = [
 
 # ── Common Zolai roots (from Bible + dictionary) ──────────────────────────────
 _KNOWN_ROOTS: dict[str, dict[str, str]] = {
+    # === VERBS ===
     "tak": {"pos": "VERB", "meaning": "walk/go"},
     "sak": {"pos": "VERB", "meaning": "write/sing"},
     "bawl": {"pos": "VERB", "meaning": "create/make"},
@@ -80,9 +81,19 @@ _KNOWN_ROOTS: dict[str, dict[str, str]] = {
     "hong": {"pos": "VERB", "meaning": "come"},
     "ci": {"pos": "VERB", "meaning": "say"},
     "he": {"pos": "VERB", "meaning": "give"},
+    "siang": {"pos": "VERB", "meaning": "call/summon"},
+    "tho": {"pos": "VERB", "meaning": "fly"},
+    "tung": {"pos": "VERB", "meaning": "arrive; top/above (in compounds)"},
+    "lei": {"pos": "VERB", "meaning": "buy/purchase; ground/clay (in compounds)"},
+    # === ADJECTIVES ===
     "dam": {"pos": "ADJ", "meaning": "well/healthy"},
     "siam": {"pos": "ADJ", "meaning": "good"},
     "khiang": {"pos": "ADJ", "meaning": "correct/true"},
+    "nam": {"pos": "ADJ", "meaning": "odoriferous"},
+    "khem": {"pos": "ADJ", "meaning": "thin/weak (after illness)"},
+    # === ADVERBS ===
+    "peuh": {"pos": "ADV", "meaning": "ever/always"},
+    # === NOUNS ===
     "gam": {"pos": "NOUN", "meaning": "earth/land"},
     "vantung": {"pos": "NOUN", "meaning": "heaven"},
     "leitung": {"pos": "NOUN", "meaning": "earth/world"},
@@ -103,8 +114,17 @@ _KNOWN_ROOTS: dict[str, dict[str, str]] = {
     "suahtakna": {"pos": "NOUN", "meaning": "holiness"},
     "itna": {"pos": "NOUN", "meaning": "love"},
     "gupna": {"pos": "NOUN", "meaning": "faith"},
-    "zu": {"pos": "NOUN", "meaning": "alcohol (default); rain (with guah-)"},
+    "zu": {"pos": "NOUN", "meaning": "distillate (alcohol)"},
     "guahzu": {"pos": "NOUN", "meaning": "rain", "compound": ["guah", "zu"]},
+    "hun": {"pos": "NOUN", "meaning": "fortune/time"},
+    "gui": {"pos": "NOUN", "meaning": "order/regulation"},
+    "khang": {"pos": "NOUN", "meaning": "generation/era"},
+    "sian": {"pos": "NOUN", "meaning": "great (in compounds); cleanse (standalone)"},
+    "van": {"pos": "NOUN", "meaning": "sky/heaven; thing/goods"},
+    # === DET ===
+    "khempeuh": {"pos": "DET", "meaning": "all/every/whole", "compound": ["khem", "peuh"]},
+    # === PARTICLES ===
+    "ta": {"pos": "PART", "meaning": "completive/realized aspect"},
 }
 
 # ── Compound word patterns (van+tung, lei+tung) ──────────────────────────────
@@ -113,20 +133,20 @@ _COMPOUND_PARTS: dict[str, str] = {
     "tung": "top/above",
     "lei": "ground/clay",
     "lai": "book/text",
-    "siang": "clean/holy",
-    "tho": "suffix (gentle)",
+    "siang": "call/summon",
+    "tho": "fly",
     "pa": "father",
     "sian": "great",
-    "ta": "beginning",
-    "khang": "time/era",
-    "gui": "song",
-    "thu": "word",
-    "nam": "water",
-    "hun": "body",
-    "khem": "heart",
-    "peuh": "mind",
+    "ta": "completive/realized",
+    "khang": "generation",
+    "gui": "order/regulation",
+    "thu": "word/matter",
+    "nam": "odoriferous",
+    "hun": "fortune/time",
+    "khem": "thin/weak",
+    "peuh": "ever/always",
     "guah": "rain",
-    "zu": "alcohol",
+    "zu": "distillate",
 }
 
 # ── High-frequency roots from Bible (top 100 words) ───────────────────────────
@@ -156,34 +176,34 @@ _HIGH_FREQ_ROOTS: dict[str, dict[str, str]] = {
     "ciang": {"pos": "VERB", "meaning": "begin/start"},
     "lam": {"pos": "VERB", "meaning": "cross/pass"},
     "kik": {"pos": "VERB", "meaning": "return/come back"},
-    "siang": {"pos": "VERB", "meaning": "clean/wash"},
-    # Nouns
-    "pasian": {"pos": "NOUN", "meaning": "God"},
-    "topa": {"pos": "NOUN", "meaning": "Lord/master"},
-    "tapa": {"pos": "NOUN", "meaning": "son/life"},
-    "gam": {"pos": "NOUN", "meaning": "country/earth"},
-    "khua": {"pos": "NOUN", "meaning": "village/place"},
-    "khuapi": {"pos": "NOUN", "meaning": "city"},
-    "mi": {"pos": "NOUN", "meaning": "person"},
-    "lungsim": {"pos": "NOUN", "meaning": "heart/mind"},
-    "nuntakna": {"pos": "NOUN", "meaning": "life"},
-    "theihna": {"pos": "NOUN", "meaning": "knowledge"},
-    "biakna": {"pos": "NOUN", "meaning": "worship"},
-    "vantung": {"pos": "NOUN", "meaning": "heaven"},
-    "leitung": {"pos": "NOUN", "meaning": "earth/world"},
-    "tui": {"pos": "NOUN", "meaning": "water"},
-    "numei": {"pos": "NOUN", "meaning": "woman"},
-    "sing": {"pos": "NOUN", "meaning": "tree"},
-    "lai": {"pos": "NOUN", "meaning": "book/text"},
-    "thu": {"pos": "NOUN", "meaning": "word/matter"},
-    "kam": {"pos": "NOUN", "meaning": "work/deed"},
-    "lungdam": {"pos": "NOUN", "meaning": "happiness/joy"},
-    "hehpihna": {"pos": "NOUN", "meaning": "salvation"},
-    "suahtakna": {"pos": "NOUN", "meaning": "holiness"},
-    "itna": {"pos": "NOUN", "meaning": "love"},
-    "gupna": {"pos": "NOUN", "meaning": "faith"},
-    "kumpipa": {"pos": "NOUN", "meaning": "Savior"},
-    "hun": {"pos": "NOUN", "meaning": "time"},
+     "siang": {"pos": "VERB", "meaning": "call/summon"},
+     # Nouns
+     "pasian": {"pos": "NOUN", "meaning": "God"},
+     "topa": {"pos": "NOUN", "meaning": "Lord/master"},
+     "tapa": {"pos": "NOUN", "meaning": "son/life"},
+     "gam": {"pos": "NOUN", "meaning": "country/earth"},
+     "khua": {"pos": "NOUN", "meaning": "village/place"},
+     "khuapi": {"pos": "NOUN", "meaning": "city"},
+     "mi": {"pos": "NOUN", "meaning": "person"},
+     "lungsim": {"pos": "NOUN", "meaning": "heart/mind"},
+     "nuntakna": {"pos": "NOUN", "meaning": "life"},
+     "theihna": {"pos": "NOUN", "meaning": "knowledge"},
+     "biakna": {"pos": "NOUN", "meaning": "worship"},
+     "vantung": {"pos": "NOUN", "meaning": "heaven"},
+     "leitung": {"pos": "NOUN", "meaning": "earth/world"},
+     "tui": {"pos": "NOUN", "meaning": "water"},
+     "numei": {"pos": "NOUN", "meaning": "woman"},
+     "sing": {"pos": "NOUN", "meaning": "tree"},
+     "lai": {"pos": "NOUN", "meaning": "book/text"},
+     "thu": {"pos": "NOUN", "meaning": "word/matter"},
+     "kam": {"pos": "NOUN", "meaning": "work/deed"},
+     "lungdam": {"pos": "NOUN", "meaning": "happiness/joy"},
+     "hehpihna": {"pos": "NOUN", "meaning": "salvation"},
+     "suahtakna": {"pos": "NOUN", "meaning": "holiness"},
+     "itna": {"pos": "NOUN", "meaning": "love"},
+     "gupna": {"pos": "NOUN", "meaning": "faith"},
+     "kumpipa": {"pos": "NOUN", "meaning": "Savior"},
+     "hun": {"pos": "NOUN", "meaning": "fortune/time"},
     "u": {"pos": "NOUN", "meaning": "elder brother/sister"},
     "nau": {"pos": "NOUN", "meaning": "younger brother/sister"},
     # Adjectives
@@ -302,6 +322,26 @@ class ZolaiMorphology:
                 "meaning": info["meaning"],
                 "particle": clean,
             }
+
+        # 1b. Check for reduplication (namnam → nam+nam, khemkhem → khem+khem)
+        if len(clean) >= 4:
+            half = len(clean) // 2
+            if len(clean) % 2 == 0 and clean[:half] == clean[half:]:
+                base = clean[:half]
+                # Check if base is in _KNOWN_ROOTS or dictionary
+                if base in _KNOWN_ROOTS:
+                    root_info = _KNOWN_ROOTS[base]
+                    return {
+                        "word": word,
+                        "stem": clean,
+                        "prefix": "",
+                        "suffix": "",
+                        "root": base,
+                        "POS": root_info.get("pos", "X"),
+                        "morphemes": [base, base],
+                        "meaning": root_info.get("meaning", "") + " (reduplicated)",
+                        "particle": "",
+                    }
 
         # 2. Try splitting off a trailing particle (huapin → huap + in)
         root_part, particle = self._split_particle(clean)
@@ -542,12 +582,22 @@ class ZolaiMorphology:
         return "X"
 
     def _get_meaning(self, word: str, root: str) -> str:
-        """Get meaning from known roots."""
+        """Get meaning for word from known roots or dictionary."""
+        meaning = ""
         if word in _KNOWN_ROOTS:
-            return _KNOWN_ROOTS[word].get("meaning", "")
-        if root in _KNOWN_ROOTS:
-            return _KNOWN_ROOTS[root].get("meaning", "")
-        return ""
+            meaning = _KNOWN_ROOTS[word].get("meaning", "")
+        if not meaning and root in _KNOWN_ROOTS:
+            meaning = _KNOWN_ROOTS[root].get("meaning", "")
+        # Dynamic dictionary lookup (lazy-loaded)
+        if not meaning and self._dict_words:
+            for entry in self._dict_words:
+                zolai = entry.get("zolai", "").lower()
+                if zolai == word or zolai == root:
+                    en = entry.get("english_clean", "")
+                    if en and len(en) < 60:
+                        meaning = en
+                        break
+        return meaning
 
     def _split_particle(self, word: str) -> tuple[str, str]:
         """Split word into root + particle if the word ends with a known particle.
