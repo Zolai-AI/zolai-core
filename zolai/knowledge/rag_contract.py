@@ -165,7 +165,7 @@ class ZolaiRAG:
 
         # Detect database (preferred over JSONL when available)
         if self._db is None:
-            db_path = self.data_dir.parent / "zolai.db"
+            db_path = config.paths.data / "zolai.db"
             if db_path.exists():
                 try:
                     self._db = get_manager(f"sqlite:///{db_path}")

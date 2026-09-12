@@ -187,17 +187,9 @@ class TestDatabaseBackedRAG:
     """Tests for database-backed retrieval path."""
 
     @pytest.fixture
-    def db_rag(self, tmp_path):
-        """Create ZolaiRAG that will find zolai.db.
-
-        DB detection uses ``data_dir.parent / "zolai.db"``.
-        The DB lives at ``zolai-core/zolai.db``, so we set ``data_dir``
-        to a child of ``zolai-core/`` (here ``zolai-core/tests/``) so that
-        ``data_dir.parent`` resolves to ``zolai-core/``.
-        """
-        from pathlib import Path
-        data_dir = Path(__file__).parent.parent / "tests"
-        return ZolaiRAG(data_dir=data_dir)
+    def db_rag(self):
+        """Create ZolaiRAG that finds zolai.db via config.paths.data."""
+        return ZolaiRAG()
 
     def test_rag_detects_database(self, db_rag):
         """RAG detects zolai.db when available."""
@@ -279,10 +271,8 @@ class TestRAGBenchmark:
     def test_benchmark_comparison(self, tmp_path):
         """DB retrieval should be faster than or equal to JSONL."""
         import time
-        from pathlib import Path
 
-        data_dir = Path(__file__).parent.parent / "tests"
-        rag = ZolaiRAG(data_dir=data_dir)
+        rag = ZolaiRAG()
         rag._ensure_loaded()
 
         query = "pasian topa gam vantung"

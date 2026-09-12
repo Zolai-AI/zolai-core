@@ -547,10 +547,12 @@ class TestPostgresAutoDetect:
         """32. Without ZOLAI_PG_URL, get_manager defaults to SQLite."""
         monkeypatch.delenv("ZOLAI_PG_URL", raising=False)
         import zolai.data.database as db_mod
+        from zolai.config import config
         db_mod._manager = None
         try:
             mgr = get_manager()
-            assert mgr._db_url == "sqlite:///zolai.db"
+            expected = f"sqlite:///{config.paths.data / 'zolai.db'}"
+            assert mgr._db_url == expected
             assert mgr._db_url.startswith("sqlite")
         finally:
             db_mod._manager = None
