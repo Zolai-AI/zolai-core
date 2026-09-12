@@ -40,6 +40,7 @@ class DictionaryEntry(Base):
     zolai: str = Column(String, nullable=False, index=True)
     english: str = Column(Text, nullable=False)
     english_clean: str | None = Column(String, nullable=True)
+    myanmar: str | None = Column(Text, nullable=True)
     source: str = Column(String, nullable=False, default="")
     pos: str = Column(String, nullable=False, default="")
 
@@ -90,6 +91,7 @@ class BibleVerse(Base):
     zo_tdb77: str | None = Column(Text, nullable=True)
     zo_tedim2010: str | None = Column(Text, nullable=True)
     en_kJV: str | None = Column(Text, nullable=True)
+    myanmar: str | None = Column(Text, nullable=True)
 
     __table_args__ = (
         Index("ix_bible_book_chapter_verse", "book", "chapter", "verse"),
@@ -130,6 +132,7 @@ class PhraseEntry(Base):
     id: int = Column(Integer, primary_key=True, autoincrement=True)
     zo: str = Column(String, nullable=False, index=True)
     english: str = Column(String, nullable=False, default="")
+    myanmar: str | None = Column(Text, nullable=True)
     frequency: int = Column(Integer, nullable=False, default=0)
     examples: str = Column(Text, nullable=False, default="[]")
 
@@ -148,6 +151,7 @@ class VocabEntry(Base):
     id: int = Column(Integer, primary_key=True, autoincrement=True)
     headword: str = Column(String, nullable=False, index=True)
     english: str = Column(String, nullable=False, default="")
+    myanmar: str | None = Column(Text, nullable=True)
     frequency: int = Column(Integer, nullable=False, default=0)
     books: str = Column(Text, nullable=False, default="[]")
     examples: str = Column(Text, nullable=False, default="[]")
@@ -257,6 +261,7 @@ class TrainingExercise(Base):
     exercise_type: str = Column(String, nullable=False, index=True)
     zolai: str = Column(Text, nullable=False)
     english: str = Column(Text, nullable=False)
+    myanmar: str | None = Column(Text, nullable=True)
     source: str = Column(String, nullable=False, default="")
     difficulty: str = Column(String, nullable=False, default="medium")
 
@@ -317,6 +322,7 @@ class Proverb(Base):
     id: int = Column(Integer, primary_key=True, autoincrement=True)
     zolai: str = Column(Text, nullable=False)
     english: str | None = Column(Text, nullable=True)
+    myanmar: str | None = Column(Text, nullable=True)
     source: str = Column(String, nullable=False, default="")
     category: str | None = Column(String, nullable=True)
 
