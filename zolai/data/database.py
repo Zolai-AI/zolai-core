@@ -811,6 +811,81 @@ class DatabaseManager:
                 return True
         return False
 
+    # ------------------------------------------------------------------
+    # CRUD: Add / Delete
+    # ------------------------------------------------------------------
+    def add_word(
+        self,
+        zolai: str,
+        english: str = "",
+        myanmar: str = "",
+        pos: str = "",
+        source: str = "manual_add",
+    ) -> bool:
+        """Add a new dictionary entry.
+
+        Returns True if added, False if the word already exists.
+        """
+        from .models import DataAuditLog, DictionaryEntry
+
+        with self._session() as session:
+            existing = session.query(DictionaryEntry).filter(
+                DictionaryEntry.zolai.ilike(zolai)
+            ).first()
+            if existing:
+                return False
+
+            entry = DictionaryEntry(
+                zolai=zolai,
+                english=english,
+                english_clean=english,
+                myanmar=myanmar,
+                pos=pos,
+                source=source,
+            )
+            session.add(entry)
+
+            log = DataAuditLog(
+                table_name="dictionary",
+                row_id=0,
+                field="zolai",
+                old_value=None,
+                new_value=zolai,
+                changed_at=datetime.now(timezone.utc).isoformat(),
+                reason="manual_add",
+            )
+            session.add(log)
+            session.commit()
+            return True
+
+    def delete_word(self, zolai: str) -> bool:
+        """Delete a dictionary entry by Zolai word.
+
+        Returns True if deleted, False if not found.
+        """
+        from .models import DataAuditLog, DictionaryEntry
+
+        with self._session() as session:
+            row = session.query(DictionaryEntry).filter(
+                DictionaryEntry.zolai.ilike(zolai)
+            ).first()
+            if not row:
+                return False
+
+            log = DataAuditLog(
+                table_name="dictionary",
+                row_id=row.id,
+                field="zolai",
+                old_value=zolai,
+                new_value="DELETED",
+                changed_at=datetime.now(timezone.utc).isoformat(),
+                reason="manual_delete",
+            )
+            session.add(log)
+            session.delete(row)
+            session.commit()
+            return True
+
     def _session(self):  # noqa: ANN202
         """Context-managed SQLAlchemy session."""
         from sqlalchemy.orm import Session
