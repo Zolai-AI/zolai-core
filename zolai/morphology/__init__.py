@@ -125,6 +125,98 @@ _COMPOUND_PARTS: dict[str, str] = {
     "peuh": "mind",
 }
 
+# ── High-frequency roots from Bible (top 100 words) ───────────────────────────
+_HIGH_FREQ_ROOTS: dict[str, dict[str, str]] = {
+    # Verbs
+    "ahih": {"pos": "VERB", "meaning": "be/exist"},
+    "ahi": {"pos": "VERB", "meaning": "be/exist"},
+    "bawl": {"pos": "VERB", "meaning": "create/make"},
+    "gen": {"pos": "VERB", "meaning": "know/understand"},
+    "pai": {"pos": "VERB", "meaning": "go/move"},
+    "om": {"pos": "VERB", "meaning": "exist/stay"},
+    "pia": {"pos": "VERB", "meaning": "give"},
+    "mu": {"pos": "VERB", "meaning": "see/look"},
+    "thei": {"pos": "VERB", "meaning": "know"},
+    "kong": {"pos": "VERB", "meaning": "say/speak"},
+    "nei": {"pos": "VERB", "meaning": "have/possess"},
+    "za": {"pos": "VERB", "meaning": "drink"},
+    "nek": {"pos": "VERB", "meaning": "eat"},
+    "huap": {"pos": "VERB", "meaning": "include/cover/span"},
+    "ne": {"pos": "VERB", "meaning": "eat/drink"},
+    "dam": {"pos": "VERB", "meaning": "be well/healthy"},
+    "sak": {"pos": "VERB", "meaning": "write/sing"},
+    "tak": {"pos": "VERB", "meaning": "walk/go"},
+    "hong": {"pos": "VERB", "meaning": "come"},
+    "ci": {"pos": "VERB", "meaning": "say/speak"},
+    "he": {"pos": "VERB", "meaning": "give"},
+    "ciang": {"pos": "VERB", "meaning": "begin/start"},
+    "lam": {"pos": "VERB", "meaning": "cross/pass"},
+    "kik": {"pos": "VERB", "meaning": "return/come back"},
+    "siang": {"pos": "VERB", "meaning": "clean/wash"},
+    # Nouns
+    "pasian": {"pos": "NOUN", "meaning": "God"},
+    "topa": {"pos": "NOUN", "meaning": "Lord/master"},
+    "tapa": {"pos": "NOUN", "meaning": "son/life"},
+    "gam": {"pos": "NOUN", "meaning": "country/earth"},
+    "khua": {"pos": "NOUN", "meaning": "village/place"},
+    "khuapi": {"pos": "NOUN", "meaning": "city"},
+    "mi": {"pos": "NOUN", "meaning": "person"},
+    "lungsim": {"pos": "NOUN", "meaning": "heart/mind"},
+    "nuntakna": {"pos": "NOUN", "meaning": "life"},
+    "theihna": {"pos": "NOUN", "meaning": "knowledge"},
+    "biakna": {"pos": "NOUN", "meaning": "worship"},
+    "vantung": {"pos": "NOUN", "meaning": "heaven"},
+    "leitung": {"pos": "NOUN", "meaning": "earth/world"},
+    "tui": {"pos": "NOUN", "meaning": "water"},
+    "numei": {"pos": "NOUN", "meaning": "woman"},
+    "sing": {"pos": "NOUN", "meaning": "tree"},
+    "lai": {"pos": "NOUN", "meaning": "book/text"},
+    "thu": {"pos": "NOUN", "meaning": "word/matter"},
+    "kam": {"pos": "NOUN", "meaning": "work/deed"},
+    "lungdam": {"pos": "NOUN", "meaning": "happiness/joy"},
+    "hehpihna": {"pos": "NOUN", "meaning": "salvation"},
+    "suahtakna": {"pos": "NOUN", "meaning": "holiness"},
+    "itna": {"pos": "NOUN", "meaning": "love"},
+    "gupna": {"pos": "NOUN", "meaning": "faith"},
+    "kumpipa": {"pos": "NOUN", "meaning": "Savior"},
+    "hun": {"pos": "NOUN", "meaning": "time"},
+    "u": {"pos": "NOUN", "meaning": "elder brother/sister"},
+    "nau": {"pos": "NOUN", "meaning": "younger brother/sister"},
+    # Adjectives
+    "siam": {"pos": "ADJ", "meaning": "good"},
+    "hoih": {"pos": "ADJ", "meaning": "good"},
+    "lian": {"pos": "ADJ", "meaning": "big"},
+    "khiang": {"pos": "ADJ", "meaning": "correct/true"},
+    # Adverbs
+    "teng": {"pos": "ADV", "meaning": "up/above"},
+    "mahmah": {"pos": "ADV", "meaning": "very"},
+    # Pronouns
+    "bang": {"pos": "PRON", "meaning": "what/how"},
+    "hang": {"pos": "PRON", "meaning": "where/how"},
+    "ama": {"pos": "PRON", "meaning": "he/she/it"},
+    "amau": {"pos": "PRON", "meaning": "they"},
+    # Postpositions
+    "kiangah": {"pos": "POST", "meaning": "in/at"},
+    "sungah": {"pos": "POST", "meaning": "in/within"},
+}
+
+# Merge high-frequency roots into _KNOWN_ROOTS
+_KNOWN_ROOTS.update(_HIGH_FREQ_ROOTS)
+
+# ── Ergative and clause-boundary particles ─────────────────────────────────────
+_KNOWN_PARTICLES: dict[str, dict[str, str]] = {
+    "in": {"pos": "PART.ERG", "meaning": "ergative particle"},
+    "leh": {"pos": "PART.CONJ", "meaning": "and"},
+    "tawh": {"pos": "PART.CONJ", "meaning": "with"},
+    "ciangin": {"pos": "PART.CONJ", "meaning": "before"},
+    "tungah": {"pos": "PART.POST", "meaning": "on/above"},
+    "sungah": {"pos": "PART.POST", "meaning": "in/within"},
+    "kiangah": {"pos": "PART.POST", "meaning": "at/near"},
+}
+
+# Particles sorted longest-first for greedy splitting
+_PARTICLE_LIST: list[str] = sorted(_KNOWN_PARTICLES.keys(), key=len, reverse=True)
+
 
 class ZolaiMorphology:
     """Morphological analyzer for Tedim Zolai.
@@ -174,43 +266,98 @@ class ZolaiMorphology:
     def analyze(self, word: str) -> dict[str, str | list[str]]:
         """Return morphological analysis of a Zolai word.
 
+        Analyzes in order:
+        1. Check if the whole word is a known particle (in, leh, tawh, etc.)
+        2. Check if root + particle (compound like huapin → huap + in)
+        3. Extract prefix (ka-, na-, a-, i-, ki-)
+        4. Extract suffix (-na, -tak, -sak, -ah, -hen, -ding, -lo)
+        5. Find root from known roots
+
         Args:
             word: Zolai word to analyze.
 
         Returns:
-            Dict with keys: stem, prefix, suffix, root, POS, morphemes, meaning.
-            Example:
-                analyze("nuntakna")
-                → {'stem': 'nuntak', 'prefix': '', 'suffix': 'na',
-                   'root': 'nun', 'POS': 'NOUN', 'morphemes': ['nun','tak','na'],
-                   'meaning': 'life'}
+            Dict with keys: word, stem, prefix, suffix, root, POS, morphemes,
+            meaning, particle.
         """
         self._ensure_loaded()
         lower = word.lower()
         clean = re.sub(r"[^\w]", "", lower)
 
-        # Extract prefix
+        # 1. Check if whole word is a known particle
+        if clean in _KNOWN_PARTICLES:
+            info = _KNOWN_PARTICLES[clean]
+            return {
+                "word": word,
+                "stem": clean,
+                "prefix": "",
+                "suffix": "",
+                "root": clean,
+                "POS": info["pos"],
+                "morphemes": [clean],
+                "meaning": info["meaning"],
+                "particle": clean,
+            }
+
+        # 2. Try splitting off a trailing particle (huapin → huap + in)
+        root_part, particle = self._split_particle(clean)
+        if particle:
+            # Analyze the root portion
+            prefix, stem = self._extract_prefix(root_part)
+            stem_no_suffix, suffix, suffix_info = self._extract_suffix(stem)
+            root = self._find_root(stem_no_suffix)
+            pos = self._determine_pos(root_part, suffix_info, root)
+            meaning = self._get_meaning(root_part, root)
+            morphemes: list[str] = []
+            if prefix:
+                morphemes.append(prefix)
+            morphemes.append(stem_no_suffix)
+            if suffix:
+                morphemes.append(suffix)
+            morphemes.append(particle)
+            return {
+                "word": word,
+                "stem": stem_no_suffix,
+                "prefix": prefix,
+                "suffix": suffix,
+                "root": root,
+                "POS": pos,
+                "morphemes": morphemes,
+                "meaning": meaning,
+                "particle": particle,
+            }
+
+        # 3. Standard prefix → suffix → root analysis
         prefix, stem = self._extract_prefix(clean)
 
-        # Extract suffix
+        # 3a. If the full word (or stem after prefix) is a known root,
+        #     don't strip suffixes — it's a complete lexical item
+        #     (e.g. mahmah should not be split into mahm + ah)
+        if stem in _KNOWN_ROOTS:
+            root_info = _KNOWN_ROOTS[stem]
+            return {
+                "word": word,
+                "stem": stem,
+                "prefix": prefix,
+                "suffix": "",
+                "root": stem,
+                "POS": root_info.get("pos", "X"),
+                "morphemes": [prefix, stem] if prefix else [stem],
+                "meaning": root_info.get("meaning", ""),
+                "particle": "",
+            }
+
         stem_without_suffix, suffix, suffix_info = self._extract_suffix(stem)
-
-        # Find root
         root = self._find_root(stem_without_suffix)
-
-        # Determine POS
         pos = self._determine_pos(clean, suffix_info, root)
-
-        # Get meaning
         meaning = self._get_meaning(clean, root)
 
-        # Build morpheme list
-        morphemes: list[str] = []
+        morphemes_std: list[str] = []
         if prefix:
-            morphemes.append(prefix)
-        morphemes.append(stem_without_suffix)
+            morphemes_std.append(prefix)
+        morphemes_std.append(stem_without_suffix)
         if suffix:
-            morphemes.append(suffix)
+            morphemes_std.append(suffix)
 
         return {
             "word": word,
@@ -219,8 +366,9 @@ class ZolaiMorphology:
             "suffix": suffix,
             "root": root,
             "POS": pos,
-            "morphemes": morphemes,
+            "morphemes": morphemes_std,
             "meaning": meaning,
+            "particle": "",
         }
 
     def lemmatize(self, word: str) -> str:
@@ -397,11 +545,32 @@ class ZolaiMorphology:
             return _KNOWN_ROOTS[root].get("meaning", "")
         return ""
 
+    def _split_particle(self, word: str) -> tuple[str, str]:
+        """Split word into root + particle if the word ends with a known particle.
+
+        E.g. 'huapin' → ('huap', 'in'), 'kam leh' → ('kam', 'leh').
+
+        Only splits if:
+        - The root portion is at least 3 characters, OR
+        - The root portion matches a known root.
+
+        Returns:
+            (root_part, particle) — if no particle found, returns (word, '').
+        """
+        for particle in _PARTICLE_LIST:
+            if word.endswith(particle) and len(word) > len(particle):
+                root_candidate = word[: -len(particle)]
+                if root_candidate in _KNOWN_ROOTS or len(root_candidate) >= 3:
+                    return root_candidate, particle
+        return word, ""
+
     def get_stats(self) -> dict[str, int]:
         """Return morphology analyzer statistics."""
         self._ensure_loaded()
         return {
             "known_roots": len(_KNOWN_ROOTS),
+            "high_freq_roots": len(_HIGH_FREQ_ROOTS),
+            "particles": len(_KNOWN_PARTICLES),
             "prefixes": len(_PREFIXES),
             "suffixes": len(_SUFFIXES),
             "compound_parts": len(_COMPOUND_PARTS),
