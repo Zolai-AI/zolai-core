@@ -81,7 +81,7 @@ _KNOWN_ROOTS: dict[str, dict[str, str]] = {
     "hong": {"pos": "VERB", "meaning": "come"},
     "ci": {"pos": "VERB", "meaning": "say"},
     "he": {"pos": "VERB", "meaning": "give"},
-    "siang": {"pos": "VERB", "meaning": "call/summon"},
+    "siang": {"pos": "VERB", "meaning": "call/summon; clean/holy (in compounds)"},
     "tho": {"pos": "VERB", "meaning": "fly"},
     "tung": {"pos": "VERB", "meaning": "arrive; top/above (in compounds)"},
     "lei": {"pos": "VERB", "meaning": "buy/purchase; ground/clay (in compounds)"},
@@ -133,7 +133,7 @@ _COMPOUND_PARTS: dict[str, str] = {
     "tung": "top/above",
     "lei": "ground/clay",
     "lai": "book/text",
-    "siang": "call/summon",
+    "siang": "call/summon; clean/holy",
     "tho": "fly",
     "pa": "father",
     "sian": "great",
@@ -176,7 +176,7 @@ _HIGH_FREQ_ROOTS: dict[str, dict[str, str]] = {
     "ciang": {"pos": "VERB", "meaning": "begin/start"},
     "lam": {"pos": "VERB", "meaning": "cross/pass"},
     "kik": {"pos": "VERB", "meaning": "return/come back"},
-     "siang": {"pos": "VERB", "meaning": "call/summon"},
+     "siang": {"pos": "VERB", "meaning": "call/summon; clean/holy (in compounds)"},
      # Nouns
      "pasian": {"pos": "NOUN", "meaning": "God"},
      "topa": {"pos": "NOUN", "meaning": "Lord/master"},
@@ -323,7 +323,32 @@ class ZolaiMorphology:
                 "particle": clean,
             }
 
-        # 1b. Check for reduplication (namnam → nam+nam, khemkhem → khem+khem)
+        # 1b. Check for compound words (laisiangtho → lai+siang+tho)
+        compound = self.is_compound(clean)
+        if compound:
+            parts = compound["parts"]
+            meanings = compound["meanings"]
+            # Build morphemes from parts
+            morphemes = []
+            root_parts = []
+            for part, meaning in zip(parts, meanings):
+                morphemes.append(part)
+                root_parts.append(f"{part}({meaning.split(';')[0].split('(')[0].strip()})"
+                )
+            # Primary root is the last part (head of compound)
+            return {
+                "word": word,
+                "stem": clean,
+                "prefix": "",
+                "suffix": "",
+                "root": "+".join(parts),
+                "POS": "NOUN",
+                "morphemes": morphemes,
+                "meaning": "; ".join(meanings),
+                "particle": "",
+            }
+
+        # 1c. Check for reduplication (namnam → nam+nam, khemkhem → khem+khem)
         if len(clean) >= 4:
             half = len(clean) // 2
             if len(clean) % 2 == 0 and clean[:half] == clean[half:]:
