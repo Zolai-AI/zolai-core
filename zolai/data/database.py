@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -766,6 +767,55 @@ class DatabaseManager:
                 "Phase 2: backfill from translations JSON field[0]",
             )
         return len(fixes)
+
+    # ------------------------------------------------------------------
+    # Phase 3: Per-word enrichment
+    # ------------------------------------------------------------------
+    def enrich_word(self, word: str, **kwargs: Any) -> bool:
+        """Enrich a dictionary entry with additional fields.
+
+        Supported fields: myanmar, english, english_clean, pos,
+        source, entry_version, update_remarks, update_description,
+        zvs_compliance_status, updated_at.
+
+        Returns True if the entry was found and updated, False otherwise.
+        """
+        from .models import DataAuditLog, DictionaryEntry
+
+        with self._session() as session:
+            row = session.query(DictionaryEntry).filter(
+                DictionaryEntry.zolai.ilike(word)
+            ).first()
+            if not row:
+                return False
+
+            changes: list[str] = []
+            for field, value in kwargs.items():
+                if hasattr(row, field) and value is not None:
+                    old = getattr(row, field)
+                    setattr(row, field, value)
+                    changes.append(f"{field}: {old!r} -> {value!r}")
+
+            if changes:
+                log = DataAuditLog(
+                    table_name="dictionary",
+                    row_id=row.id,
+                    field="enrichment",
+                    old_value=None,
+                    new_value=json.dumps(changes, ensure_ascii=False),
+                    changed_at=datetime.now(timezone.utc).isoformat(),
+                    reason="word_enrichment",
+                )
+                session.add(log)
+                session.commit()
+                return True
+        return False
+
+    def _session(self):  # noqa: ANN202
+        """Context-managed SQLAlchemy session."""
+        from sqlalchemy.orm import Session
+
+        return Session(self.engine)
 
     # ------------------------------------------------------------------
     # Phase 4: Export to JSONL
