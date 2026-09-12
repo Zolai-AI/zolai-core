@@ -23,6 +23,7 @@ from ..config import config
 # Map of table_name → (jsonl_relative_path_under_data_dir, json_columns)
 迁移_MAP: dict[str, tuple[str, set[str]]] = {
     "dictionary": ("dictionary/processed/dict_zo_en_master_v1.jsonl", {"english"}),
+    "dictionary_en_zo": ("dictionary/processed/dict_canonical_clean.jsonl", {"translations", "pos"}),
     "bible_verses": ("bible/parallel_corpus_v1.jsonl", set()),
     "grammar_patterns": ("bible/grammar_patterns_v2.jsonl", {"examples"}),
     "phrases": ("bible/phrases_v1.jsonl", {"examples"}),
@@ -84,6 +85,25 @@ def _transform_record(table_name: str, rec: dict[str, Any]) -> dict[str, Any]:
             "english": rec.get("english", ""),
             "frequency": int(rec.get("frequency", 0)),
             "examples": json.dumps(rec.get("examples", []), ensure_ascii=False),
+        }
+
+    if table_name == "dictionary_en_zo":
+        # Mixed records: some have headword/translations, others zolai/english
+        headword = rec.get("headword") or rec.get("zolai") or ""
+        translations = rec.get("translations", [])
+        translations_clean = rec.get("translations_clean")
+        pos_raw = rec.get("pos", [])
+        if isinstance(pos_raw, list):
+            pos_str = ",".join(pos_raw) if pos_raw else None
+        else:
+            pos_str = str(pos_raw) if pos_raw else None
+        source = rec.get("category") or rec.get("source") or ""
+        return {
+            "headword": headword,
+            "translations": json.dumps(translations, ensure_ascii=False) if isinstance(translations, list) else str(translations),
+            "translations_clean": translations_clean,
+            "pos": pos_str,
+            "source": source,
         }
 
     if table_name == "vocab":
