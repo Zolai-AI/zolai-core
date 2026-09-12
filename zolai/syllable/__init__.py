@@ -21,6 +21,9 @@ from dataclasses import dataclass
 # NLP Pipeline Integration (SylBreak4All M7)
 from .integration import SyllableAwarePOS, SyllableEmbeddings, ZolaiTokenizer
 
+# Tokenizer Training (SylBreak4All M8)
+from .tokenizer_training import SyllableTokenizerTrainer
+
 __all__ = [
     "Boundary",
     "ZolaiSyllabifier",
@@ -30,6 +33,7 @@ __all__ = [
     "ZolaiTokenizer",
     "SyllableAwarePOS",
     "SyllableEmbeddings",
+    "SyllableTokenizerTrainer",
 ]
 
 
