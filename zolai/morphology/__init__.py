@@ -103,6 +103,8 @@ _KNOWN_ROOTS: dict[str, dict[str, str]] = {
     "suahtakna": {"pos": "NOUN", "meaning": "holiness"},
     "itna": {"pos": "NOUN", "meaning": "love"},
     "gupna": {"pos": "NOUN", "meaning": "faith"},
+    "zu": {"pos": "NOUN", "meaning": "alcohol (default); rain (with guah-)"},
+    "guahzu": {"pos": "NOUN", "meaning": "rain", "compound": ["guah", "zu"]},
 }
 
 # ── Compound word patterns (van+tung, lei+tung) ──────────────────────────────
@@ -123,6 +125,8 @@ _COMPOUND_PARTS: dict[str, str] = {
     "hun": "body",
     "khem": "heart",
     "peuh": "mind",
+    "guah": "rain",
+    "zu": "alcohol",
 }
 
 # ── High-frequency roots from Bible (top 100 words) ───────────────────────────
