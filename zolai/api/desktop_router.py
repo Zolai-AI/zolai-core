@@ -10,13 +10,28 @@ from ..config import config
 
 router = APIRouter(prefix="/desktop", tags=["desktop"])
 
-SCRIPTS_DIR = config.paths.root / "scripts"
+SCRIPTS_DIR = config.paths.datasets_scripts
 ZOLAI_CORE = str(config.paths.root)
+
+# Scripts are grouped under zolai-datasets/scripts/<category>/. Try the
+# category folders in this order after a direct lookup.
+SCRIPT_SUBDIRS = ("my", "bible", "training", "gemini", "annotation", "online", "zvs")
+
+def resolve_script(name: str):
+    """Locate a script under SCRIPTS_DIR, checking the root then category folders."""
+    direct = SCRIPTS_DIR / name
+    if direct.exists():
+        return direct
+    for sub in SCRIPT_SUBDIRS:
+        candidate = SCRIPTS_DIR / sub / name
+        if candidate.exists():
+            return candidate
+    return None
 
 def run_script(name: str, *args: str, timeout: int = 120):
     """Run a zolai script and return parsed JSON output."""
-    script = SCRIPTS_DIR / name
-    if not script.exists():
+    script = resolve_script(name)
+    if not script:
         return {"error": f"Script not found: {name}"}
     try:
         r = subprocess.run(
@@ -376,15 +391,43 @@ async def zvs_forbidden():
 # PATTERN TOOLS
 # ═══════════════════════════════════════════
 
-@ router.get("/pattern/learn")
-async def pattern_learn():
-    """Learn patterns from Bible."""
-    return run_script("pattern_learner.py")
-
 @ router.get("/pattern/stats")
 async def pattern_stats():
-    """Get pattern statistics."""
-    return run_script("pattern_learner.py", "--stats")
+    """Get grammar pattern statistics from grammar_patterns table."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM grammar_patterns")
+        total = cur.fetchone()[0]
+        cur.execute("SELECT function, COUNT(*) FROM grammar_patterns GROUP BY function ORDER BY COUNT(*) DESC")
+        by_function = dict(cur.fetchall())
+        cur.close()
+        conn.close()
+        output = json.dumps({"total": total, "by_function": by_function}, indent=2)
+        return {"output": output}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@ router.get("/pattern/learn")
+async def pattern_learn(limit: int = Query(20)):
+    """Get sample grammar patterns from grammar_patterns table."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT pattern_id, pattern, function, examples, frequency "
+            "FROM grammar_patterns ORDER BY frequency DESC LIMIT ?",
+            (limit,),
+        )
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        cur.close()
+        conn.close()
+        output = json.dumps([dict(zip(cols, r)) for r in rows], indent=2, ensure_ascii=False)
+        return {"output": output}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ═══════════════════════════════════════════
@@ -392,12 +435,41 @@ async def pattern_stats():
 # ═══════════════════════════════════════════
 
 @ router.get("/export/{data_type}")
-async def export_data(data_type: str):
-    """Export data to JSONL."""
-    valid = ["dictionary", "bible", "vocabulary", "grammar", "phrases", "exercises"]
-    if data_type not in valid:
-        return {"error": f"Must be one of: {', '.join(valid)}"}
-    return run_script("export_data.py", data_type)
+async def export_data(data_type: str, limit: int = Query(20)):
+    """Export data to JSONL format — returns count + sample as formatted JSON string."""
+    table_map = {
+        "dictionary": "dictionary",
+        "bible": "bible_verses",
+        "vocabulary": "vocab",
+        "grammar": "grammar_patterns",
+        "phrases": "phrases",
+        "exercises": "training_exercises",
+    }
+    table = table_map.get(data_type)
+    if not table:
+        return {"error": f"Must be one of: {', '.join(table_map.keys())}"}
+
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+
+        # Total count
+        cur.execute(f"SELECT COUNT(*) FROM [{table}]")
+        total = cur.fetchone()[0]
+
+        # Sample rows
+        cur.execute(f"SELECT * FROM [{table}] LIMIT ?", (limit,))
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        sample = [dict(zip(cols, r)) for r in rows]
+
+        cur.close()
+        conn.close()
+
+        output = json.dumps({"table": table, "total": total, "sample": sample}, indent=2, ensure_ascii=False)
+        return {"output": output}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ═══════════════════════════════════════════
@@ -405,6 +477,24 @@ async def export_data(data_type: str):
 # ═══════════════════════════════════════════
 
 @ router.get("/audit/recent")
-async def audit_recent(date: str = Query(None)):
-    """Get recent audit log entries."""
-    return run_script("audit_log.py", "--recent", "--date", date or "")
+async def audit_recent(limit: int = Query(50)):
+    """Get recent audit log entries from data_audit_log table."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, table_name, row_id, field, old_value, new_value, changed_at, reason
+            FROM data_audit_log
+            ORDER BY changed_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+        cur.close()
+        conn.close()
+        return {"results": [dict(zip(cols, r)) for r in rows]}
+    except Exception as e:
+        return {"error": str(e)}
