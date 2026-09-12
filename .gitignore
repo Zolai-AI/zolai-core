@@ -31,3 +31,7 @@ test-results/
 report/zvs-scan*
 !zolai/data/
 *.db
+
+# Prisma generated files
+prisma/migrations/
+prisma/node_modules/
