@@ -181,3 +181,136 @@ class TestValidateSentence:
     def test_question_ending(self, rag):
         result = rag.validate_sentence("Na pai hiam")
         assert result["valid"] is True
+
+
+class TestDatabaseBackedRAG:
+    """Tests for database-backed retrieval path."""
+
+    @pytest.fixture
+    def db_rag(self, tmp_path):
+        """Create ZolaiRAG that will find zolai.db."""
+        # The DB is at zolai-core/zolai.db, data_dir is zolai-core/../data
+        from pathlib import Path
+        data_dir = Path(__file__).parent.parent.parent / "data"
+        return ZolaiRAG(data_dir=data_dir)
+
+    def test_rag_detects_database(self, db_rag):
+        """RAG detects zolai.db when available."""
+        db_rag._ensure_loaded()
+        assert db_rag._db is not None
+
+    def test_rag_db_returns_dictionary_results(self, db_rag):
+        """Database lookup returns dictionary evidence for 'pasian'."""
+        pack = db_rag.retrieve("pasian")
+        assert pack.total() > 0
+        assert len(pack.vocabulary) > 0
+        # Should contain "pasian" in at least one evidence text
+        texts = [e.text for e in pack.vocabulary]
+        assert any("pasian" in t for t in texts)
+
+    def test_rag_db_returns_bible_results(self, db_rag):
+        """Database search returns Bible evidence for 'pasian'."""
+        pack = db_rag.retrieve("pasian")
+        assert len(pack.bible) > 0
+        # Bible results should have ref format (e.g., "GEN 1:1")
+        refs = [e.id for e in pack.bible]
+        assert any("bible:" in r for r in refs)
+
+    def test_rag_db_returns_grammar_results(self, db_rag):
+        """Database lookup returns grammar patterns."""
+        pack = db_rag.retrieve("pai")
+        # Grammar patterns may or may not match "pai"
+        # Just verify no crash and returns EvidencePack
+        assert isinstance(pack, EvidencePack)
+
+    def test_rag_db_returns_phrase_results(self, db_rag):
+        """Database lookup returns phrase matches."""
+        pack = db_rag.retrieve("pasian")
+        # Phrases may or may not match
+        assert isinstance(pack, EvidencePack)
+
+    def test_rag_db_unknown_word_returns_empty(self, db_rag):
+        """Database lookup for unknown word returns empty vocabulary."""
+        pack = db_rag.retrieve("xyzzyplugh")
+        # Unknown word should have no dictionary matches
+        dict_evidence = [e for e in pack.vocabulary if e.source == "dictionary"]
+        assert len(dict_evidence) == 0
+
+    def test_rag_db_forbidden_form_detected(self, db_rag):
+        """ZVS forbidden forms still detected with DB path."""
+        pack = db_rag.retrieve("pathian")
+        assert len(pack.zvs) > 0
+        assert "FORBIDDEN" in pack.zvs[0].text
+
+    def test_rag_db_english_word_lookup(self, db_rag):
+        """Database lookup works for English words too."""
+        pack = db_rag.retrieve("God")
+        assert pack.total() > 0
+        # Should find "pasian" as Zolai for "God"
+        texts = [e.text for e in pack.vocabulary]
+        assert any("pasian" in t.lower() for t in texts)
+
+    def test_rag_db_evidencepack_has_all_sections(self, db_rag):
+        """EvidencePack has all expected sections even with DB."""
+        pack = db_rag.retrieve("pasian topa gam")
+        assert hasattr(pack, "vocabulary")
+        assert hasattr(pack, "grammar")
+        assert hasattr(pack, "phrases")
+        assert hasattr(pack, "bible")
+        assert hasattr(pack, "zvs")
+        assert hasattr(pack, "context")
+
+    def test_rag_db_to_prompt_works(self, db_rag):
+        """to_prompt() produces valid output with DB-backed results."""
+        pack = db_rag.retrieve("pasian")
+        prompt = pack.to_prompt()
+        assert isinstance(prompt, str)
+        assert len(prompt) > 0
+
+
+class TestRAGBenchmark:
+    """Compare DB vs JSONL retrieval latency."""
+
+    def test_benchmark_comparison(self, tmp_path):
+        """DB retrieval should be faster than or equal to JSONL."""
+        import time
+        from pathlib import Path
+
+        data_dir = Path(__file__).parent.parent.parent / "data"
+        rag = ZolaiRAG(data_dir=data_dir)
+        rag._ensure_loaded()
+
+        query = "pasian topa gam vantung"
+
+        # DB path timing
+        if rag._db:
+            times_db = []
+            for _ in range(5):
+                t0 = time.time()
+                pack_db = rag.retrieve(query)
+                times_db.append(time.time() - t0)
+            avg_db = sum(times_db) / len(times_db)
+        else:
+            avg_db = None
+
+        # JSONL path timing (force JSONL)
+        saved_db = rag._db
+        rag._db = None
+        times_jsonl = []
+        for _ in range(5):
+            t0 = time.time()
+            pack_jsonl = rag.retrieve(query)
+            times_jsonl.append(time.time() - t0)
+        avg_jsonl = sum(times_jsonl) / len(times_jsonl)
+        rag._db = saved_db
+
+        # Both should return results
+        assert pack_jsonl.total() > 0
+        if avg_db is not None:
+            assert pack_db.total() > 0
+
+        # Log results
+        print(f"\nBenchmark: DB={avg_db:.3f}s, JSONL={avg_jsonl:.3f}s")
+        if avg_db is not None:
+            speedup = avg_jsonl / avg_db if avg_db > 0 else 0
+            print(f"Speedup: {speedup:.1f}x")

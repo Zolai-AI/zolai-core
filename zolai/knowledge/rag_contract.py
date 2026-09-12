@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import config
+from ..data.database import get_manager
 from ..learning.feedback import FeedbackStore
 
 
@@ -93,6 +94,7 @@ class ZolaiRAG:
         if data_dir is None:
             data_dir = config.paths.data
         self.data_dir = data_dir
+        self._db = None
         self._dict_zo_en: dict[str, dict] | None = None
         self._dict_en_zo: dict[str, dict] | None = None
         self._grammar: list[dict] | None = None
@@ -161,6 +163,15 @@ class ZolaiRAG:
                     except Exception:
                         continue
 
+        # Detect database (preferred over JSONL when available)
+        if self._db is None:
+            db_path = self.data_dir.parent / "zolai.db"
+            if db_path.exists():
+                try:
+                    self._db = get_manager(f"sqlite:///{db_path}")
+                except Exception:
+                    self._db = None
+
     @staticmethod
     def _load_jsonl_index(path: Path, key: str, fallback: str | None) -> dict[str, dict]:
         """Load JSONL into a dict keyed by `key` field."""
@@ -219,57 +230,92 @@ class ZolaiRAG:
         words = query_lower.split()
 
         # 1. Vocabulary lookup
-        for word in words:
-            # ZO→EN
-            if self._dict_zo_en and word in self._dict_zo_en:
-                entry = self._dict_zo_en[word]
-                en_val = entry.get(
-                    "english_clean", entry.get("english", "")
-                )
-                if isinstance(en_val, list):
-                    en_val = ", ".join(str(v) for v in en_val)
-                pack.vocabulary.append(
-                    Evidence(
-                        id=f"dict_zo_en:{word}",
-                        text=f"{word} = {en_val}",
-                        source="dictionary",
-                        type="vocabulary",
-                        confidence=0.95,
-                        metadata={"direction": "zo_en", "entry": entry},
+        if self._db:
+            # Database path (fast, indexed)
+            for word in words:
+                # ZO→EN via database
+                results = self._db.lookup_word(word)
+                for r in results[:3]:
+                    en_val = r.get("english", r.get("english_clean", ""))
+                    if isinstance(en_val, list):
+                        en_val = ", ".join(str(v) for v in en_val)
+                    pack.vocabulary.append(
+                        Evidence(
+                            id=f"dict_zo_en:{word}",
+                            text=f"{word} = {en_val}",
+                            source="dictionary",
+                            type="vocabulary",
+                            confidence=0.95,
+                            metadata={"direction": "zo_en", "db": True},
+                        )
                     )
-                )
-            # EN→ZO
-            if self._dict_en_zo and word in self._dict_en_zo:
-                entry = self._dict_en_zo[word]
-                zo_val = entry.get(
-                    "zolai", entry.get("headword", "")
-                )
-                if isinstance(zo_val, list):
-                    zo_val = ", ".join(str(v) for v in zo_val)
-                pack.vocabulary.append(
-                    Evidence(
-                        id=f"dict_en_zo:{word}",
-                        text=f"{word} = {zo_val}",
-                        source="dictionary",
-                        type="vocabulary",
-                        confidence=0.95,
-                        metadata={"direction": "en_zo", "entry": entry},
+                # Vocab index via database
+                vocab_results = self._db.get_vocab(word)
+                for v in vocab_results[:2]:
+                    pack.vocabulary.append(
+                        Evidence(
+                            id=f"vocab:{word}",
+                            text=f"{word}: freq={v.get('frequency', 0)}, "
+                            f"books={v.get('books', '')}",
+                            source="vocab_index",
+                            type="vocabulary",
+                            confidence=0.85,
+                            metadata={"db": True},
+                        )
                     )
-                )
-            # Vocab index (frequency, examples)
-            if self._vocab_index and word in self._vocab_index:
-                entry = self._vocab_index[word]
-                pack.vocabulary.append(
-                    Evidence(
-                        id=f"vocab:{word}",
-                        text=f"{word}: freq={entry.get('frequency', 0)}, "
-                        f"books={entry.get('books', '')}",
-                        source="vocab_index",
-                        type="vocabulary",
-                        confidence=0.85,
-                        metadata={"entry": entry},
+        else:
+            # JSONL fallback (legacy path)
+            for word in words:
+                # ZO→EN
+                if self._dict_zo_en and word in self._dict_zo_en:
+                    entry = self._dict_zo_en[word]
+                    en_val = entry.get(
+                        "english_clean", entry.get("english", "")
                     )
-                )
+                    if isinstance(en_val, list):
+                        en_val = ", ".join(str(v) for v in en_val)
+                    pack.vocabulary.append(
+                        Evidence(
+                            id=f"dict_zo_en:{word}",
+                            text=f"{word} = {en_val}",
+                            source="dictionary",
+                            type="vocabulary",
+                            confidence=0.95,
+                            metadata={"direction": "zo_en", "entry": entry},
+                        )
+                    )
+                # EN→ZO
+                if self._dict_en_zo and word in self._dict_en_zo:
+                    entry = self._dict_en_zo[word]
+                    zo_val = entry.get(
+                        "zolai", entry.get("headword", "")
+                    )
+                    if isinstance(zo_val, list):
+                        zo_val = ", ".join(str(v) for v in zo_val)
+                    pack.vocabulary.append(
+                        Evidence(
+                            id=f"dict_en_zo:{word}",
+                            text=f"{word} = {zo_val}",
+                            source="dictionary",
+                            type="vocabulary",
+                            confidence=0.95,
+                            metadata={"direction": "en_zo", "entry": entry},
+                        )
+                    )
+                # Vocab index (frequency, examples)
+                if self._vocab_index and word in self._vocab_index:
+                    entry = self._vocab_index[word]
+                    pack.vocabulary.append(
+                        Evidence(
+                            id=f"vocab:{word}",
+                            text=f"{word}: freq={entry.get('frequency', 0)}, "
+                            f"books={entry.get('books', '')}",
+                            source="vocab_index",
+                            type="vocabulary",
+                            confidence=0.85,
+                            metadata={"entry": entry},
+                        )
+                    )
 
         # 1b. Feedback overrides — user corrections override dict results
         if self._feedback is None:
@@ -292,65 +338,116 @@ class ZolaiRAG:
                 )
 
         # 2. Grammar pattern matching
-        if self._grammar:
-            for pattern in self._grammar[:200]:
-                pattern_text = pattern.get("pattern", "").lower()
-                if any(w in pattern_text or pattern_text in w for w in words):
+        if self._db:
+            for word in words:
+                results = self._db.get_grammar(word)
+                for r in results[:3]:
                     pack.grammar.append(
                         Evidence(
-                            id=pattern.get("id", ""),
-                            text=f"Pattern: {pattern.get('pattern', '')} — "
-                            f"{pattern.get('description', pattern.get('function', ''))}",
+                            id=r.get("id", ""),
+                            text=f"Pattern: {r.get('pattern', '')} — "
+                            f"{r.get('description', r.get('function', ''))}",
                             source="grammar",
                             type="grammar_pattern",
                             confidence=0.80,
-                            metadata={"pattern": pattern},
+                            metadata={"db": True},
                         )
                     )
-                    if len(pack.grammar) >= 3:
-                        break
+        else:
+            if self._grammar:
+                for pattern in self._grammar[:200]:
+                    pattern_text = pattern.get("pattern", "").lower()
+                    if any(w in pattern_text or pattern_text in w
+                           for w in words):
+                        pack.grammar.append(
+                            Evidence(
+                                id=pattern.get("id", ""),
+                                text=f"Pattern: "
+                                f"{pattern.get('pattern', '')} — "
+                                f"{pattern.get('description', pattern.get('function', ''))}",
+                                source="grammar",
+                                type="grammar_pattern",
+                                confidence=0.80,
+                                metadata={"pattern": pattern},
+                            )
+                        )
+                        if len(pack.grammar) >= 3:
+                            break
 
         # 3. Phrase matching
-        if self._phrases:
-            for phrase_entry in self._phrases[:100]:
-                phrase_text = phrase_entry.get(
-                    "phrase", phrase_entry.get("zolai", "")
-                ).lower()
-                if any(w in phrase_text for w in words):
+        if self._db:
+            for word in words:
+                results = self._db.match_phrase(word)
+                for r in results[:3]:
                     pack.phrases.append(
                         Evidence(
-                            id=f"phrase:{phrase_text[:20]}",
-                            text=f"{phrase_text} = "
-                            f"{phrase_entry.get('english', phrase_entry.get('meaning', ''))}",
+                            id=f"phrase:{r.get('zolai', '')[:20]}",
+                            text=f"{r.get('zolai', '')} = "
+                            f"{r.get('english', r.get('meaning', ''))}",
                             source="phrases",
                             type="phrase",
                             confidence=0.80,
-                            metadata={"phrase": phrase_entry},
+                            metadata={"db": True},
                         )
                     )
-                    if len(pack.phrases) >= 3:
-                        break
+        else:
+            if self._phrases:
+                for phrase_entry in self._phrases[:100]:
+                    phrase_text = phrase_entry.get(
+                        "phrase", phrase_entry.get("zolai", "")
+                    ).lower()
+                    if any(w in phrase_text for w in words):
+                        pack.phrases.append(
+                            Evidence(
+                                id=f"phrase:{phrase_text[:20]}",
+                                text=f"{phrase_text} = "
+                                f"{phrase_entry.get('english', phrase_entry.get('meaning', ''))}",
+                                source="phrases",
+                                type="phrase",
+                                confidence=0.80,
+                                metadata={"phrase": phrase_entry},
+                            )
+                        )
+                        if len(pack.phrases) >= 3:
+                            break
 
         # 4. Bible verse search (data uses zo_tdb77/zo_tedim2010/en_kJV)
-        if self._bible:
-            for verse in self._bible[:500]:
-                zo = (verse.get("zo_tdb77") or verse.get("zo_tedim2010") or "") .lower()
-                en = (verse.get("en_kJV") or "") .lower()
-                if any(w in zo or w in en for w in words):
+        if self._db:
+            for word in words:
+                results = self._db.search_bible(word)
+                for r in results[:3]:
                     pack.bible.append(
                         Evidence(
-                            id=f"bible:{verse.get('ref', '')}",
-                            text=f"{verse.get('ref', '')}: "
-                            f"{verse.get('zo_tdb77', '')} / "
-                            f"{verse.get('en_kJV', '')}",
+                            id=f"bible:{r.get('ref', '')}",
+                            text=f"{r.get('ref', '')}: "
+                            f"{r.get('zo_tdb77', '')} / "
+                            f"{r.get('en_kJV', '')}",
                             source="bible",
                             type="verse",
                             confidence=0.75,
-                            metadata={"verse": verse},
+                            metadata={"db": True},
                         )
                     )
-                    if len(pack.bible) >= 3:
-                        break
+        else:
+            if self._bible:
+                for verse in self._bible[:500]:
+                    zo = (verse.get("zo_tdb77") or verse.get("zo_tedim2010") or "") .lower()
+                    en = (verse.get("en_kJV") or "") .lower()
+                    if any(w in zo or w in en for w in words):
+                        pack.bible.append(
+                            Evidence(
+                                id=f"bible:{verse.get('ref', '')}",
+                                text=f"{verse.get('ref', '')}: "
+                                f"{verse.get('zo_tdb77', '')} / "
+                                f"{verse.get('en_kJV', '')}",
+                                source="bible",
+                                type="verse",
+                                confidence=0.75,
+                                metadata={"verse": verse},
+                            )
+                        )
+                        if len(pack.bible) >= 3:
+                            break
 
         # 5. ZVS compliance check
         for word in words:
