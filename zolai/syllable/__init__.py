@@ -18,12 +18,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# NLP Pipeline Integration (SylBreak4All M7)
+from .integration import SyllableAwarePOS, SyllableEmbeddings, ZolaiTokenizer
+
 __all__ = [
     "Boundary",
     "ZolaiSyllabifier",
     "segment",
     "segment_with_boundaries",
     "CRFSyllableSegmenter",
+    "ZolaiTokenizer",
+    "SyllableAwarePOS",
+    "SyllableEmbeddings",
 ]
 
 
