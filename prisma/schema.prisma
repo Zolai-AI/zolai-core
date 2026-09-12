@@ -17,6 +17,7 @@ model Dictionary {
   zolai       String   @unique
   english     String
   englishClean String? @map("english_clean")
+  myanmar     String?
   source      String
   pos         String
 
@@ -44,6 +45,7 @@ model BibleVerse {
   zoTdb77     String? @map("zo_tdb77")
   zoTedim2010 String? @map("zo_tedim2010")
   enKjv       String? @map("en_kJV")
+  myanmar     String?
 
   @@index([ref])
   @@index([book])
@@ -66,6 +68,7 @@ model Phrase {
   id       Int    @id @default(autoincrement())
   zo       String
   english  String
+  myanmar  String?
   frequency Int
   examples String
 
@@ -76,6 +79,7 @@ model Vocab {
   id        Int    @id @default(autoincrement())
   headword  String
   english   String
+  myanmar   String?
   frequency Int
   books     String
   examples  String
@@ -110,6 +114,7 @@ model TrainingExercise {
   exerciseType  String @map("exercise_type")
   zolai         String
   english       String
+  myanmar       String?
   source        String
   difficulty    String
 
@@ -153,6 +158,7 @@ model Proverb {
   id       Int     @id @default(autoincrement())
   zolai    String
   english  String?
+  myanmar  String?
   source   String
   category String?
 
