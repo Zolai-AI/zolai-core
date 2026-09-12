@@ -37,7 +37,7 @@ while true; do
     2)
       echo -e "${G}Launching desktop app...${NC}"
       source "$DIR/.venv/bin/activate" 2>/dev/null || true
-      cd "$DIR" && python -m zolai desktop
+      cd "$DIR" && zolai desktop
       ;;
     3)
       echo -e "${G}Starting server + desktop...${NC}"
@@ -48,7 +48,7 @@ while true; do
       sleep 2
       if curl -s http://localhost:8000/health >/dev/null 2>&1; then
         echo -e "  ${G}✅ API running${NC}"
-        cd "$DIR" && python -m zolai desktop
+        cd "$DIR" && zolai desktop
       else
         echo -e "  ${R}❌ API failed${NC}"
       fi
@@ -81,7 +81,7 @@ conn.close()
       ;;
     6)
       source "$DIR/.venv/bin/activate" 2>/dev/null || true
-      cd "$DIR" && python -m zolai info
+      cd "$DIR" && zolai info
       read -p "Press Enter..."
       ;;
     7)
