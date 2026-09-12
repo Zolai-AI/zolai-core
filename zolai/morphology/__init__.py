@@ -89,8 +89,8 @@ _KNOWN_ROOTS: dict[str, dict[str, str]] = {
     "dam": {"pos": "ADJ", "meaning": "well/healthy"},
     "siam": {"pos": "ADJ", "meaning": "good"},
     "khiang": {"pos": "ADJ", "meaning": "correct/true"},
-    "nam": {"pos": "ADJ", "meaning": "odoriferous"},
-    "khem": {"pos": "ADJ", "meaning": "thin/weak (after illness)"},
+    "nam": {"pos": "VERB", "meaning": "smell (tone-dependent)"},
+    "khem": {"pos": "VERB", "meaning": "lie/deceive"},
     # === ADVERBS ===
     "peuh": {"pos": "ADV", "meaning": "ever/always"},
     # === NOUNS ===
@@ -141,9 +141,9 @@ _COMPOUND_PARTS: dict[str, str] = {
     "khang": "generation",
     "gui": "order/regulation",
     "thu": "word/matter",
-    "nam": "odoriferous",
+    "nam": "smell",
     "hun": "fortune/time",
-    "khem": "thin/weak",
+    "khem": "lie/deceive",
     "peuh": "ever/always",
     "guah": "rain",
     "zu": "distillate",
