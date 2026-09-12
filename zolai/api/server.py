@@ -360,22 +360,68 @@ def create_app() -> FastAPI:
     @app.post("/dictionary/search", response_model=DictSearchResponse)
     async def dictionary_search(req: DictSearchRequest):
         try:
-            manager = DictionaryManager()
-            entries = manager.search(req.query) if req.query else []
+            from ..data.database import get_manager
+            db = get_manager()
+
             results = []
-            for entry in entries[:20]:
-                results.append(
-                    {
+
+            # ZO→EN search
+            zo_results = db.lookup_word(req.query)
+            for r in zo_results[:10]:
+                results.append({
+                    "source": r.get("source", ""),
+                    "zolai": r.get("zolai", ""),
+                    "english": r.get("english_clean")
+                    or r.get("english", ""),
+                    "pos": r.get("pos", ""),
+                    "example": "",
+                    "direction": "zo-en",
+                })
+
+            # EN→ZO search
+            en_results = db.lookup_english(req.query)
+            for r in en_results[:10]:
+                trans = r.get("translations_clean", "")
+                if not trans:
+                    import json as _json
+                    try:
+                        trans_list = _json.loads(
+                            r.get("translations", "[]")
+                        )
+                        trans = (
+                            trans_list[0] if trans_list else ""
+                        )
+                    except Exception:
+                        trans = ""
+                results.append({
+                    "source": r.get("source", ""),
+                    "zolai": trans,
+                    "english": r.get("headword", ""),
+                    "pos": r.get("pos", ""),
+                    "example": "",
+                    "direction": "en-zo",
+                })
+
+            return DictSearchResponse(
+                status="ok", results=results[:20]
+            )
+        except Exception as e:
+            # Fallback to DictionaryManager if DB fails
+            try:
+                manager = DictionaryManager()
+                entries = manager.search(req.query) if req.query else []
+                results = []
+                for entry in entries[:20]:
+                    results.append({
                         "source": entry.get("source", ""),
                         "zolai": entry.get("zolai", ""),
                         "english": entry.get("english", ""),
                         "pos": entry.get("pos", ""),
                         "example": entry.get("example", ""),
-                    }
-                )
-            return DictSearchResponse(status="ok", results=results)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+                    })
+                return DictSearchResponse(status="ok", results=results)
+            except Exception as e2:
+                raise HTTPException(status_code=500, detail=str(e2))
 
     # --- Bible ---
 
