@@ -280,7 +280,6 @@ def create_app() -> FastAPI:
     
     app.include_router(desktop_router, prefix="/desktop", tags=["desktop"])    
     # --- Static File Serving for Desktop App ---
-    from fastapi.staticfiles import StaticFiles
     from fastapi.responses import FileResponse
     _FRONTEND_DIR = Path(__file__).parent.parent.parent / "tauri" / "frontend"
     
@@ -294,7 +293,7 @@ def create_app() -> FastAPI:
     
     @app.get("/{path:path}")
     async def serve_static(path: str):
-        """Serve static files."""
+        """Serve static files (CSS/JS/images only)."""
         file_path = _FRONTEND_DIR / path
         if file_path.exists() and file_path.is_file():
             return FileResponse(str(file_path))
