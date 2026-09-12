@@ -8,8 +8,8 @@ YELL = "\033[1;33m"
 RED = "\033[0;31m"
 NC = "\033[0m"
 
-def run(cmd, check=True):
-    r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+def run(cmd, check=True, cwd=None):
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=cwd)
     return r.stdout.strip(), r.stderr.strip(), r.returncode
 
 def detect_gpu():
@@ -129,7 +129,7 @@ def main():
     print(f"  {GREEN}[1/3] Core packages...{NC}")
     pkg_list = " ".join([p[0] for p in core if p[0].split('>=')[0].lower() not in installed])
     if pkg_list:
-        r = run(f'{sys.executable} -m pip install -q {" ".join(core)}', check=False)
+        r = run(f'{sys.executable} -m pip install -q {" ".join([p[0] for p in core])}', check=False)
         if r[2] == 0:
             print(f"    {GREEN}✅ Core packages installed{NC}")
         else:
@@ -141,7 +141,7 @@ def main():
     print(f"  {GREEN}[2/3] Dev packages...{NC}")
     pkg_list = " ".join([p[0] for p in dev if p[0].split('>=')[0].lower() not in installed])
     if pkg_list:
-        r = run(f'{sys.executable} -m pip install -q {" ".join(dev)}', check=False)
+        r = run(f'{sys.executable} -m pip install -q {" ".join([p[0] for p in dev])}', check=False)
         if r[2] == 0:
             print(f"    {GREEN}✅ Dev packages installed{NC}")
         else:
