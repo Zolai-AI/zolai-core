@@ -85,6 +85,18 @@ class Paths:
             self.root.parent / "zolai-tauri" / "frontend",
         )
 
+    @property
+    def datasets_scripts(self) -> Path:
+        """Path to the zolai-datasets scripts directory.
+
+        The real desktop tool scripts live in `zolai-datasets/scripts/{my,bible,training,...}`
+        rather than inside this repo, so resolution crosses into the sibling repo.
+        """
+        return _env_path(
+            "ZOLAI_DATASETS_SCRIPTS",
+            self.root.parent / "zolai-datasets" / "scripts",
+        )
+
     def ensure_dirs(self):
         for p in [self.data_raw, self.data_cleaned, self.data_training, self.data_knowledge, self.data_archive]:
             p.mkdir(parents=True, exist_ok=True)
