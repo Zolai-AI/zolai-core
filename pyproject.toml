@@ -47,6 +47,7 @@ dependencies = [
     "pandas>=2.0",
     "numpy>=2.4",
     "scikit-learn>=1.8",
+    "sklearn-crfsuite>=1.0",
     # ML/Training
     "transformers>=5.0",
     "datasets>=4.8",
