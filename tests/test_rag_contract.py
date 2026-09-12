@@ -188,10 +188,15 @@ class TestDatabaseBackedRAG:
 
     @pytest.fixture
     def db_rag(self, tmp_path):
-        """Create ZolaiRAG that will find zolai.db."""
-        # The DB is at zolai-core/zolai.db, data_dir is zolai-core/../data
+        """Create ZolaiRAG that will find zolai.db.
+
+        DB detection uses ``data_dir.parent / "zolai.db"``.
+        The DB lives at ``zolai-core/zolai.db``, so we set ``data_dir``
+        to a child of ``zolai-core/`` (here ``zolai-core/tests/``) so that
+        ``data_dir.parent`` resolves to ``zolai-core/``.
+        """
         from pathlib import Path
-        data_dir = Path(__file__).parent.parent.parent / "data"
+        data_dir = Path(__file__).parent.parent / "tests"
         return ZolaiRAG(data_dir=data_dir)
 
     def test_rag_detects_database(self, db_rag):
@@ -276,7 +281,7 @@ class TestRAGBenchmark:
         import time
         from pathlib import Path
 
-        data_dir = Path(__file__).parent.parent.parent / "data"
+        data_dir = Path(__file__).parent.parent / "tests"
         rag = ZolaiRAG(data_dir=data_dir)
         rag._ensure_loaded()
 
