@@ -180,6 +180,45 @@ class TestDictionaryCRUD:
         assert "God" in results[0]["english"]
 
 
+class TestDictionaryEnglishLookup:
+    def test_lookup_english(self, tmp_db):
+        """English→Zolai lookup works."""
+        tmp_db.insert_many("dictionary_en_zo", [{
+            "headword": "god",
+            "translations": '["pasian"]',
+            "translations_clean": "pasian",
+            "pos": "n",
+            "source": "test",
+        }])
+        results = tmp_db.lookup_english("god")
+        assert len(results) >= 1
+        assert results[0]["headword"] == "god"
+
+    def test_lookup_english_case_insensitive(self, tmp_db):
+        """English lookup is case-insensitive."""
+        tmp_db.insert_many("dictionary_en_zo", [{
+            "headword": "Earth",
+            "translations": '["gam"]',
+            "translations_clean": "gam",
+            "pos": "n",
+            "source": "test",
+        }])
+        results = tmp_db.lookup_english("earth")
+        assert len(results) >= 1
+        assert results[0]["headword"] == "Earth"
+
+    def test_lookup_english_like_fallback(self, tmp_db):
+        """English lookup falls back to LIKE for partial match."""
+        tmp_db.insert_many("dictionary_en_zo", [
+            {"headword": "breakfast", "translations": '["cingta"]',
+             "translations_clean": "cingta", "pos": "n", "source": "test"},
+            {"headword": "break", "translations": '["khiat"]',
+             "translations_clean": "khiat", "pos": "v", "source": "test"},
+        ])
+        results = tmp_db.lookup_english("break")
+        assert len(results) >= 1
+
+
 class TestBibleCRUD:
     def test_insert_and_search_bible(self, tmp_db, sample_verse):
         """3. Insert a Bible verse and search."""
