@@ -482,6 +482,81 @@ def create_app() -> FastAPI:
                         continue
             return {"query": q, "version": version, "count": len(results), "results": results}
 
+    # ── Dictionary CRUD ────────────────────────────────────────
+
+    @app.post("/dictionary/add")
+    async def dictionary_add(
+        word: str,
+        english: str = "",
+        myanmar: str = "",
+        pos: str = "",
+    ):
+        """Add a new dictionary entry."""
+        from ..data.database import get_manager
+
+        db = get_manager()
+        r = db.enrich_word(
+            word,
+            english_clean=english,
+            myanmar=myanmar,
+            pos=pos,
+            source="api_add",
+        )
+        return {"success": r, "word": word}
+
+    @app.put("/dictionary/update")
+    async def dictionary_update(word: str, field: str, value: str):
+        """Update a dictionary entry field."""
+        from ..data.database import get_manager
+
+        db = get_manager()
+        r = db.enrich_word(word, **{field: value})
+        return {"success": r, "word": word, "field": field}
+
+    @app.delete("/dictionary/delete")
+    async def dictionary_delete(word: str):
+        """Delete a dictionary entry (soft delete — marks as deleted in audit)."""
+        from ..data.database import get_manager
+
+        db = get_manager()
+        db._log_change("dictionary", 0, "zolai", word, "DELETED", "api_delete")
+        return {"success": True, "word": word}
+
+    @app.get("/dictionary/search/all")
+    async def dictionary_search_all(q: str, limit: int = 20):
+        """Search dictionary with ZO↔EN↔MY."""
+        from ..data.database import get_manager
+
+        db = get_manager()
+        results = db.search_dictionary(q, limit=limit)
+        return {"results": results, "count": len(results)}
+
+    # ── Monitor ────────────────────────────────────────────────
+
+    @app.get("/monitor/health")
+    async def monitor_health():
+        """DB health check."""
+        from ..data.database import get_manager
+
+        db = get_manager()
+        return db.health_check()
+
+    @app.get("/monitor/coverage")
+    async def monitor_coverage():
+        """Translation coverage per table."""
+        from ..data.database import get_manager
+
+        db = get_manager()
+        return db.quality_report()
+
+    @app.get("/monitor/audit")
+    async def monitor_audit(limit: int = 50):
+        """Recent audit log entries."""
+        from ..data.database import get_manager
+
+        db = get_manager()
+        return db.get_audit_log(limit=limit)
+
     # --- Myanmar / Burmese endpoints ---
 
     @app.get("/dictionary/search/my")
