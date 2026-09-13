@@ -50,23 +50,11 @@ while true; do
       python -m uvicorn zolai.api.server:app --host 0.0.0.0 --port 8000
       ;;
     2)
-      echo -e "${G}Stopping API server...${NC}"
-      stop_server
-      read -p "Press Enter..."
-      ;;
-    3)
-      echo -e "${G}Force stopping API server...${NC}"
-      pkill -9 -f "uvicorn zolai.api.server" 2>/dev/null
-      sleep 1
-      echo -e "  ${G}✅ Server force stopped${NC}"
-      read -p "Press Enter..."
-      ;;
-    4)
       echo -e "${G}Launching desktop app...${NC}"
       source "$DIR/.venv/bin/activate" 2>/dev/null || true
       cd "$DIR" && zolai desktop
       ;;
-    5)
+    3)
       echo -e "${G}Starting server + desktop...${NC}"
       source "$DIR/.venv/bin/activate" 2>/dev/null || true
       cd "$DIR"
@@ -80,13 +68,13 @@ while true; do
         echo -e "  ${R}❌ API failed${NC}"
       fi
       ;;
-    6)
+    4)
       echo -e "${G}Running tests...${NC}"
       source "$DIR/.venv/bin/activate" 2>/dev/null || true
       cd "$DIR" && python -m pytest tests/ -q --tb=short
       read -p "Press Enter..."
       ;;
-    7)
+    5)
       echo -e "${G}DB Health Check...${NC}"
       source "$DIR/.venv/bin/activate" 2>/dev/null || true
       cd "$DIR" && python -c "
@@ -106,16 +94,16 @@ conn.close()
 "
       read -p "Press Enter..."
       ;;
-    8)
+    6)
       echo -e "${G}CLI info...${NC}"
       source "$DIR/.venv/bin/activate" 2>/dev/null || true
       cd "$DIR" && zolai info
       read -p "Press Enter..."
       ;;
-    9)
+    7)
       bash "$WORKSPACE/zolai-datasets/scripts/bible/menu.sh"
       ;;
-    A)
+    8)
       echo -e "${G}Running smart installer...${NC}"
       echo -e "  ${Y}This will detect your system and install only what's needed.${NC}"
       echo -e "  ${Y}No NVIDIA GPU? → CPU-only packages (~300MB).${NC}"
@@ -128,7 +116,7 @@ conn.close()
       fi
       read -p "Press Enter..."
       ;;
-    B)
+    9)
       echo -e "${G}Building desktop app...${NC}"
       cd "$WORKSPACE/zolai-tauri/src-tauri" && cargo build --release
       read -p "Press Enter..."
