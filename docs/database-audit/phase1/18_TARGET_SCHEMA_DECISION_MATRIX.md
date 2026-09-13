@@ -28,7 +28,7 @@
 | 4 | `grammar_patterns` | Grammar | 5,547 | Grammar rules | `grammar_patterns` | MERGE (+instructions) | High | Low | pattern_id UNIQUE (0 dups). Merge 16 instructions. |
 | 5 | `translations` | Corpus | 212,754 | EN↔ZO sentence pairs | `translations` | KEEP | High | Medium | 67× max dup. Dedup recommended. |
 | 6 | `word_alignments` | Corpus | 385,120 | Word-level ZO↔EN | `word_alignments` | KEEP | High | Low | 2× max dup. Import superset (224,696 unique triples). |
-| 7 | `vocab` | Vocabulary | 107,979 | Word frequency index | `vocab` | MERGE (+zolai_vocabulary) | High | Medium | COALESCE myanmar. ~5K dup headwords. ~114K target. |
+| 7 | `vocab` | Vocabulary | 107,979 | Word frequency index | `vocab` | MERGE (+zolai_vocabulary) | High | Medium | COALESCE myanmar. 107,049 unique headwords. ~115K unique words target. |
 | 8 | `proverbs` | Culture | 7,736 | Proverbs | `proverbs` | MERGE (+zolai_proverbs_idioms) | High | Low | 5,072 overlap. 2,664 proverbs-only (NULL enrichment). |
 | 9 | `phrases` | Vocabulary | 5,000 | Multi-word expressions | `phrases` | KEEP | High | Low | Single source, 5,000 curated phrases. |
 | 10 | `word_usage` | Corpus | 60,365 | Per-book word profiles | `word_usage` | KEEP | High | Low | (word,book) UNIQUE (0 dups). zolai_word_usage exported. |

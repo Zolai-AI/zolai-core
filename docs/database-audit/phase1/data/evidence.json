@@ -83,9 +83,9 @@
   "vocab": {
     "total": 107979,
     "zolai_total": 112279,
-    "overlap": 106243,
-    "vocab_only": 30147,
-    "zolai_only": 8414,
+    "overlap": 76911,
+    "vocab_only": 30138,
+    "zolai_only": 8399,
     "dup_headwords": [
       [
         "a",
@@ -129,7 +129,11 @@
         "ai",
         2
       ]
-    ]
+    ],
+    "unique_headwords_vocab": 107049,
+    "unique_zolai_zolai_vocab": 85310,
+    "total_unique_union": 115448,
+    "note": "overlap/vocab_only/zolai_only are UNIQUE word counts (not row counts). Both tables have duplicate entries."
   },
   "grammar": {
     "total": 5547,

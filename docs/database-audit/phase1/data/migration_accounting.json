@@ -11,8 +11,14 @@
     {
       "target": "dictionary",
       "sources": {
-        "dictionary": {"rows": 103303, "join_key": "zolai"},
-        "dictionary_import": {"rows": 156808, "join_key": "zolai"}
+        "dictionary": {
+          "rows": 103303,
+          "join_key": "zolai"
+        },
+        "dictionary_import": {
+          "rows": 156808,
+          "join_key": "zolai"
+        }
       },
       "matched": 103303,
       "duplicates_in_source": 1876,
@@ -23,13 +29,19 @@
       "target_rows": 103303,
       "loss": 0,
       "loss_pct": 0.0,
-      "balance_check": "103303 = 103303 + 0 + 0 ✓"
+      "balance_check": "103303 = 103303 + 0 + 0 \u2713"
     },
     {
       "target": "dictionary_en_zo",
       "sources": {
-        "dictionary_en_zo": {"rows": 113750, "join_key": "headword"},
-        "dictionary_en_zo_import": {"rows": 135276, "join_key": "headword"}
+        "dictionary_en_zo": {
+          "rows": 113750,
+          "join_key": "headword"
+        },
+        "dictionary_en_zo_import": {
+          "rows": 135276,
+          "join_key": "headword"
+        }
       },
       "matched": 127695,
       "duplicates_in_source": 42818,
@@ -40,31 +52,44 @@
       "target_rows": 113750,
       "loss": 0,
       "loss_pct": 0.0,
-      "balance_check": "113750 = 113750 + 0 + 0 ✓"
+      "balance_check": "113750 = 113750 + 0 + 0 \u2713"
     },
     {
       "target": "vocab",
       "sources": {
-        "vocab": {"rows": 107979, "join_key": "headword"},
-        "zolai_vocabulary": {"rows": 112279, "join_key": "zolai"}
+        "vocab": {
+          "rows": 107979,
+          "join_key": "headword"
+        },
+        "zolai_vocabulary": {
+          "rows": 112279,
+          "join_key": "zolai"
+        }
       },
-      "overlap": 106243,
-      "vocab_only": 1736,
-      "zolai_only": 6036,
+      "overlap": 76911,
+      "vocab_only": 30138,
+      "zolai_only": 8399,
       "duplicates_in_vocab": "~5000",
       "duplicates_in_zolai_vocab": "~20000",
-      "merged": "~114000",
+      "merged": "~115448",
       "conflicting": 0,
-      "target_rows": "~114000",
-      "loss": "~4979",
-      "loss_pct": 2.2,
-      "balance_check": "Loss from DISTINCT dedup on headword in both tables"
+      "target_rows": "~115448",
+      "loss": "~4810",
+      "loss_pct": 4.1,
+      "balance_check": "Unique word balance: 115448 = 76911 + 30138 + 8399 \u2713"
     },
     {
       "target": "grammar_patterns",
       "sources": {
-        "grammar_patterns": {"rows": 5547, "join_key": "pattern_id"},
-        "grammar_instructions": {"rows": 16, "join_key": null, "action": "append"}
+        "grammar_patterns": {
+          "rows": 5547,
+          "join_key": "pattern_id"
+        },
+        "grammar_instructions": {
+          "rows": 16,
+          "join_key": null,
+          "action": "append"
+        }
       },
       "matched": 0,
       "merged": 5563,
@@ -72,18 +97,36 @@
       "target_rows": 5563,
       "loss": 0,
       "loss_pct": 0.0,
-      "balance_check": "5547 + 16 = 5563 ✓",
+      "balance_check": "5547 + 16 = 5563 \u2713",
       "orphaned": [
-        {"table": "zolai_grammar_patterns", "rows": 13519, "reason": "pattern_id=NULL for ALL rows"},
-        {"table": "grammar_patterns_enhanced", "rows": 5597, "reason": "pattern_id=NULL for ALL rows"},
-        {"table": "grammar_patterns_import", "rows": 6983, "reason": "Staging table"}
+        {
+          "table": "zolai_grammar_patterns",
+          "rows": 13519,
+          "reason": "pattern_id=NULL for ALL rows"
+        },
+        {
+          "table": "grammar_patterns_enhanced",
+          "rows": 5597,
+          "reason": "pattern_id=NULL for ALL rows"
+        },
+        {
+          "table": "grammar_patterns_import",
+          "rows": 6983,
+          "reason": "Staging table"
+        }
       ]
     },
     {
       "target": "proverbs",
       "sources": {
-        "proverbs": {"rows": 7736, "join_key": "zolai"},
-        "zolai_proverbs_idioms": {"rows": 4984, "join_key": "zolai"}
+        "proverbs": {
+          "rows": 7736,
+          "join_key": "zolai"
+        },
+        "zolai_proverbs_idioms": {
+          "rows": 4984,
+          "join_key": "zolai"
+        }
       },
       "overlap": 5072,
       "proverbs_only": 2664,
@@ -94,14 +137,20 @@
       "target_rows": 7736,
       "loss": 0,
       "loss_pct": 0.0,
-      "balance_check": "7736 = 7736 + 0 ✓",
+      "balance_check": "7736 = 7736 + 0 \u2713",
       "note": "2664 proverbs-only get NULL for enriched fields (literal_translation, morpheme_breakdown, theme, cultural_context)"
     },
     {
       "target": "translations",
       "sources": {
-        "translations": {"rows": 212754, "join_key": "(source, target)"},
-        "translations_import": {"rows": 135511, "join_key": "(zolai, english)"}
+        "translations": {
+          "rows": 212754,
+          "join_key": "(source, target)"
+        },
+        "translations_import": {
+          "rows": 135511,
+          "join_key": "(zolai, english)"
+        }
       },
       "matched": 135511,
       "canonical_only": 77243,
@@ -118,8 +167,14 @@
     {
       "target": "word_alignments",
       "sources": {
-        "word_alignments": {"rows": 385120, "join_key": "(ref, zolai_word, english_word)"},
-        "word_alignments_import": {"rows": 627000, "join_key": "(ref, zo_word, en_word)"}
+        "word_alignments": {
+          "rows": 385120,
+          "join_key": "(ref, zolai_word, english_word)"
+        },
+        "word_alignments_import": {
+          "rows": 627000,
+          "join_key": "(ref, zo_word, en_word)"
+        }
       },
       "unique_triples_import": 224696,
       "matched": 385120,
@@ -136,7 +191,10 @@
     {
       "target": "word_usage",
       "sources": {
-        "word_usage": {"rows": 60365, "join_key": "(word, book)"}
+        "word_usage": {
+          "rows": 60365,
+          "join_key": "(word, book)"
+        }
       },
       "overlap_with_zolai": 1848,
       "word_usage_only": 58517,
@@ -148,47 +206,156 @@
       "loss_pct": 0.0,
       "balance_check": "Direct copy, no merge",
       "orphaned": [
-        {"table": "zolai_word_usage", "rows": 85045, "reason": "Different schema, 1848/60365 overlap"}
+        {
+          "table": "zolai_word_usage",
+          "rows": 85045,
+          "reason": "Different schema, 1848/60365 overlap"
+        }
       ]
     }
   ],
   "direct_copies": [
-    {"target": "bible_verses", "source": "bible_verses", "rows": 62751, "note": "30569 refs have 2-3 dups; dedup recommended"},
-    {"target": "phrases", "source": "phrases", "rows": 5000},
-    {"target": "syllable_data", "source": "syllable_data", "rows": 189554},
-    {"target": "word_collocations", "source": "word_collocations", "rows": 5000},
-    {"target": "articles", "source": "articles", "rows": 6371},
-    {"target": "songs", "source": "zolai_songs", "rows": 1032, "action": "rename"},
-    {"target": "wiki_content", "source": "wiki_content + wiki_lessons", "rows": 1688, "action": "merge_columns"},
-    {"target": "import_log", "source": "jsonl_import_log", "rows": 92, "action": "rename"},
-    {"target": "data_audit_log", "source": "data_audit_log", "rows": 24762},
-    {"target": "audit_findings", "source": "audit_findings", "rows": 713},
-    {"target": "provenance", "source": "provenance", "rows": 255},
-    {"target": "tone_sandhi", "source": "zolai_tone_sandhi", "rows": 19, "action": "rename"},
-    {"target": "tone_patterns", "source": "tone_patterns", "rows": 118},
-    {"target": "training_runs", "source": "training_runs", "rows": 2},
-    {"target": "bible_analysis", "source": "zolai_bible_analysis", "rows": 30758}
+    {
+      "target": "bible_verses",
+      "source": "bible_verses",
+      "rows": 62751,
+      "note": "30569 refs have 2-3 dups; dedup recommended"
+    },
+    {
+      "target": "phrases",
+      "source": "phrases",
+      "rows": 5000
+    },
+    {
+      "target": "syllable_data",
+      "source": "syllable_data",
+      "rows": 189554
+    },
+    {
+      "target": "word_collocations",
+      "source": "word_collocations",
+      "rows": 5000
+    },
+    {
+      "target": "articles",
+      "source": "articles",
+      "rows": 6371
+    },
+    {
+      "target": "songs",
+      "source": "zolai_songs",
+      "rows": 1032,
+      "action": "rename"
+    },
+    {
+      "target": "wiki_content",
+      "source": "wiki_content + wiki_lessons",
+      "rows": 1688,
+      "action": "merge_columns"
+    },
+    {
+      "target": "import_log",
+      "source": "jsonl_import_log",
+      "rows": 92,
+      "action": "rename"
+    },
+    {
+      "target": "data_audit_log",
+      "source": "data_audit_log",
+      "rows": 24762
+    },
+    {
+      "target": "audit_findings",
+      "source": "audit_findings",
+      "rows": 713
+    },
+    {
+      "target": "provenance",
+      "source": "provenance",
+      "rows": 255
+    },
+    {
+      "target": "tone_sandhi",
+      "source": "zolai_tone_sandhi",
+      "rows": 19,
+      "action": "rename"
+    },
+    {
+      "target": "tone_patterns",
+      "source": "tone_patterns",
+      "rows": 118
+    },
+    {
+      "target": "training_runs",
+      "source": "training_runs",
+      "rows": 2
+    },
+    {
+      "target": "bible_analysis",
+      "source": "zolai_bible_analysis",
+      "rows": 30758
+    }
   ],
   "orphaned_export": [
-    {"table": "zolai_grammar_patterns", "rows": 13519, "reason": "pattern_id=NULL, no FK", "action": "export_jsonl"},
-    {"table": "grammar_patterns_enhanced", "rows": 5597, "reason": "pattern_id=NULL, no FK", "action": "export_jsonl"},
-    {"table": "zolai_word_usage", "rows": 85045, "reason": "Different schema", "action": "export_jsonl"},
-    {"table": "training_exercises", "rows": 81805, "reason": "Generated artifact", "action": "export_jsonl"},
-    {"table": "bible_context", "rows": 1228, "reason": "Different schema", "action": "export_jsonl"},
-    {"table": "simbu", "rows": 4163, "reason": "Niche data", "action": "export_jsonl"},
-    {"table": "wiki_lessons", "rows": 1688, "reason": "Merged into wiki_content", "action": "export_jsonl"},
-    {"table": "grammar_instructions", "rows": 16, "reason": "Merged into grammar_patterns", "action": "merged"}
+    {
+      "table": "zolai_grammar_patterns",
+      "rows": 13519,
+      "reason": "pattern_id=NULL, no FK",
+      "action": "export_jsonl"
+    },
+    {
+      "table": "grammar_patterns_enhanced",
+      "rows": 5597,
+      "reason": "pattern_id=NULL, no FK",
+      "action": "export_jsonl"
+    },
+    {
+      "table": "zolai_word_usage",
+      "rows": 85045,
+      "reason": "Different schema",
+      "action": "export_jsonl"
+    },
+    {
+      "table": "training_exercises",
+      "rows": 81805,
+      "reason": "Generated artifact",
+      "action": "export_jsonl"
+    },
+    {
+      "table": "bible_context",
+      "rows": 1228,
+      "reason": "Different schema",
+      "action": "export_jsonl"
+    },
+    {
+      "table": "simbu",
+      "rows": 4163,
+      "reason": "Niche data",
+      "action": "export_jsonl"
+    },
+    {
+      "table": "wiki_lessons",
+      "rows": 1688,
+      "reason": "Merged into wiki_content",
+      "action": "export_jsonl"
+    },
+    {
+      "table": "grammar_instructions",
+      "rows": 16,
+      "reason": "Merged into grammar_patterns",
+      "action": "merged"
+    }
   ],
   "total_orphaned_rows": 193045,
   "summary": {
     "total_source_rows": 3162926,
     "total_target_rows_est": 1574000,
-    "total_loss_est": 17933,
-    "overall_loss_pct": 1.14,
+    "total_loss_est": 17764,
+    "overall_loss_pct": 1.13,
     "loss_breakdown": {
       "dictionary_dedup": 0,
       "dictionary_en_zo_dedup": 0,
-      "vocab_dedup": 4979,
+      "vocab_dedup": 4810,
       "translations_dedup": 12754,
       "word_alignments_dedup": 200,
       "other": 0
