@@ -425,18 +425,40 @@ async def bible_chapters(book: str = Query(...)):
 async def bible_verses(
     book: str = Query(...),
     chapter: int = Query(...),
+    verse_start: int = Query(None),
+    verse_end: int = Query(None),
     versions: str = Query("tdb77,tedim2010,kjv"),
 ):
-    """Get all verses for a Bible chapter with parallel translations."""
+    """Get all verses for a Bible chapter with parallel translations.
+
+    Optional verse_start/verse_end filter a range of verses within the chapter.
+    """
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("""
-            SELECT verse, zo_tdb77, zo_tedim2010, en_kJV, myanmar, book_name
-            FROM bible_verses
-            WHERE book = ? AND chapter = ?
-            ORDER BY verse
-        """, (book, chapter))
+
+        if verse_start is not None and verse_end is not None:
+            cur.execute("""
+                SELECT verse, zo_tdb77, zo_tedim2010, en_kJV, myanmar, book_name
+                FROM bible_verses
+                WHERE book = ? AND chapter = ? AND verse >= ? AND verse <= ?
+                ORDER BY verse
+            """, (book, chapter, verse_start, verse_end))
+        elif verse_start is not None:
+            cur.execute("""
+                SELECT verse, zo_tdb77, zo_tedim2010, en_kJV, myanmar, book_name
+                FROM bible_verses
+                WHERE book = ? AND chapter = ? AND verse >= ?
+                ORDER BY verse
+            """, (book, chapter, verse_start))
+        else:
+            cur.execute("""
+                SELECT verse, zo_tdb77, zo_tedim2010, en_kJV, myanmar, book_name
+                FROM bible_verses
+                WHERE book = ? AND chapter = ?
+                ORDER BY verse
+            """, (book, chapter))
+
         rows = cur.fetchall()
         cur.close()
         conn.close()
