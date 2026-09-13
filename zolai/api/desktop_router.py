@@ -273,7 +273,7 @@ async def dict_browse(limit: int = 50, offset: int = 0, q: str = None):
     try:
         conn = get_db()
         cur = conn.cursor()
-        
+
         if q:
             # Letter filter - search for entries starting with the letter
             cur.execute(
@@ -287,17 +287,17 @@ async def dict_browse(limit: int = 50, offset: int = 0, q: str = None):
                 "ORDER BY zolai LIMIT ? OFFSET ?",
                 (limit, offset),
             )
-        
+
         rows = cur.fetchall()
         cols = [d[0] for d in cur.description]
-        
+
         # Get total count for pagination
         if q:
             cur.execute("SELECT COUNT(*) FROM dictionary WHERE zolai LIKE ?", (f"{q}%",))
         else:
             cur.execute("SELECT COUNT(*) FROM dictionary")
         total = cur.fetchone()[0]
-        
+
         cur.close()
         conn.close()
         return {
@@ -376,7 +376,7 @@ async def bible_books():
         conn = get_db()
         cur = conn.cursor()
         cur.execute("""
-            SELECT book, book_name, 
+            SELECT book, book_name,
                    COUNT(*) as verse_count,
                    MIN(chapter) as min_chapter,
                    MAX(chapter) as max_chapter
@@ -749,7 +749,7 @@ async def get_ai_models():
         # Try to get Gemini models from environment or config
         gemini_models = [
             "gemini-3-flash",
-            "gemini-3-pro-plus", 
+            "gemini-3-pro-plus",
             "gemini-3-pro",
             "gemini-3-flash-thinking",
             "gemini-3-flash-plus",
@@ -758,7 +758,7 @@ async def get_ai_models():
             "gemini-3-flash-advanced",
             "gemini-3-flash-thinking-advanced",
         ]
-        
+
         # OpenRouter free models
         openrouter_models = [
             "mimo-v2.5-free",
@@ -766,12 +766,12 @@ async def get_ai_models():
             "hy3-free",
             "muse-spark-1.2-contributor-free",
         ]
-        
+
         # Local Zolai model
         local_models = [
             {"name": "zolai-local", "provider": "zolai", "type": "local", "endpoint": "/chat/zolai"},
         ]
-        
+
         models = []
         for m in gemini_models:
             models.append({"name": m, "provider": "gemini", "type": "cloud"})
@@ -779,7 +779,7 @@ async def get_ai_models():
             models.append({"name": m, "provider": "openrouter", "type": "cloud"})
         for m in local_models:
             models.append(m)
-            
+
         # Try to load from config if available
         try:
             from ..config import config
@@ -788,7 +788,7 @@ async def get_ai_models():
                 pass
         except:
             pass
-            
+
         return {"models": models, "default": "zolai-local"}
     except Exception as e:
         return {"models": [{"name": "zolai-local", "provider": "zolai", "type": "local", "endpoint": "/chat/zolai"}], "default": "zolai-local", "error": str(e)}
