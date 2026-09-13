@@ -1,67 +1,155 @@
-# zolai-core — Zolai Python toolkit + RAG Knowledge Brain
+# zolai-core
 
-<p align="center"><img src="logo.png" alt="Zolai AI" width="120"></p>
+Python toolkit + RAG Knowledge Brain for Tedim Zolai (ZVS 2018).
 
-Bilingual (Tedim Zolai ⇄ English) AI toolkit for the Zomi people. Python package,
-FastAPI services, and the **RAG-first Knowledge Brain** (embeddings over wiki + PDF,
-no raw fine-tuning).
-
-## What's here
-
-- `zolai/` — run-time Python package (analyzer, bible, cleaner, cli, crawler,
-  dictionary, ingest, knowledge, ocr, api...)
-- `zolai/knowledge/` — **Knowledge Brain**: `ingest` (MD/PDF → chunks → embeddings),
-  `retrieve` (offline cosine RAG), `ngram` (word/bigram prediction tables)
-- `scripts/kg/` — knowledge pipeline tooling + `smoke_test.py`
-- `tests/` — pytest suite
-
-## Quick start
+## Quick Start
 
 ```bash
-pip install -e .          # or: source .venv/bin/activate
-export HF_TOKEN=...       # embeddings sourced from HF Hub (cache)
-
-# Index a wiki sample + a PDF-OCR corpus into the vector store
-python -m zolai.knowledge.ingest --limit 20
-python -m zolai.knowledge.pdf             # backlog B: PDF-derived knowledge
-python scripts/kg/smoke_test.py           # PASS expected
-
-# Retrieval (RAG)
-python -c "from zolai.knowledge import load_index, retrieve
-idx=load_index(); print(retrieve('Gentehna grammar sentence structure', idx))"
+pip install -e .
 ```
 
-## Context
+```python
+from zolai.syllable import SyllableSegmenter
+from zolai.pos_tagger import ZolaiPOSTagger
+from zolai.morphology import ZolaiMorphology
+from zolai.embeddings import ZolaiWordEmbeddings
+from zolai.mt import ZolaiMT
+from zolai.summarizer import ZolaiSummarizer
+from zolai.qa import ZolaiQA
+from zolai.ner import ZolaiNER
+from zolai.classifier import ZolaiClassifier
+from zolai.dependency import ZolaiDependency
 
-Read `context/` — the **pcore-orchestra six-file set** is ground truth for agents.
-See `docs/ZOLAI_AI_ARCHITECTURE.md` (system) and
-`docs/ZOLAI_KNOWLEDGE_BRAIN_ARCHITECTURE.md` (RAG-first, no fine-tuning).
+# Syllable segmentation
+seg = SyllableSegmenter()
+seg.segment("vantung")  # ['van', 'tung']
 
-## Language standard
+# POS tagging
+pos = ZolaiPOSTagger()
+pos.tag("Pasian in vantung a piangsak hi")
 
-ZVS 2018 orthography, SOV order, ergative `-in`. All language output must comply.
+# Morphological analysis
+morph = ZolaiMorphology()
+morph.analyze("piangsak")  # {'root': 'piang', 'suffix': 'sak', ...}
 
-## Contribute
+# Machine Translation
+mt = ZolaiMT()
+await mt.translate_en_zo("God created the earth")
 
-See `CONNECT.md` for how `zolai-core` relates to the other `zolai-ai` repos.
+# Question Answering
+qa = ZolaiQA()
+await qa.answer("Who created the earth?", "Pasian in vantung a piangsak hi")
+```
 
----
+## Features
 
-## Part of the Zolai-AI org
+### Syllable Segmentation (SylBreak4All)
+- **Rule-based**: Deterministic onset-nucleus-coda (C)(C)V(C)
+- **CRF-based**: Trained on 10K gold standard (99.92% F1)
+- **Tone-aware**: 4-tone system (T1-T4) with 19 sandhi rules
+- **Compound handling**: 200+ built-in Bible compounds
 
-This repo is a component of the **Zolai-AI** organization — see the
-[org profile](https://github.com/Zolai-AI) for the full ecosystem and
-[`.github/CONTRIBUTING.md`](https://github.com/Zolai-AI/.github/blob/main/CONTRIBUTING.md) to contribute.
+### POS Tagging
+- 13 tag categories (NOUN, VERB, ADJ, ADV, PRON, DET, POST, CONJ, PART, NUM, INTJ, PUNCT, X)
+- Dictionary-backed with Bible proper noun detection
+- Confidence scoring
 
----
+### Morphological Analysis
+- Prefix/suffix stripping
+- Compound detection (200+ built-in)
+- Tone-dependent meaning disambiguation
+- 65 high-frequency Bible roots + 7 particles
 
-*Zolai AI · preserving Tedim Zolai (ZVS 2018) with a RAG-first bilingual toolkit for the Zomi people.*
+### Word Embeddings
+- fastText skipgram/CBOW
+- Negative sampling
+- Cosine similarity + word analogies
+- JSONL export
 
+### NLP Pipeline
+- **NER**: 6 entity types (PER, LOC, ORG, DATE, NUM, BOOK)
+- **Classifier**: 8 topics (religion, education, news, story, grammar, song, proverb)
+- **MT**: EN↔ZO with dictionary fallback + Gemini ensemble
+- **Summarizer**: Extractive + AI
+- **QA**: Bible-context aware
+- **Dependency**: SOV-aware parser
 
+### ZVS 2018 Validator
+- Enforces orthography rules
+- Bible-only historical exceptions
+- 192 tests passing
 
----
+## Database
 
-## Org context
+All data lives in `data/zolai.db` (SQLite WAL, ~1.2GB, 72 tables, ~3.1M rows).
 
-Full project ecosystem, architecture, design, status & plans: **[Zolai AI Project Brain](https://github.com/Zolai-AI/.github/blob/main/docs/ZOLAI_AI_PROJECT_BRAIN.md)**.
-Part of the [Zolai-AI](https://github.com/Zolai-AI) org.
+```python
+from zolai.config import Config
+from zolai.data import DatabaseManager
+
+config = Config()
+db = DatabaseManager(config)
+
+# Search dictionary
+results = db.search_dictionary("pasian")
+
+# Search Bible
+verses = db.search_bible("vantung")
+
+# Get word usage
+usage = db.get_word_usage("khem")
+```
+
+### Key Tables
+
+| Table | Rows | Purpose |
+|-------|------|---------|
+| dictionary | 103,150 | Zolai→English |
+| dictionary_en_zo | 113,739 | English→Zolai |
+| bible_verses | 31,649 | Parallel EN/ZO/MY |
+| grammar_patterns | 5,547 | Sentence patterns |
+| vocab | 94,458 | Vocabulary index |
+| syllable_data | 189,554 | Syllable segmentation |
+
+Source corpora (Bible translations, TongDot/TongSan dictionaries, web-scraped corpus)
+are processed into our own cleaned, ZVS-2018-aligned database at `data/zolai.db`. See
+`data/CREDITS.md` for full attribution.
+
+## API Server
+
+```bash
+zolai-api serve --host 0.0.0.0 --port 8000
+```
+
+Endpoints:
+- `GET /health` — Health check
+- `POST /analyze` — Full sentence analysis
+- `POST /dictionary/search` — Dictionary lookup
+- `GET /bible/search` — Bible verse search
+- `POST /dictionary/add` — Add entry
+- `POST /chat/zolai` — Zolai chat
+
+## Tests
+
+```bash
+pytest tests/
+```
+
+## SylBreak4All Milestones (10/10 Complete)
+
+| Milestone | Deliverable |
+|-----------|-------------|
+| M1 | Audit — `docs/ZOLAI_SYLLABLE_AUDIT.md` |
+| M2 | Design — `docs/ZOLAI_SYLLABLE_DESIGN.md` |
+| M3 | Rule segmenter — `zolai/syllable/segmenter.py` |
+| M4 | Gold dataset — `data/syllable/gold.jsonl` (10K) |
+| M5 | CRF segmenter — `zolai/syllable/crf_segmenter.py` |
+| M6 | Evaluation — `zolai/syllable/evaluation.py` |
+| M7 | NLP integration — `zolai/syllable/integration.py` |
+| M8 | Tokenizer training — `zolai/syllable/tokenizer_training.py` |
+| M9 | E2E testing — `zolai/syllable/e2e_test.py` |
+| M10 | Docs + release — README, CHANGELOG, RELEASE_NOTES |
+
+## License
+
+MIT — Open source for Zomi language preservation.
