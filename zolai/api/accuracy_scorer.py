@@ -1,94 +1,58 @@
 """
 Zolai AI Accuracy Scorer — cross-reference multiple data sources.
 
-Scores words/phrases by confidence based on dictionary + Bible + wiki + grammar.
+Scores words/phrases by confidence based on dictionary + Bible + grammar,
+all read from the canonical DB (no runtime JSONL).
 """
-import json
-from pathlib import Path
 
-DATA_DIR = Path(__file__).parent.parent.parent.parent / "data"
+from ..config import config
+from ..data.database import get_manager
 
 
 class AccuracyScorer:
     """Cross-reference accuracy scoring for Zolai words/phrases."""
 
     def __init__(self):
-        self.dict_zo_en = self._load_jsonl(
-            DATA_DIR / "dictionary" / "processed" / "dict_zo_en_master_v1.jsonl"
-        )
-        self.bible = self._load_jsonl(
-            DATA_DIR / "bible" / "parallel_corpus_v1.jsonl"
-        )
-        grammar_path = DATA_DIR / "bible" / "grammar_patterns_v2.jsonl"
-        self.grammar = (
-            self._load_json(grammar_path) if grammar_path.exists() else {}
-        )
-
-    def _load_jsonl(self, path: Path) -> list[dict]:
-        if not path.exists():
-            return []
-        data = []
-        with open(path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    data.append(json.loads(line))
-        return data
-
-    def _load_json(self, path: Path) -> dict:
-        if not path.exists():
-            return {}
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        self._db = get_manager(f"sqlite:///{config.paths.zolai_db}")
 
     def score_word(self, word: str) -> dict:
         """Score a single word's accuracy/confidence."""
         sources = []
-
         wl = word.lower()
 
         # Check dictionary
-        dict_matches = [
-            e for e in self.dict_zo_en
-            if wl in str(e.get('zolai', '')).lower()
-            or wl in str(e.get('english', '')).lower()
-        ]
+        dict_matches = self._db.lookup_word(wl)
         if dict_matches:
-            sources.append(('dictionary', len(dict_matches)))
+            sources.append(("dictionary", len(dict_matches)))
 
         # Check Bible
         bible_matches = [
-            v for v in self.bible
-            if wl in str(v.get('zo', '')).lower()
-            or wl in str(v.get('english', '')).lower()
+            v for v in self._db.search_bible(wl)
         ]
         if bible_matches:
-            sources.append(('bible', len(bible_matches)))
+            sources.append(("bible", len(bible_matches)))
 
         # Check grammar patterns
-        grammar_matches = [
-            p for p in self.grammar.get('patterns', [])
-            if wl in str(p.get('example', '')).lower()
-        ]
+        grammar_matches = self._db.get_grammar(wl)
         if grammar_matches:
-            sources.append(('grammar', len(grammar_matches)))
+            sources.append(("grammar", len(grammar_matches)))
 
         # Calculate confidence
         source_count = len(sources)
         if source_count >= 3:
-            confidence = 'HIGH'
+            confidence = "HIGH"
         elif source_count == 2:
-            confidence = 'MEDIUM'
+            confidence = "MEDIUM"
         elif source_count == 1:
-            confidence = 'LOW'
+            confidence = "LOW"
         else:
-            confidence = 'UNCERTAIN'
+            confidence = "UNCERTAIN"
 
         return {
-            'word': word,
-            'confidence': confidence,
-            'sources': sources,
-            'source_count': source_count,
+            "word": word,
+            "confidence": confidence,
+            "sources": sources,
+            "source_count": source_count,
         }
 
     def score_phrase(self, words: list[str]) -> dict:
@@ -96,16 +60,16 @@ class AccuracyScorer:
         scores = [self.score_word(w) for w in words]
 
         # Overall confidence is the minimum of individual confidences
-        confidence_levels = {'HIGH': 3, 'MEDIUM': 2, 'LOW': 1, 'UNCERTAIN': 0}
-        min_confidence = min(confidence_levels.get(s['confidence'], 0) for s in scores)
+        confidence_levels = {"HIGH": 3, "MEDIUM": 2, "LOW": 1, "UNCERTAIN": 0}
+        min_confidence = min(confidence_levels.get(s["confidence"], 0) for s in scores)
 
-        reverse_levels = {3: 'HIGH', 2: 'MEDIUM', 1: 'LOW', 0: 'UNCERTAIN'}
+        reverse_levels = {3: "HIGH", 2: "MEDIUM", 1: "LOW", 0: "UNCERTAIN"}
 
         return {
-            'words': words,
-            'overall_confidence': reverse_levels[min_confidence],
-            'word_scores': scores,
-            'total_sources': sum(s['source_count'] for s in scores),
+            "words": words,
+            "overall_confidence": reverse_levels[min_confidence],
+            "word_scores": scores,
+            "total_sources": sum(s["source_count"] for s in scores),
         }
 
 

@@ -114,41 +114,8 @@ class ZolaiRAG:
         self._feedback: FeedbackStore | None = None
 
     def _ensure_loaded(self) -> None:
-        """Lazy-load all data sources on first query."""
-        dict_dir = self.data_dir / "dictionary" / "processed"
-        bible_dir = self.data_dir / "bible"
-
-        # Load ZO→EN dictionary
-        if self._dict_zo_en is None:
-            path = dict_dir / "dict_zo_en_master_v1.jsonl"
-            self._dict_zo_en = self._load_jsonl_index(path, "zolai", "word")
-
-        # Load EN→ZO dictionary
-        if self._dict_en_zo is None:
-            path = dict_dir / "dict_canonical_clean.jsonl"
-            self._dict_en_zo = self._load_jsonl_index(path, "english", "word")
-
-        # Load grammar patterns
-        if self._grammar is None:
-            path = bible_dir / "grammar_patterns_v2.jsonl"
-            self._grammar = self._load_jsonl_list(path)
-
-        # Load phrases
-        if self._phrases is None:
-            path = bible_dir / "phrases_v1.jsonl"
-            self._phrases = self._load_jsonl_list(path)
-
-        # Load Bible verses
-        if self._bible is None:
-            path = bible_dir / "parallel_corpus_v1.jsonl"
-            self._bible = self._load_jsonl_list(path)
-
-        # Load vocab index (keyed on "headword")
-        if self._vocab_index is None:
-            path = bible_dir / "vocab_index_full.jsonl"
-            self._vocab_index = self._load_jsonl_index(path, "headword", None)
-
-        # Load per-book knowledge
+        """Lazy-load data sources on first query (DB-first)."""
+        # Per-book knowledge (small reference JSON bundle; not served from JSONL)
         if self._book_knowledge is None:
             self._book_knowledge = {}
             book_dir = self.data_dir / "bible" / "book_knowledge"
@@ -163,56 +130,10 @@ class ZolaiRAG:
                     except Exception:
                         continue
 
-        # Detect database (preferred over JSONL when available)
+        # Detect database (mandatory serving path)
         if self._db is None:
             db_path = config.paths.data / "zolai.db"
-            if db_path.exists():
-                try:
-                    self._db = get_manager(f"sqlite:///{db_path}")
-                except Exception:
-                    self._db = None
-
-    @staticmethod
-    def _load_jsonl_index(path: Path, key: str, fallback: str | None) -> dict[str, dict]:
-        """Load JSONL into a dict keyed by `key` field."""
-        index: dict[str, dict] = {}
-        if not path.exists():
-            return index
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                word = entry.get(key, "")
-                if not word and fallback:
-                    word = entry.get(fallback, "")
-                # Handle list fields (e.g. translations: ["say"])
-                if isinstance(word, list):
-                    word = word[0] if word else ""
-                if isinstance(word, str) and word:
-                    index[word.lower()] = entry
-        return index
-
-    @staticmethod
-    def _load_jsonl_list(path: Path) -> list[dict]:
-        """Load JSONL into a list."""
-        items: list[dict] = []
-        if not path.exists():
-            return items
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    items.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-        return items
+            self._db = get_manager(f"sqlite:///{db_path}")
 
     def retrieve(self, query: str, top_k: int = 10) -> EvidencePack:
         """Retrieve structured evidence for a query.

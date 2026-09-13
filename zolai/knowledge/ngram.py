@@ -1,8 +1,9 @@
 """Zolai word + bigram prediction tables.
 
 Builds word-frequency and bigram count tables from the dictionary headwords and
-bilingual wordlists. Output is newline-delimited JSON for downstream prediction
-features (word-prediction, sentence-structure suggestions).
+bilingual wordlists. Output is stored in the ``ngram`` table (DB-first); the
+same records may also be exported to newline-delimited JSON for downstream
+tooling. Prediction reads come from the repository layer, never raw JSONL.
 """
 from __future__ import annotations
 
@@ -13,6 +14,8 @@ from collections import Counter
 from pathlib import Path
 
 from ..config import config
+from ..data.repositories import get_engine
+from ..data.repositories.extended import NgramRepository
 
 ART = config.paths.data_knowledge
 DICT = config.paths.data / "dictionary" / "processed" / "dict_master_v2.json"
@@ -22,7 +25,7 @@ _WORD = re.compile(r"[a-zA-Z][a-zA-Z'']*")
 
 
 def build_ngram_tables(out_dir=ART) -> Path:
-    """Extract unigrams + bigrams; write artifacts/kg/ngrams.jsonl."""
+    """Extract unigrams + bigrams and persist to the ``ngram`` table (and JSONL)."""
     unigrams: Counter[str] = Counter()
     bigrams: Counter[tuple[str, str]] = Counter()
 
@@ -61,6 +64,13 @@ def build_ngram_tables(out_dir=ART) -> Path:
         for a, b in zip(toks, toks[1:]):
             bigrams[(a, b)] += 1
 
+    tables = {
+        "unigrams": dict(unigrams),
+        "bigrams": {f"{a}\t{b}": c for (a, b), c in bigrams.items()},
+    }
+    # Persist to the ngram table (DB-first serving path).
+    _save_tables_to_db(tables, bigrams)
+
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "ngrams.jsonl"
     with out_path.open("w", encoding="utf-8") as f:
@@ -69,43 +79,39 @@ def build_ngram_tables(out_dir=ART) -> Path:
         for tok, cnt in unigrams.most_common():
             f.write(json.dumps({"type": "unigram", "word": tok, "count": cnt}, ensure_ascii=False) + "\n")
 
-    print(f"ngram: {len(unigrams)} unigrams, {len(bigrams)} bigrams -> {out_path}")
+    print(f"ngram: {len(unigrams)} unigrams, {len(bigrams)} bigrams -> DB + {out_path}")
     return out_path
+
+
+def _save_tables_to_db(tables: dict, keyed_bigrams: Counter) -> None:
+    """Persist unigram/bigram tables to the ``ngram`` table (idempotent build)."""
+    engine = get_engine()
+    repo = NgramRepository(engine)
+    # Re-shape bigrams back to (a, b) tuples for the repository save.
+    unigrams = tables.get("unigrams", {})
+    bigrams = {
+        (a, b): c for (a, b), c in keyed_bigrams.items()
+    }
+    repo.save_tables({"unigrams": unigrams, "bigrams": bigrams})
 
 
 @functools.lru_cache(maxsize=1)
 def load_ngram_tables(path: str | None = None) -> dict[str, dict]:
-    """Load ngram tables from a ngrams.jsonl file.
+    """Load ngram tables from the canonical ``ngram`` table.
 
     Returns {"unigrams": {word: count}, "bigrams": {(a, b): count}}.
-    Returns empty dicts if the file is missing or unreadable.
+    Returns empty dicts if the table is empty.
 
-    Example:
-        >>> tables = load_ngram_tables("artifacts/kg/ngrams.jsonl")
-        >>> "uh" in tables["unigrams"]
-        True
+    ``path`` is accepted only for backward compatibility with callers that used
+    to pass a JSONL path; it is ignored and the DB is read instead.
     """
-    if path is None:
-        path = str(ART / "ngrams.jsonl")
-    p = Path(path)
-    if not p.exists():
-        return {"unigrams": {}, "bigrams": {}}
-    unigrams: dict[str, int] = {}
-    bigrams: dict[tuple[str, str], int] = {}
     try:
-        with p.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                row = json.loads(line)
-                if row.get("type") == "bigram":
-                    bigrams[(row["a"], row["b"])] = row["count"]
-                elif row.get("type") == "unigram":
-                    unigrams[row["word"]] = row["count"]
+        engine = get_engine()
+        ngram = NgramRepository(engine)
+        tables = ngram.as_tables()
     except Exception:
         return {"unigrams": {}, "bigrams": {}}
-    return {"unigrams": unigrams, "bigrams": bigrams}
+    return tables
 
 
 def predict_next(

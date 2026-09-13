@@ -162,8 +162,18 @@ def index_wiki(
         print(f"wg: no new chunks (all {len(existing_ids)} already indexed)")
 
     # ── Write complete index (existing + new, all with embeddings) ──
-    # Write in batches so partial progress is saved if interrupted
     all_rows = existing_rows + new_rows
+
+    # DB-first serving path: upsert into the knowledge_vectors table.
+    from ..data.repositories import get_engine
+    from ..data.repositories.extended import KnowledgeVectorRepository
+
+    repo = KnowledgeVectorRepository(get_engine())
+    repo.upsert_batch(all_rows, batch_id="wiki-ingest")
+    print(f"wg: total index rows = {len(all_rows)} (DB: knowledge_vectors)")
+
+    # Export JSONL bundle for HuggingFace distribution (build artifact).
+    out_dir.mkdir(parents=True, exist_ok=True)
     batch_size = 5000
     with out_path.open("w", encoding="utf-8") as f:
         for i in range(0, len(all_rows), batch_size):
@@ -171,10 +181,8 @@ def index_wiki(
             for r in batch:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
             f.flush()
-            if (i // batch_size) % 10 == 0 and i > 0:
-                print(f"wg: wrote {i + len(batch)}/{len(all_rows)} rows...")
 
-    print(f"wg: total index rows = {len(all_rows)}, vectors -> {out_path}")
+    print(f"wg: exported {len(all_rows)} rows -> {out_path}")
     return out_path
 
 

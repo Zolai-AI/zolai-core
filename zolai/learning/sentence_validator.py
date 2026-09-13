@@ -3,7 +3,6 @@ Sentence Validator — checks if a Zolai sentence is real/attested.
 Uses Bible + corpus as ground truth. Lazy loading.
 Set ZOLAI_LOAD_CORPUS=1 to include  corpus (~208MB, slow load).
 """
-import json
 import os
 import re
 from pathlib import Path
@@ -31,36 +30,26 @@ class SentenceValidator:
             self._load_()
 
     def _load_bible(self):
-        bible_path = DATA_DIR / "bible" / "parallel_corpus_v1.jsonl"
-        if not bible_path.exists():
-            return
-        with open(bible_path, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    entry = json.loads(line)
-                    zo = entry.get("zo_tdb77") or ""
-                    if zo.strip():
-                        normalized = self._normalize(zo)
-                        self.bible_sentences.add(normalized)
-                        words = re.findall(r"\b[a-zA-Z'-]+\b", zo.lower())
-                        self.bible_words.update(words)
-                except Exception:
-                    continue
+        from ..data.repositories import get_repositories
+
+        repos = get_repositories()
+        for r in repos["bible"].all_records(["zo_tdb77", "zo_tedim2010"]):
+            zo = (r.get("zo_tdb77") or r.get("zo_tedim2010") or "").strip()
+            if zo:
+                normalized = self._normalize(zo)
+                self.bible_sentences.add(normalized)
+                words = re.findall(r"\b[a-zA-Z'-]+\b", zo.lower())
+                self.bible_words.update(words)
 
     def _load_parallel(self):
-        parallel_path = DATA_DIR / "parallel" / "zo_en_pairs_combined_v1.jsonl"
-        if not parallel_path.exists():
-            return
-        with open(parallel_path, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    entry = json.loads(line)
-                    zo = entry.get("zolai", "")
-                    if zo.strip():
-                        normalized = self._normalize(zo)
-                        self.corpus_sentences.add(normalized)
-                except Exception:
-                    continue
+        from ..data.repositories import get_repositories
+
+        repos = get_repositories()
+        for r in repos["translation"].all_records(["target"]):
+            zo = (r.get("target") or "").strip()
+            if zo:
+                normalized = self._normalize(zo)
+                self.corpus_sentences.add(normalized)
 
     def _load_(self):
         """Load  corpus for modern Zolai validation."""
