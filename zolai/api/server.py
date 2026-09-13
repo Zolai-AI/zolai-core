@@ -272,66 +272,20 @@ def create_app() -> FastAPI:
         yield
         logger.info("Zolai API shutting down")
 
-    # API Key Configuration
-API_KEY_NAME = "X-API-Key"
-API_KEY_QUERY = "api_key"
-API_KEYS = {"dev-key-123": "development", "admin-key-456": "admin"}  # In production, use env var or secure store
-
-api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
-api_key_query = APIKeyQuery(name=API_KEY_QUERY, auto_error=False)
-
-from fastapi import Request, Depends
-from fastapi.security import APIKeyHeader, APIKeyQuery
-from fastapi.responses import JSONResponse
-
-async def get_api_key(
-    api_key_header_val: str = Depends(api_key_header),
-    api_key_query_val: str = Depends(api_key_query),
-):
-    """Validate API key from header or query parameter."""
-    api_key = api_key_header_val or api_key_query_val
-    if api_key and api_key in API_KEYS:
-        return API_KEYS[api_key]  # Return role
-    raise HTTPException(status_code=403, detail="Invalid or missing API key")
-
-# Optional: public endpoints that don't require auth
-PUBLIC_ENDPOINTS = {
-    "/health", "/docs", "/openapi.json", "/redoc",
-    "/chat/models", "/chat/chat", "/chat/chat/stream", "/chat",
-    "/chat/zolai",  # Zolai chat is public but rate-limited
-    "/desktop/stats", "/desktop/tables", "/desktop/query",  # Dashboard read endpoints
-    "/dictionary/search/all", "/dictionary/search/my", "/dictionary/stats",
-    "/bible/search", "/monitor/health", "/monitor/coverage", "/monitor/audit",
-}
-
-from starlette.middleware.base import BaseHTTPMiddleware
-
-class APIKeyMiddleware(BaseHTTPMiddleware):
-    """Middleware to enforce API key on protected endpoints."""
-    async def dispatch(self, request: Request, call_next):
-        if request.url.path in PUBLIC_ENDPOINTS:
-            return await call_next(request)
-        
-        # Skip for OPTIONS (CORS preflight)
-        if request.method == "OPTIONS":
-            return await call_next(request)
-        
-        api_key = request.headers.get(API_KEY_NAME) or request.query_params.get(API_KEY_QUERY)
-        if not api_key or api_key not in API_KEYS:
-            return JSONResponse(status_code=403, content={"detail": "Invalid or missing API key"})
-        
-        request.state.api_key_role = API_KEYS[api_key]
-        return await call_next(request)
-
-app = FastAPI(
+    app = FastAPI(
         title="Zolai Toolkit API",
         description="REST API for Zolai language data pipeline",
         version="1.0.0",
         lifespan=lifespan,
     )
 
-    app.include_router(desktop_router)
-    app.include_router(jsonl_router)
+    # app.include_router(desktop_router)
+    for route in desktop_router.routes:
+        app.router.routes.append(route)
+    # app.include_router(jsonl_router)
+    for route in jsonl_router.routes:
+        app.router.routes.append(route)
+
     # --- Static File Serving for Desktop App ---
     from fastapi.responses import FileResponse
     _FRONTEND_DIR = config.paths.frontend
@@ -501,7 +455,7 @@ app = FastAPI(
 
     @app.get("/bible/search")
     async def bible_search(q: str = "", version: str = "tdb77", limit: int = 10):
-        """Search bible parallel corpora for matching verses."""
+        """Search Bible verses by Zolai or English text (LIKE match)."""
         from ..data.database import get_manager
 
         if not q:
@@ -560,7 +514,6 @@ app = FastAPI(
     ):
         """Add a new dictionary entry."""
         from ..data.database import get_manager
-
         db = get_manager()
         r = db.enrich_word(
             word,
@@ -575,7 +528,6 @@ app = FastAPI(
     async def dictionary_update(word: str, field: str, value: str):
         """Update a dictionary entry field."""
         from ..data.database import get_manager
-
         db = get_manager()
         r = db.enrich_word(word, **{field: value})
         return {"success": r, "word": word, "field": field}
@@ -616,7 +568,8 @@ app = FastAPI(
         
         for table, pk_col in tables_to_delete:
             # First, check if record exists and get its data for audit
-            cur.execute(f'SELECT * FROM "{table}" WHERE "{tables_to_delete[0][1] if table == tables_to_delete[0][0] else (table == "dictionary_en_zo" and "english" or table == "dictionary_import" and "zolai" or "english")}" = ?', (word,))
+            pk_name = "zolai" if "dictionary" in table and "en_zo" not in table else "english"
+            cur.execute(f'SELECT * FROM "{table}" WHERE "{pk_name}" = ?', (word,))
             existing = cur.fetchone()
             
             if existing:
@@ -639,9 +592,8 @@ app = FastAPI(
                 )
                 
                 # Soft delete
-                pk_val = "zolai" if "dictionary" in table and "en_zo" not in table else "english"
                 cur.execute(
-                    f'UPDATE "{table}" SET is_deleted = 1, deleted_at = ? WHERE "{pk_val}" = ?',
+                    f'UPDATE "{table}" SET is_deleted = 1, deleted_at = ? WHERE "{pk_col}" = ?',
                     (now, word)
                 )
                 rows_affected = cur.rowcount

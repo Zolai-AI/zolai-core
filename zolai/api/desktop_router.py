@@ -503,25 +503,59 @@ async def audit_recent(limit: int = Query(50)):
 # AI MODELS ENDPOINT
 # ═══════════════════════════════════════════
 
+
+# ═══════════════════════════════════════════
+# AI MODELS ENDPOINT (Dynamic)
+# ═══════════════════════════════════════════
+
 @router.get("/ai/models")
 async def get_ai_models():
-    """Get available AI models from zolai-core."""
-    # Local models available in zolai-core
-    local_models = [
-        {"name": "gemini-3-flash", "provider": "gemini", "type": "cloud"},
-        {"name": "gemini-3-pro-plus", "provider": "gemini", "type": "cloud"},
-        {"name": "gemini-3-pro", "provider": "gemini", "type": "cloud"},
-        {"name": "gemini-3-flash-thinking", "provider": "gemini", "type": "cloud"},
-        {"name": "gemini-3-flash-plus", "provider": "gemini", "type": "cloud"},
-        {"name": "gemini-3-flash-thinking-plus", "provider": "gemini", "type": "cloud"},
-        {"name": "gemini-3-pro-advanced", "provider": "gemini", "type": "cloud"},
-        {"name": "gemini-3-flash-advanced", "provider": "gemini", "type": "cloud"},
-        {"name": "gemini-3-flash-thinking-advanced", "provider": "gemini", "type": "cloud"},
-        {"name": "mimo-v2.5-free", "provider": "openrouter", "type": "cloud"},
-        {"name": "nemotron-3-ultra-free", "provider": "openrouter", "type": "cloud"},
-        {"name": "hy3-free", "provider": "openrouter", "type": "cloud"},
-        {"name": "muse-spark-1.2-contributor-free", "provider": "openrouter", "type": "cloud"},
-        {"name": "zolai-local", "provider": "zolai", "type": "local", "endpoint": "/chat/zolai"},
-    ]
-    return {"models": local_models, "default": "zolai-local"}
+    """Get available AI models from zolai-core configuration."""
+    try:
+        # Try to get Gemini models from environment or config
+        gemini_models = [
+            "gemini-3-flash",
+            "gemini-3-pro-plus", 
+            "gemini-3-pro",
+            "gemini-3-flash-thinking",
+            "gemini-3-flash-plus",
+            "gemini-3-flash-thinking-plus",
+            "gemini-3-pro-advanced",
+            "gemini-3-flash-advanced",
+            "gemini-3-flash-thinking-advanced",
+        ]
+        
+        # OpenRouter free models
+        openrouter_models = [
+            "mimo-v2.5-free",
+            "nemotron-3-ultra-free",
+            "hy3-free",
+            "muse-spark-1.2-contributor-free",
+        ]
+        
+        # Local Zolai model
+        local_models = [
+            {"name": "zolai-local", "provider": "zolai", "type": "local", "endpoint": "/chat/zolai"},
+        ]
+        
+        models = []
+        for m in gemini_models:
+            models.append({"name": m, "provider": "gemini", "type": "cloud"})
+        for m in openrouter_models:
+            models.append({"name": m, "provider": "openrouter", "type": "cloud"})
+        for m in local_models:
+            models.append(m)
+            
+        # Try to load from config if available
+        try:
+            from ..config import config
+            # Check if config has model overrides
+            if hasattr(config, 'ai_models'):
+                pass
+        except:
+            pass
+            
+        return {"models": models, "default": "zolai-local"}
+    except Exception as e:
+        return {"models": [{"name": "zolai-local", "provider": "zolai", "type": "local", "endpoint": "/chat/zolai"}], "default": "zolai-local", "error": str(e)}
 

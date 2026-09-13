@@ -24,7 +24,7 @@ DESKTOP_CONTRACT = [
     ("POST", "/dictionary/add"),
     ("PUT", "/dictionary/update"),
     ("DELETE", "/dictionary/delete"),
-    ("GET", "/dictionary/stats"),
+    ("GET", "/desktop/dict/stats"),
     
     # Desktop Router - Bible Tools
     ("GET", "/desktop/bible/study"),

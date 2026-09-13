@@ -31,6 +31,9 @@ from .integration import SyllableAwarePOS, SyllableEmbeddings, ZolaiTokenizer
 # Tokenizer Training (SylBreak4All M8)
 from .tokenizer_training import SyllableTokenizerTrainer
 
+# Full Rule-Based Segmenter (SylBreak4All M3)
+from .segmenter import SyllableSegmenter
+
 __all__ = [
     "Boundary",
     "ZolaiSyllabifier",
@@ -42,6 +45,7 @@ __all__ = [
     "SyllableEmbeddings",
     "SyllableTokenizerTrainer",
     "SyllableAnnotator",
+    "SyllableSegmenter",
 ]
 
 
