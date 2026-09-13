@@ -277,13 +277,13 @@ async def dict_browse(limit: int = 50, offset: int = 0, q: str = None):
         if q:
             # Letter filter - search for entries starting with the letter
             cur.execute(
-                "SELECT zolai, english_clean, myanmar, pos, source FROM dictionary "
+                "SELECT zolai, english, myanmar, pos, source FROM dictionary "
                 "WHERE zolai LIKE ? ORDER BY zolai LIMIT ? OFFSET ?",
                 (f"{q}%", limit, offset),
             )
         else:
             cur.execute(
-                "SELECT zolai, english_clean, myanmar, pos, source FROM dictionary "
+                "SELECT zolai, english, myanmar, pos, source FROM dictionary "
                 "ORDER BY zolai LIMIT ? OFFSET ?",
                 (limit, offset),
             )
@@ -321,11 +321,11 @@ async def dict_stats():
         pos_counts = dict(cur.fetchall())
         cur.execute("SELECT COUNT(*) FROM dictionary WHERE myanmar IS NOT NULL AND myanmar != ''")
         my_count = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM dictionary WHERE english_clean IS NOT NULL")
+        cur.execute("SELECT COUNT(*) FROM dictionary WHERE english IS NOT NULL AND english != ''")
         en_clean = cur.fetchone()[0]
         cur.close()
         conn.close()
-        return {"total": total, "with_myanmar": my_count, "english_clean": en_clean, "pos_breakdown": pos_counts}
+        return {"total": total, "with_myanmar": my_count, "with_english": en_clean, "pos_breakdown": pos_counts}
     except Exception as e:
         return {"error": str(e)}
 
@@ -366,6 +366,103 @@ async def bible_context_topics():
 
 
 # ═══════════════════════════════════════════
+# BIBLE NAVIGATION ENDPOINTS
+# ═══════════════════════════════════════════
+
+@router.get("/bible/books")
+async def bible_books():
+    """List all Bible books with verse counts."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT book, book_name, 
+                   COUNT(*) as verse_count,
+                   MIN(chapter) as min_chapter,
+                   MAX(chapter) as max_chapter
+            FROM bible_verses
+            GROUP BY book
+            ORDER BY MIN(chapter), MIN(verse)
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        books = []
+        for r in rows:
+            books.append({
+                "abbr": r[0],
+                "name": r[1] or r[0],
+                "verses": r[2],
+                "min_chapter": r[3],
+                "max_chapter": r[4],
+            })
+        return {"books": books, "total": len(books)}
+    except Exception as e:
+        return {"error": str(e)}
+
+@router.get("/bible/chapters")
+async def bible_chapters(book: str = Query(...)):
+    """List chapters for a Bible book with verse counts."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT chapter, COUNT(*) as verse_count
+            FROM bible_verses
+            WHERE book = ?
+            GROUP BY chapter
+            ORDER BY chapter
+        """, (book,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        chapters = [{"chapter": r[0], "verses": r[1]} for r in rows]
+        return {"book": book, "chapters": chapters, "total": len(chapters)}
+    except Exception as e:
+        return {"error": str(e)}
+
+@router.get("/bible/verses")
+async def bible_verses(
+    book: str = Query(...),
+    chapter: int = Query(...),
+    versions: str = Query("tdb77,tedim2010,kjv"),
+):
+    """Get all verses for a Bible chapter with parallel translations."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT verse, zo_tdb77, zo_tedim2010, en_kJV, myanmar, book_name
+            FROM bible_verses
+            WHERE book = ? AND chapter = ?
+            ORDER BY verse
+        """, (book, chapter))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        verses = []
+        for r in rows:
+            v = {
+                "verse": r[0],
+                "zo_tdb77": r[1] or "",
+                "zo_tedim2010": r[2] or "",
+                "en_kJV": r[3] or "",
+                "myanmar": r[4] or "",
+                "book_name": r[5] or book,
+            }
+            verses.append(v)
+        return {
+            "book": book,
+            "chapter": chapter,
+            "book_name": verses[0]["book_name"] if verses else book,
+            "verses": verses,
+            "total": len(verses),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ═══════════════════════════════════════════
 # GEMINI TOOLS
 # ═══════════════════════════════════════════
 
@@ -379,10 +476,29 @@ async def gemini_fill_my(limit: int = Query(50)):
     """Fill missing Myanmar translations."""
     return run_script("gemini_translate.py", "--fill-my", "--limit", str(limit))
 
-@ router.get("/gemini/coverage")
+@router.get("/gemini/coverage")
 async def gemini_coverage():
-    """Check translation coverage."""
-    return run_script("gemini_translate.py", "--coverage")
+    """Check translation coverage from database."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM dictionary")
+        total = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM dictionary WHERE english IS NOT NULL AND english != ''")
+        with_english = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM dictionary WHERE myanmar IS NOT NULL AND myanmar != ''")
+        with_myanmar = cur.fetchone()[0]
+        cur.close()
+        conn.close()
+        return {
+            "total": total,
+            "with_english": with_english,
+            "with_myanmar": with_myanmar,
+            "english_pct": round(with_english / total * 100, 1) if total else 0,
+            "myanmar_pct": round(with_myanmar / total * 100, 1) if total else 0,
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 @ router.get("/gemini/fill")
 async def gemini_fill(text: str = Query(...), lang: str = Query("my")):
