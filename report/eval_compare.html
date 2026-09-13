@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Syllable Segmentation Evaluation Report</title>
+    <style>
+        /* ruff: noqa: F821 */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 { color: #1a1a2e; border-bottom: 3px solid #16213e; padding-bottom: 10px; }
+        h2 { color: #16213e; margin-top: 30px; }
+        h3 { color: #0f3460; }
+        table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #16213e; color: white; }
+        tr:nth-child(even) { background-color: #f2f2f2; }
+        .metric-card { display: inline-block; background: #f8f9fa;
+            border: 1px solid #dee2e6; border-radius: 8px;
+            padding: 15px; margin: 10px; min-width: 180px; }
+        .metric-value { font-size: 2em; font-weight: bold; color: #16213e; }
+        .metric-label { font-size: 0.9em; color: #6c757d; }
+        .good { color: #28a745; } .bad { color: #dc3545; }
+        .warn { color: #ffc107; }
+        .error-table { font-family: monospace; font-size: 0.9em; }
+        .chart-container { margin: 20px 0; }
+        .progress-bar { height: 20px; background: #e9ecef;
+            border-radius: 10px; overflow: hidden; }
+        .progress-fill { height: 100%;
+            background: linear-gradient(90deg, #16213e, #0f3460);
+            transition: width 0.5s; }
+        .comparison-table { font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <h1>Syllable Segmentation Evaluation Report</h1>
+<div class="metrics-grid">
+    <div class="metric-card">
+        <div class="metric-label">Rule-based - Boundary F1</div>
+        <div class="metric-value good">1.0000</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Rule-based - Word Accuracy</div>
+        <div class="metric-value good">1.0000</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">CRF - Boundary F1</div>
+        <div class="metric-value good">1.0000</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">CRF - Word Accuracy</div>
+        <div class="metric-value good">1.0000</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">SentencePiece - Boundary F1</div>
+        <div class="metric-value bad">0.4953</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">SentencePiece - Word Accuracy</div>
+        <div class="metric-value bad">0.0020</div>
+    </div></div>
+
+    <h2>Summary Metrics</h2>
+    <table class="comparison-table">
+        <thead>
+            <tr>
+                <th>Segmenter</th>
+                <th>Boundary P</th>
+                <th>Boundary R</th>
+                <th>Boundary F1</th>
+                <th>Syllable Acc</th>
+                <th>Word Acc</th>
+                <th>Total Words</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Rule-based</strong></td>
+                <td>1.0000</td>
+                <td>1.0000</td>
+                <td>1.0000</td>
+                <td>1.0000</td>
+                <td>1.0000</td>
+                <td>1000</td>
+            </tr>
+            <tr>
+                <td><strong>CRF</strong></td>
+                <td>1.0000</td>
+                <td>1.0000</td>
+                <td>1.0000</td>
+                <td>1.0000</td>
+                <td>1.0000</td>
+                <td>1000</td>
+            </tr>
+            <tr>
+                <td><strong>SentencePiece</strong></td>
+                <td>0.3291</td>
+                <td>1.0000</td>
+                <td>0.4953</td>
+                <td>0.0314</td>
+                <td>0.0020</td>
+                <td>1000</td>
+            </tr></tbody></table>
+
+    <h2>Per-Syllable-Count Breakdown</h2>
+    <table class="comparison-table">
+        <thead>
+            <tr>
+                <th>Segmenter</th>
+                <th>Syllable Count</th>
+                <th>Accuracy</th>
+                <th>Visual</th>
+                <th>Total</th>
+                <th>Correct</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Rule-based</td>
+                <td>1</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>69</td>
+                <td>69</td>
+            </tr>
+            <tr>
+                <td>Rule-based</td>
+                <td>2</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>354</td>
+                <td>354</td>
+            </tr>
+            <tr>
+                <td>Rule-based</td>
+                <td>3</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>290</td>
+                <td>290</td>
+            </tr>
+            <tr>
+                <td>Rule-based</td>
+                <td>4</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>113</td>
+                <td>113</td>
+            </tr>
+            <tr>
+                <td>Rule-based</td>
+                <td>5</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>121</td>
+                <td>121</td>
+            </tr>
+            <tr>
+                <td>Rule-based</td>
+                <td>6</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>42</td>
+                <td>42</td>
+            </tr>
+            <tr>
+                <td>Rule-based</td>
+                <td>7</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>8</td>
+                <td>8</td>
+            </tr>
+            <tr>
+                <td>Rule-based</td>
+                <td>8</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>2</td>
+                <td>2</td>
+            </tr>
+            <tr>
+                <td>Rule-based</td>
+                <td>9</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>1</td>
+                <td>1</td>
+            </tr>
+            <tr>
+                <td>CRF</td>
+                <td>1</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>69</td>
+                <td>69</td>
+            </tr>
+            <tr>
+                <td>CRF</td>
+                <td>2</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>354</td>
+                <td>354</td>
+            </tr>
+            <tr>
+                <td>CRF</td>
+                <td>3</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>290</td>
+                <td>290</td>
+            </tr>
+            <tr>
+                <td>CRF</td>
+                <td>4</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>113</td>
+                <td>113</td>
+            </tr>
+            <tr>
+                <td>CRF</td>
+                <td>5</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>121</td>
+                <td>121</td>
+            </tr>
+            <tr>
+                <td>CRF</td>
+                <td>6</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>42</td>
+                <td>42</td>
+            </tr>
+            <tr>
+                <td>CRF</td>
+                <td>7</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>8</td>
+                <td>8</td>
+            </tr>
+            <tr>
+                <td>CRF</td>
+                <td>8</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>2</td>
+                <td>2</td>
+            </tr>
+            <tr>
+                <td>CRF</td>
+                <td>9</td>
+                <td>1.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 100%"></div>
+                </div></td>
+                <td>1</td>
+                <td>1</td>
+            </tr>
+            <tr>
+                <td>SentencePiece</td>
+                <td>1</td>
+                <td>0.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 0%"></div>
+                </div></td>
+                <td>69</td>
+                <td>0</td>
+            </tr>
+            <tr>
+                <td>SentencePiece</td>
+                <td>2</td>
+                <td>0.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 0%"></div>
+                </div></td>
+                <td>354</td>
+                <td>0</td>
+            </tr>
+            <tr>
+                <td>SentencePiece</td>
+                <td>3</td>
+                <td>0.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 0%"></div>
+                </div></td>
+                <td>290</td>
+                <td>0</td>
+            </tr>
+            <tr>
+                <td>SentencePiece</td>
+                <td>4</td>
+                <td>0.0088</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 0%"></div>
+                </div></td>
+                <td>113</td>
+                <td>1</td>
+            </tr>
+            <tr>
+                <td>SentencePiece</td>
+                <td>5</td>
+                <td>0.0083</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 0%"></div>
+                </div></td>
+                <td>121</td>
+                <td>1</td>
+            </tr>
+            <tr>
+                <td>SentencePiece</td>
+                <td>6</td>
+                <td>0.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 0%"></div>
+                </div></td>
+                <td>42</td>
+                <td>0</td>
+            </tr>
+            <tr>
+                <td>SentencePiece</td>
+                <td>7</td>
+                <td>0.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 0%"></div>
+                </div></td>
+                <td>8</td>
+                <td>0</td>
+            </tr>
+            <tr>
+                <td>SentencePiece</td>
+                <td>8</td>
+                <td>0.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 0%"></div>
+                </div></td>
+                <td>2</td>
+                <td>0</td>
+            </tr>
+            <tr>
+                <td>SentencePiece</td>
+                <td>9</td>
+                <td>0.0000</td>
+                <td><div class="progress-bar">
+                    <div class="progress-fill" style="width: 0%"></div>
+                </div></td>
+                <td>1</td>
+                <td>0</td>
+            </tr></tbody></table>
+
+    <h2>Error Analysis</h2>
+    <h3>Rule-based</h3>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">Total Words</div>
+            <div class="metric-value">1000</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Correct Syllable Count</div>
+            <div class="metric-value good">1000</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Total Errors</div>
+            <div class="metric-value bad">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Over-segmentation</div>
+            <div class="metric-value warn">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Under-segmentation</div>
+            <div class="metric-value warn">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Boundary Shift</div>
+            <div class="metric-value warn">0</div>
+        </div>
+    </div>
+    <h4>By Word Frequency</h4>
+    <table class="comparison-table">
+        <thead>
+            <tr>
+                <th>Frequency Bucket</th>
+                <th>Total</th>
+                <th>Correct</th>
+                <th>Errors</th>
+                <th>Accuracy</th>
+            </tr>
+        </thead>
+        <tbody>
+        <tr>
+            <td>unseen (0)</td>
+            <td>1000</td>
+            <td>1000</td>
+            <td>0</td>
+            <td>1.0000</td>
+        </tr></tbody></table>
+    <h3>CRF</h3>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">Total Words</div>
+            <div class="metric-value">1000</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Correct Syllable Count</div>
+            <div class="metric-value good">1000</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Total Errors</div>
+            <div class="metric-value bad">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Over-segmentation</div>
+            <div class="metric-value warn">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Under-segmentation</div>
+            <div class="metric-value warn">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Boundary Shift</div>
+            <div class="metric-value warn">0</div>
+        </div>
+    </div>
+    <h4>By Word Frequency</h4>
+    <table class="comparison-table">
+        <thead>
+            <tr>
+                <th>Frequency Bucket</th>
+                <th>Total</th>
+                <th>Correct</th>
+                <th>Errors</th>
+                <th>Accuracy</th>
+            </tr>
+        </thead>
+        <tbody>
+        <tr>
+            <td>unseen (0)</td>
+            <td>1000</td>
+            <td>1000</td>
+            <td>0</td>
+            <td>1.0000</td>
+        </tr></tbody></table>
+    <h3>SentencePiece</h3>
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-label">Total Words</div>
+            <div class="metric-value">1000</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Correct Syllable Count</div>
+            <div class="metric-value good">2</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Total Errors</div>
+            <div class="metric-value bad">998</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Over-segmentation</div>
+            <div class="metric-value warn">998</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Under-segmentation</div>
+            <div class="metric-value warn">0</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-label">Boundary Shift</div>
+            <div class="metric-value warn">0</div>
+        </div>
+    </div>
+    <h4>By Word Frequency</h4>
+    <table class="comparison-table">
+        <thead>
+            <tr>
+                <th>Frequency Bucket</th>
+                <th>Total</th>
+                <th>Correct</th>
+                <th>Errors</th>
+                <th>Accuracy</th>
+            </tr>
+        </thead>
+        <tbody>
+        <tr>
+            <td>unseen (0)</td>
+            <td>1000</td>
+            <td>2</td>
+            <td>998</td>
+            <td>0.0020</td>
+        </tr></tbody></table>
+    <h4>Common Errors (Top 15)</h4>
+    <table class="error-table">
+        <thead><tr><th>Word</th><th>Gold</th><th>Predicted</th><th>Error Type</th><th>Frequency</th></tr></thead>
+        <tbody>
+        <tr><td>deihsakna</td><td>['deih', 'sak', 'na']</td><td>['d', 'e', 'i', 'h', 's', 'a', 'k', 'n', 'a']</td><td>over-segmentation</td><td>0</td></tr>
+        <tr><td>kilemin</td><td>['kil', 'em', 'in']</td><td>['k', 'i', 'l', 'e', 'm', 'i', 'n']</td><td>over-segmentation</td><td>0</td></tr>
+        <tr><td>zelzel</td><td>['zel', 'zel']</td><td>['z', 'e', 'l', 'z', 'e', 'l']</td><td>over-segmentation</td><td>0</td></tr>
+        <tr><td>arms</td><td>['ar', 'm', 's']</td><td>['a', 'r', 'm', 's']</td><td>over-segmentation</td><td>0</td></tr>
+        <tr><td>goliath</td><td>['gol', 'iat', 'h']</td><td>['g', 'o', 'l', 'i', 'a', 't', 'h']</td><td>over-segmentation</td><td>0</td></tr>
+        <tr><td>lampang</td><td>['lam', 'pang']</td><td>['l', 'a', 'm', 'p', 'a', 'n', 'g']</td><td>over-segmentation</td><td>0</td></tr>
+        <tr><td>anim</td><td>['an', 'im']</td><td>['a', 'n', 'i', 'm']</td><td>over-segmentation</td><td>0</td></tr>
+        <tr><td>buddihst</td><td>['bu', 'd', 'dih', 's', 't']</td><td>['b', 'u', 'd', 'd', 'i', 'h', 's', 't']</td><td>over-segmentation</td><td>0</td></tr>
+        <tr><td>zahtaakhuai</td><td>['zah', 'ta', 'ak', 'hua', 'i']</td><td>['z', 'a', 'h', 't', 'a', 'a', 'k', 'h', 'u', 'a', 'i']</td><td>over-segmentation</td><td>0</td></tr>
+        <tr><td>sawlin</td><td>['sawl', 'in']</td><td>['s', 'a', 'w', 'l', 'i', 'n']</td><td>over-segmentation</td><td>0</td></tr>
+        <tr><td>gin</td><td>['gin']</td><td>['g', 'i', 'n']</td><td>over-segmentation</td><td>0</td></tr>
+        <tr><td>akiu</td><td>['ak', 'iu']</td><td>['a', 'k', 'i', 'u']</td><td>over-segmentation</td><td>0</td></tr>
+        <tr><td>tumcip</td><td>['tum', 'cip']</td><td>['t', 'u', 'm', 'c', 'i', 'p']</td><td>over-segmentation</td><td>0</td></tr>
+        <tr><td>adjudgement</td><td>['a', 'd', 'ju', 'd', 'gem', 'en', 't']</td><td>['a', 'd', 'j', 'u', 'd', 'g', 'e', 'm', 'e', 'n', 't']</td><td>over-segmentation</td><td>0</td></tr>
+        <tr><td>kampi</td><td>['kam', 'pi']</td><td>['k', 'a', 'm', 'p', 'i']</td><td>over-segmentation</td><td>0</td></tr></tbody></table>
+    <h2>Statistical Significance Tests (McNemar's)</h2>
+    <div class="metric-card">
+        <div class="metric-label">Rule-based vs CRF</div>
+        <div class="metric-value bad">p = 1.000000</div>
+        <div style="font-size: 0.8em; color: #6c757d;">No disagreements between segmenters</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">Rule-based vs SentencePiece</div>
+        <div class="metric-value good">p = 0.000000</div>
+        <div style="font-size: 0.8em; color: #6c757d;">Rule-based significantly outperforms the other (p=0.0000)</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-label">CRF vs SentencePiece</div>
+        <div class="metric-value good">p = 0.000000</div>
+        <div style="font-size: 0.8em; color: #6c757d;">CRF significantly outperforms the other (p=0.0000)</div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,1988 @@
+{
+  "pipeline": {
+    "total": 15,
+    "passed": 15,
+    "failed": 0,
+    "success_rate": 1.0,
+    "results": [
+      {
+        "input_text": "Pasian in vantung leh leitung a piangsak hi",
+        "syllables": [
+          "pa",
+          "sian",
+          "in",
+          "van",
+          "tung",
+          "leh",
+          "lei",
+          "tung",
+          "a",
+          "piang",
+          "sak",
+          "hi"
+        ],
+        "tokens": [
+          "pa",
+          "sian",
+          "in",
+          "van",
+          "tung",
+          "leh",
+          "lei",
+          "tung",
+          "a",
+          "piang",
+          "sak",
+          "hi"
+        ],
+        "pos_tags": [
+          {
+            "word": "Pasian",
+            "pos": "N.PROPER",
+            "original_pos": "N.PROPER",
+            "syllables": [
+              "pa",
+              "sian"
+            ],
+            "syllable_count": 2,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV",
+                "CVVC"
+              ],
+              "has_diphthong": true,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple",
+                "simple"
+              ],
+              "nucleus_types": [
+                "short",
+                "diphthong"
+              ]
+            }
+          },
+          {
+            "word": "in",
+            "pos": "PART.ERG",
+            "original_pos": "PART.ERG",
+            "syllables": [
+              "in"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "VC"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "none"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "vantung",
+            "pos": "N.PROPER",
+            "original_pos": "NOUN",
+            "syllables": [
+              "van",
+              "tung"
+            ],
+            "syllable_count": 2,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVC",
+                "CVCC"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple",
+                "simple"
+              ],
+              "nucleus_types": [
+                "short",
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "leh",
+            "pos": "PART",
+            "original_pos": "PART",
+            "syllables": [
+              "leh"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVC"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "leitung",
+            "pos": "N.PROPER",
+            "original_pos": "NOUN",
+            "syllables": [
+              "lei",
+              "tung"
+            ],
+            "syllable_count": 2,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVV",
+                "CVCC"
+              ],
+              "has_diphthong": true,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple",
+                "simple"
+              ],
+              "nucleus_types": [
+                "diphthong",
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "a",
+            "pos": "PRON",
+            "original_pos": "PRON",
+            "syllables": [
+              "a"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "V"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "none"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "piangsak",
+            "pos": "VERB",
+            "original_pos": "VERB",
+            "syllables": [
+              "piang",
+              "sak"
+            ],
+            "syllable_count": 2,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVVCC",
+                "CVC"
+              ],
+              "has_diphthong": true,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple",
+                "simple"
+              ],
+              "nucleus_types": [
+                "diphthong",
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "hi",
+            "pos": "PART",
+            "original_pos": "PART",
+            "syllables": [
+              "hi"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          }
+        ],
+        "translation_zo_en": {
+          "translation": "Prefix",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "translation_en_zo": {
+          "translation": "an",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "zvs_report": {
+          "source": "<text>",
+          "text": "Pasian in vantung leh leitung a piangsak hi",
+          "violations": []
+        },
+        "success": true,
+        "error": null
+      },
+      {
+        "input_text": "Ka nungzuiah a om hi",
+        "syllables": [
+          "ka",
+          "nung",
+          "zui",
+          "ah",
+          "a",
+          "om",
+          "hi"
+        ],
+        "tokens": [
+          "ka",
+          "nung",
+          "zui",
+          "ah",
+          "a",
+          "om",
+          "hi"
+        ],
+        "pos_tags": [
+          {
+            "word": "Ka",
+            "pos": "PRON",
+            "original_pos": "PRON",
+            "syllables": [
+              "ka"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "nungzuiah",
+            "pos": "VERB",
+            "original_pos": "VERB",
+            "syllables": [
+              "nung",
+              "zui",
+              "ah"
+            ],
+            "syllable_count": 3,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVCC",
+                "CVV",
+                "VC"
+              ],
+              "has_diphthong": true,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple",
+                "simple",
+                "none"
+              ],
+              "nucleus_types": [
+                "short",
+                "diphthong",
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "a",
+            "pos": "PRON",
+            "original_pos": "PRON",
+            "syllables": [
+              "a"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "V"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "none"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "om",
+            "pos": "NOUN",
+            "original_pos": "NOUN",
+            "syllables": [
+              "om"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "VC"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "none"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "hi",
+            "pos": "PART",
+            "original_pos": "PART",
+            "syllables": [
+              "hi"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          }
+        ],
+        "translation_zo_en": {
+          "translation": "Prefix",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "translation_en_zo": {
+          "translation": "an",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "zvs_report": {
+          "source": "<text>",
+          "text": "Ka nungzuiah a om hi",
+          "violations": []
+        },
+        "success": true,
+        "error": null
+      },
+      {
+        "input_text": "Tapa in laisiangtho a zoh hi",
+        "syllables": [
+          "ta",
+          "pa",
+          "in",
+          "lai",
+          "siang",
+          "tho",
+          "a",
+          "zoh",
+          "hi"
+        ],
+        "tokens": [
+          "ta",
+          "pa",
+          "in",
+          "lai",
+          "siang",
+          "tho",
+          "a",
+          "zoh",
+          "hi"
+        ],
+        "pos_tags": [
+          {
+            "word": "Tapa",
+            "pos": "N.PROPER",
+            "original_pos": "N.PROPER",
+            "syllables": [
+              "ta",
+              "pa"
+            ],
+            "syllable_count": 2,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV",
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple",
+                "simple"
+              ],
+              "nucleus_types": [
+                "short",
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "in",
+            "pos": "PART.ERG",
+            "original_pos": "PART.ERG",
+            "syllables": [
+              "in"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "VC"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "none"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "laisiangtho",
+            "pos": "NOUN",
+            "original_pos": "NOUN",
+            "syllables": [
+              "lai",
+              "siang",
+              "tho"
+            ],
+            "syllable_count": 3,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVV",
+                "CVVCC",
+                "CCV"
+              ],
+              "has_diphthong": true,
+              "has_digraph_onset": true,
+              "has_coda": true,
+              "onset_types": [
+                "simple",
+                "simple",
+                "digraph"
+              ],
+              "nucleus_types": [
+                "diphthong",
+                "diphthong",
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "a",
+            "pos": "PRON",
+            "original_pos": "PRON",
+            "syllables": [
+              "a"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "V"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "none"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "zoh",
+            "pos": "NOUN",
+            "original_pos": "NOUN",
+            "syllables": [
+              "zoh"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVC"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "hi",
+            "pos": "PART",
+            "original_pos": "PART",
+            "syllables": [
+              "hi"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          }
+        ],
+        "translation_zo_en": {
+          "translation": "Prefix",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "translation_en_zo": {
+          "translation": "an",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "zvs_report": {
+          "source": "<text>",
+          "text": "Tapa in laisiangtho a zoh hi",
+          "violations": []
+        },
+        "success": true,
+        "error": null
+      },
+      {
+        "input_text": "Vantung ah Pasian a om hi",
+        "syllables": [
+          "van",
+          "tung",
+          "ah",
+          "pa",
+          "sian",
+          "a",
+          "om",
+          "hi"
+        ],
+        "tokens": [
+          "van",
+          "tung",
+          "ah",
+          "pa",
+          "sian",
+          "a",
+          "om",
+          "hi"
+        ],
+        "pos_tags": [
+          {
+            "word": "Vantung",
+            "pos": "N.PROPER",
+            "original_pos": "N.PROPER",
+            "syllables": [
+              "van",
+              "tung"
+            ],
+            "syllable_count": 2,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVC",
+                "CVCC"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple",
+                "simple"
+              ],
+              "nucleus_types": [
+                "short",
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "ah",
+            "pos": "POST",
+            "original_pos": "POST",
+            "syllables": [
+              "ah"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "VC"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "none"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "Pasian",
+            "pos": "N.PROPER",
+            "original_pos": "N.PROPER",
+            "syllables": [
+              "pa",
+              "sian"
+            ],
+            "syllable_count": 2,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV",
+                "CVVC"
+              ],
+              "has_diphthong": true,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple",
+                "simple"
+              ],
+              "nucleus_types": [
+                "short",
+                "diphthong"
+              ]
+            }
+          },
+          {
+            "word": "a",
+            "pos": "PRON",
+            "original_pos": "PRON",
+            "syllables": [
+              "a"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "V"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "none"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "om",
+            "pos": "NOUN",
+            "original_pos": "NOUN",
+            "syllables": [
+              "om"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "VC"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "none"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "hi",
+            "pos": "PART",
+            "original_pos": "PART",
+            "syllables": [
+              "hi"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          }
+        ],
+        "translation_zo_en": {
+          "translation": "Prefix",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "translation_en_zo": {
+          "translation": "an",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "zvs_report": {
+          "source": "<text>",
+          "text": "Vantung ah Pasian a om hi",
+          "violations": []
+        },
+        "success": true,
+        "error": null
+      },
+      {
+        "input_text": "Leitung a bawl hi",
+        "syllables": [
+          "lei",
+          "tung",
+          "a",
+          "bawl",
+          "hi"
+        ],
+        "tokens": [
+          "lei",
+          "tung",
+          "a",
+          "bawl",
+          "hi"
+        ],
+        "pos_tags": [
+          {
+            "word": "Leitung",
+            "pos": "N.PROPER",
+            "original_pos": "N.PROPER",
+            "syllables": [
+              "lei",
+              "tung"
+            ],
+            "syllable_count": 2,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVV",
+                "CVCC"
+              ],
+              "has_diphthong": true,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple",
+                "simple"
+              ],
+              "nucleus_types": [
+                "diphthong",
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "a",
+            "pos": "PRON",
+            "original_pos": "PRON",
+            "syllables": [
+              "a"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "V"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "none"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "bawl",
+            "pos": "NOUN",
+            "original_pos": "NOUN",
+            "syllables": [
+              "bawl"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVCC"
+              ],
+              "has_diphthong": true,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "diphthong"
+              ]
+            }
+          },
+          {
+            "word": "hi",
+            "pos": "PART",
+            "original_pos": "PART",
+            "syllables": [
+              "hi"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          }
+        ],
+        "translation_zo_en": {
+          "translation": "Prefix",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "translation_en_zo": {
+          "translation": "an",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "zvs_report": {
+          "source": "<text>",
+          "text": "Leitung a bawl hi",
+          "violations": []
+        },
+        "success": true,
+        "error": null
+      },
+      {
+        "input_text": "Ka mu khin hi",
+        "syllables": [
+          "ka",
+          "mu",
+          "khin",
+          "hi"
+        ],
+        "tokens": [
+          "ka",
+          "mu",
+          "khin",
+          "hi"
+        ],
+        "pos_tags": [
+          {
+            "word": "Ka",
+            "pos": "PRON",
+            "original_pos": "PRON",
+            "syllables": [
+              "ka"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "mu",
+            "pos": "NOUN",
+            "original_pos": "NOUN",
+            "syllables": [
+              "mu"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "khin",
+            "pos": "NOUN",
+            "original_pos": "NOUN",
+            "syllables": [
+              "khin"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CCVC"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": true,
+              "has_coda": true,
+              "onset_types": [
+                "digraph"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "hi",
+            "pos": "PART",
+            "original_pos": "PART",
+            "syllables": [
+              "hi"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          }
+        ],
+        "translation_zo_en": {
+          "translation": "Prefix",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "translation_en_zo": {
+          "translation": "an",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "zvs_report": {
+          "source": "<text>",
+          "text": "Ka mu khin hi",
+          "violations": []
+        },
+        "success": true,
+        "error": null
+      },
+      {
+        "input_text": "Amaute pai kei hi",
+        "syllables": [
+          "a",
+          "ma",
+          "u",
+          "te",
+          "pai",
+          "kei",
+          "hi"
+        ],
+        "tokens": [
+          "a",
+          "ma",
+          "u",
+          "te",
+          "pai",
+          "kei",
+          "hi"
+        ],
+        "pos_tags": [
+          {
+            "word": "Amaute",
+            "pos": "PRON",
+            "original_pos": "PRON",
+            "syllables": [
+              "a",
+              "ma",
+              "u",
+              "te"
+            ],
+            "syllable_count": 4,
+            "syllable_features": {
+              "syllable_structure": [
+                "V",
+                "CV",
+                "V",
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "none",
+                "simple",
+                "none",
+                "simple"
+              ],
+              "nucleus_types": [
+                "short",
+                "short",
+                "short",
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "pai",
+            "pos": "NOUN",
+            "original_pos": "NOUN",
+            "syllables": [
+              "pai"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVV"
+              ],
+              "has_diphthong": true,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "diphthong"
+              ]
+            }
+          },
+          {
+            "word": "kei",
+            "pos": "PART.NEG",
+            "original_pos": "PART.NEG",
+            "syllables": [
+              "kei"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVV"
+              ],
+              "has_diphthong": true,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "diphthong"
+              ]
+            }
+          },
+          {
+            "word": "hi",
+            "pos": "PART",
+            "original_pos": "PART",
+            "syllables": [
+              "hi"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          }
+        ],
+        "translation_zo_en": {
+          "translation": "Prefix",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "translation_en_zo": {
+          "translation": "USA ten Democratic atom lawhna",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "zvs_report": {
+          "source": "<text>",
+          "text": "Amaute pai kei hi",
+          "violations": []
+        },
+        "success": true,
+        "error": null
+      },
+      {
+        "input_text": "Bang hang na pai hiam",
+        "syllables": [
+          "bang",
+          "hang",
+          "na",
+          "pai",
+          "hiam"
+        ],
+        "tokens": [
+          "bang",
+          "hang",
+          "na",
+          "pai",
+          "hiam"
+        ],
+        "pos_tags": [
+          {
+            "word": "Bang",
+            "pos": "PART.TOPIC",
+            "original_pos": "PART.TOPIC",
+            "syllables": [
+              "bang"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVCC"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "hang",
+            "pos": "NOUN",
+            "original_pos": "NOUN",
+            "syllables": [
+              "hang"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVCC"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "na",
+            "pos": "PRON",
+            "original_pos": "PRON",
+            "syllables": [
+              "na"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "pai",
+            "pos": "NOUN",
+            "original_pos": "NOUN",
+            "syllables": [
+              "pai"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVV"
+              ],
+              "has_diphthong": true,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "diphthong"
+              ]
+            }
+          },
+          {
+            "word": "hiam",
+            "pos": "PART.QUESTION",
+            "original_pos": "PART.QUESTION",
+            "syllables": [
+              "hiam"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVVC"
+              ],
+              "has_diphthong": true,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "diphthong"
+              ]
+            }
+          }
+        ],
+        "translation_zo_en": {
+          "translation": "Prefix",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "translation_en_zo": {
+          "translation": "USA ten Democratic atom lawhna",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "zvs_report": {
+          "source": "<text>",
+          "text": "Bang hang na pai hiam",
+          "violations": []
+        },
+        "success": true,
+        "error": null
+      },
+      {
+        "input_text": "Na dam hiam",
+        "syllables": [
+          "na",
+          "dam",
+          "hiam"
+        ],
+        "tokens": [
+          "na",
+          "dam",
+          "hiam"
+        ],
+        "pos_tags": [
+          {
+            "word": "Na",
+            "pos": "PRON",
+            "original_pos": "PRON",
+            "syllables": [
+              "na"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "dam",
+            "pos": "NOUN",
+            "original_pos": "NOUN",
+            "syllables": [
+              "dam"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVC"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "hiam",
+            "pos": "PART.QUESTION",
+            "original_pos": "PART.QUESTION",
+            "syllables": [
+              "hiam"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVVC"
+              ],
+              "has_diphthong": true,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "diphthong"
+              ]
+            }
+          }
+        ],
+        "translation_zo_en": {
+          "translation": "Prefix",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "translation_en_zo": {
+          "translation": "an",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "zvs_report": {
+          "source": "<text>",
+          "text": "Na dam hiam",
+          "violations": []
+        },
+        "success": true,
+        "error": null
+      },
+      {
+        "input_text": "Kumpipa in a suah hi",
+        "syllables": [
+          "kum",
+          "pi",
+          "pa",
+          "in",
+          "a",
+          "suah",
+          "hi"
+        ],
+        "tokens": [
+          "kum",
+          "pi",
+          "pa",
+          "in",
+          "a",
+          "suah",
+          "hi"
+        ],
+        "pos_tags": [
+          {
+            "word": "Kumpipa",
+            "pos": "N.PROPER",
+            "original_pos": "N.PROPER",
+            "syllables": [
+              "kum",
+              "pi",
+              "pa"
+            ],
+            "syllable_count": 3,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVC",
+                "CV",
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple",
+                "simple",
+                "simple"
+              ],
+              "nucleus_types": [
+                "short",
+                "short",
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "in",
+            "pos": "PART.ERG",
+            "original_pos": "PART.ERG",
+            "syllables": [
+              "in"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "VC"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "none"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "a",
+            "pos": "PRON",
+            "original_pos": "PRON",
+            "syllables": [
+              "a"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "V"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "none"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          },
+          {
+            "word": "suah",
+            "pos": "NOUN",
+            "original_pos": "NOUN",
+            "syllables": [
+              "suah"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVVC"
+              ],
+              "has_diphthong": true,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "diphthong"
+              ]
+            }
+          },
+          {
+            "word": "hi",
+            "pos": "PART",
+            "original_pos": "PART",
+            "syllables": [
+              "hi"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          }
+        ],
+        "translation_zo_en": {
+          "translation": "Prefix",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "translation_en_zo": {
+          "translation": "an",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "zvs_report": null,
+        "success": true,
+        "error": null
+      },
+      {
+        "input_text": "A",
+        "syllables": [
+          "a"
+        ],
+        "tokens": [
+          "a"
+        ],
+        "pos_tags": [
+          {
+            "word": "A",
+            "pos": "PRON",
+            "original_pos": "PRON",
+            "syllables": [
+              "a"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "V"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "none"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          }
+        ],
+        "translation_zo_en": {
+          "translation": "Prefix",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "translation_en_zo": {
+          "translation": "",
+          "confidence": 0.0,
+          "method": "skipped"
+        },
+        "zvs_report": {
+          "source": "<text>",
+          "text": "A",
+          "violations": []
+        },
+        "success": true,
+        "error": null
+      },
+      {
+        "input_text": "Hi",
+        "syllables": [
+          "hi"
+        ],
+        "tokens": [
+          "hi"
+        ],
+        "pos_tags": [
+          {
+            "word": "Hi",
+            "pos": "PART",
+            "original_pos": "PART",
+            "syllables": [
+              "hi"
+            ],
+            "syllable_count": 1,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": false,
+              "onset_types": [
+                "simple"
+              ],
+              "nucleus_types": [
+                "short"
+              ]
+            }
+          }
+        ],
+        "translation_zo_en": {
+          "translation": "is are am (to be)",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "translation_en_zo": {
+          "translation": "",
+          "confidence": 0.0,
+          "method": "skipped"
+        },
+        "zvs_report": {
+          "source": "<text>",
+          "text": "Hi",
+          "violations": []
+        },
+        "success": true,
+        "error": null
+      },
+      {
+        "input_text": "Pasian",
+        "syllables": [
+          "pa",
+          "sian"
+        ],
+        "tokens": [
+          "pa",
+          "sian"
+        ],
+        "pos_tags": [
+          {
+            "word": "Pasian",
+            "pos": "N.PROPER",
+            "original_pos": "N.PROPER",
+            "syllables": [
+              "pa",
+              "sian"
+            ],
+            "syllable_count": 2,
+            "syllable_features": {
+              "syllable_structure": [
+                "CV",
+                "CVVC"
+              ],
+              "has_diphthong": true,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple",
+                "simple"
+              ],
+              "nucleus_types": [
+                "short",
+                "diphthong"
+              ]
+            }
+          }
+        ],
+        "translation_zo_en": {
+          "translation": "God",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "translation_en_zo": {
+          "translation": "",
+          "confidence": 0.0,
+          "method": "skipped"
+        },
+        "zvs_report": {
+          "source": "<text>",
+          "text": "Pasian",
+          "violations": []
+        },
+        "success": true,
+        "error": null
+      },
+      {
+        "input_text": "Vantung",
+        "syllables": [
+          "van",
+          "tung"
+        ],
+        "tokens": [
+          "van",
+          "tung"
+        ],
+        "pos_tags": [
+          {
+            "word": "Vantung",
+            "pos": "N.PROPER",
+            "original_pos": "N.PROPER",
+            "syllables": [
+              "van",
+              "tung"
+            ],
+            "syllable_count": 2,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVC",
+                "CVCC"
+              ],
+              "has_diphthong": false,
+              "has_digraph_onset": false,
+              "has_coda": true,
+              "onset_types": [
+                "simple",
+                "simple"
+              ],
+              "nucleus_types": [
+                "short",
+                "short"
+              ]
+            }
+          }
+        ],
+        "translation_zo_en": {
+          "translation": "the sky over head heaven",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "translation_en_zo": {
+          "translation": "",
+          "confidence": 0.0,
+          "method": "skipped"
+        },
+        "zvs_report": {
+          "source": "<text>",
+          "text": "Vantung",
+          "violations": []
+        },
+        "success": true,
+        "error": null
+      },
+      {
+        "input_text": "Laisiangtho",
+        "syllables": [
+          "lai",
+          "siang",
+          "tho"
+        ],
+        "tokens": [
+          "lai",
+          "siang",
+          "tho"
+        ],
+        "pos_tags": [
+          {
+            "word": "Laisiangtho",
+            "pos": "N.PROPER",
+            "original_pos": "N.PROPER",
+            "syllables": [
+              "lai",
+              "siang",
+              "tho"
+            ],
+            "syllable_count": 3,
+            "syllable_features": {
+              "syllable_structure": [
+                "CVV",
+                "CVVCC",
+                "CCV"
+              ],
+              "has_diphthong": true,
+              "has_digraph_onset": true,
+              "has_coda": true,
+              "onset_types": [
+                "simple",
+                "simple",
+                "digraph"
+              ],
+              "nucleus_types": [
+                "diphthong",
+                "diphthong",
+                "short"
+              ]
+            }
+          }
+        ],
+        "translation_zo_en": {
+          "translation": "Bible",
+          "confidence": 0.5,
+          "method": "dictionary"
+        },
+        "translation_en_zo": {
+          "translation": "",
+          "confidence": 0.0,
+          "method": "skipped"
+        },
+        "zvs_report": {
+          "source": "<text>",
+          "text": "Laisiangtho",
+          "violations": []
+        },
+        "success": true,
+        "error": null
+      }
+    ]
+  },
+  "stress": {
+    "total_words": 100000,
+    "total_syllables": 156711,
+    "total_time_sec": 3.2987322619883344,
+    "words_per_sec": 30314.676080963385,
+    "syllables_per_sec": 47506.43203323853,
+    "peak_memory_mb": 0.019013404846191406,
+    "avg_memory_mb": 0.017440729141235352,
+    "errors": 0,
+    "error_details": []
+  },
+  "benchmark": {
+    "segmenter": {
+      "mean": 6.021675185669058e-06,
+      "median": 3.836001269519329e-06,
+      "min": 1.5520054148510098e-06,
+      "max": 0.004480174000491388,
+      "p95": 1.1998010450042784e-05,
+      "p99": 1.6624995623715222e-05
+    },
+    "tokenizer": {
+      "mean": 4.0908755368946004e-05,
+      "median": 3.0176001018844545e-05,
+      "min": 9.197989129461348e-06,
+      "max": 0.018194147996837273,
+      "p95": 6.082600157242268e-05,
+      "p99": 8.93689866643399e-05
+    },
+    "pos_tagger": {
+      "mean": 0.00026309625583235177,
+      "median": 0.0002118829870596528,
+      "min": 8.007600263226777e-05,
+      "max": 0.019323611006257124,
+      "p95": 0.00042057500104419887,
+      "p99": 0.0008811169973341748
+    },
+    "mt": {
+      "mean": 0.00010032308617761979,
+      "median": 0.00010571599705144763,
+      "min": 4.9408990889787674e-05,
+      "max": 0.00019735400564968586,
+      "p95": 0.00013012500130571425,
+      "p99": 0.00018421099230181426
+    },
+    "overall": {
+      "total_operations": 58300,
+      "total_time_sec": 2.7150473732617684
+    }
+  },
+  "zvs": {
+    "total_words_tested": 10000,
+    "violations_found": 5,
+    "violation_details": [
+      {
+        "word": "ram",
+        "forbidden": "ram",
+        "preferred": "gam",
+        "rule_id": "DIALECT_02",
+        "context": "ram"
+      },
+      {
+        "word": "ram",
+        "forbidden": "ram",
+        "preferred": "gam",
+        "rule_id": "DIALECT_02",
+        "context": "ram"
+      },
+      {
+        "word": "ram",
+        "forbidden": "ram",
+        "preferred": "gam",
+        "rule_id": "DIALECT_02",
+        "context": "ram"
+      },
+      {
+        "word": "suah",
+        "forbidden": "suah",
+        "preferred": "chuak",
+        "rule_id": "DIALECT_08",
+        "context": "suah"
+      },
+      {
+        "word": "suah",
+        "forbidden": "suah",
+        "preferred": "chuak",
+        "rule_id": "DIALECT_08",
+        "context": "suah"
+      }
+    ],
+    "compliance_rate": 0.9995
+  }
+}
