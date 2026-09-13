@@ -80,86 +80,115 @@
     "zolai_word_usage",
     "zvs_corrections_import"
   ],
-  "table_counts": {
-    "articles": 6371,
-    "audit_findings": 713,
-    "bible_book_analysis_import": 65,
-    "bible_chapter_analysis_import": 1153,
-    "bible_context": 1228,
-    "bible_verses": 62751,
-    "bible_verses_enhanced": 0,
-    "bible_verses_import": 62204,
-    "corrections": 0,
-    "data_audit_log": 24762,
-    "dictionary": 103303,
-    "dictionary_en_my_import": 0,
-    "dictionary_en_zo": 113750,
-    "dictionary_en_zo_import": 135276,
-    "dictionary_enhanced": 0,
-    "dictionary_import": 156808,
-    "dictionary_my_import": 7840,
-    "dictionary_trilingual_import": 0,
-    "gemini_model_results": 0,
-    "grammar_instructions": 16,
-    "grammar_patterns": 5547,
-    "grammar_patterns_enhanced": 5597,
-    "grammar_patterns_import": 6983,
-    "jsonl_import_log": 92,
-    "knowledge_vectors": 0,
-    "morph_verified": 0,
-    "ngram": 0,
-    "particle_database": 0,
-    "phrase_context_import": 45597,
-    "phrases": 5000,
-    "phrases_from_bible_import": 14000,
-    "phrases_import": 15000,
-    "pos_gold": 0,
-    "pos_verified": 0,
-    "provenance": 255,
-    "proverbs": 7736,
-    "proverbs_idioms": 0,
-    "proverbs_import": 7736,
-    "sentence_patterns_import": 65,
-    "simbu": 4163,
-    "syllable_data": 189554,
-    "tone_patterns": 118,
-    "topic_clusters_import": 12,
-    "training_corpus_qwen3_import": 9386,
-    "training_exercises": 81805,
-    "training_exercises_import": 81805,
-    "training_runs": 2,
-    "training_seed_data_import": 500,
-    "training_valid_sentences_import": 4693,
-    "training_validation": 0,
-    "translations": 212754,
-    "translations_import": 135511,
-    "verb_database": 0,
-    "vocab": 107979,
-    "vocab_import": 180458,
-    "vocabulary_enhanced": 0,
-    "wiki_content": 1688,
-    "wiki_content_fts": 1688,
-    "wiki_content_fts_config": 1,
-    "wiki_content_fts_data": 4141,
-    "wiki_content_fts_docsize": 1688,
-    "wiki_content_fts_idx": 3186,
-    "wiki_lessons": 1688,
-    "word_alignments": 385120,
-    "word_alignments_import": 627000,
-    "word_collocations": 5000,
-    "word_collocations_import": 5000,
-    "word_similarity": 0,
-    "word_usage": 60365,
-    "word_usage_profiles_import": 7384,
-    "zolai_bible_analysis": 30758,
-    "zolai_grammar_patterns": 13519,
-    "zolai_proverbs_idioms": 4984,
-    "zolai_songs": 1032,
-    "zolai_tone_sandhi": 19,
-    "zolai_vocabulary": 112279,
-    "zolai_vocabulary_import": 12692,
-    "zolai_word_usage": 85045,
-    "zvs_corrections_import": 44
+  "vocab": {
+    "total": 107979,
+    "zolai_total": 112279,
+    "overlap": 106243,
+    "vocab_only": 30147,
+    "zolai_only": 8414,
+    "dup_headwords": [
+      [
+        "a",
+        2
+      ],
+      [
+        "aam",
+        2
+      ],
+      [
+        "aana",
+        2
+      ],
+      [
+        "aaron",
+        2
+      ],
+      [
+        "abaddon",
+        2
+      ]
+    ],
+    "dup_words": [
+      [
+        "aa",
+        2
+      ],
+      [
+        "ading",
+        2
+      ],
+      [
+        "ah",
+        2
+      ],
+      [
+        "ahi",
+        2
+      ],
+      [
+        "ai",
+        2
+      ]
+    ]
+  },
+  "grammar": {
+    "total": 5547,
+    "zolai_total": 13519,
+    "enhanced_total": 5597,
+    "overlap_by_id": 0,
+    "dup_ids": []
+  },
+  "proverbs": {
+    "total": 7736,
+    "enriched_total": 4984,
+    "overlap": 5072,
+    "proverbs_only": 2750,
+    "dup_zolai": []
+  },
+  "dictionary": {
+    "canonical": 103303,
+    "import_total": 156808,
+    "matched": 135543,
+    "canonical_only": 0,
+    "import_only": 44287,
+    "dup_pairs": []
+  },
+  "dictionary_en_zo": {
+    "canonical": 113750,
+    "import_total": 135276,
+    "matched": 127695,
+    "canonical_only": 0,
+    "import_only": 69573,
+    "dup_headwords": [
+      [
+        "-ish",
+        2
+      ],
+      [
+        "-itis",
+        2
+      ],
+      [
+        "a",
+        2
+      ],
+      [
+        "a-ba-zhoor",
+        2
+      ],
+      [
+        "a-nimosity",
+        2
+      ]
+    ]
+  },
+  "word_alignments": {
+    "canonical": 385120,
+    "import_total": 627000
+  },
+  "translations": {
+    "canonical": 212754,
+    "import_total": 135511
   },
   "schemas": {
     "articles": [
@@ -7202,429 +7231,85 @@
       }
     ]
   },
-  "vocab_reconciliation": {
-    "vocab_columns": [
-      {
-        "name": "id",
-        "type": "INTEGER",
-        "notnull": true,
-        "default": null,
-        "pk": true
-      },
-      {
-        "name": "headword",
-        "type": "VARCHAR",
-        "notnull": true,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "english",
-        "type": "VARCHAR",
-        "notnull": true,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "frequency",
-        "type": "INTEGER",
-        "notnull": true,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "books",
-        "type": "TEXT",
-        "notnull": true,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "examples",
-        "type": "TEXT",
-        "notnull": true,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "myanmar",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "import_batch_id",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "source_file",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "version",
-        "type": "INTEGER",
-        "notnull": false,
-        "default": "1",
-        "pk": false
-      },
-      {
-        "name": "imported_at",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      }
-    ],
-    "zolai_vocabulary_columns": [
-      {
-        "name": "id",
-        "type": "INTEGER",
-        "notnull": false,
-        "default": null,
-        "pk": true
-      },
-      {
-        "name": "zolai",
-        "type": "TEXT",
-        "notnull": true,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "english",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "myanmar",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "pos",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "tone_category",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "meaning_t1",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "meaning_t3",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "meaning_t4",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "is_compound",
-        "type": "INTEGER",
-        "notnull": false,
-        "default": "0",
-        "pk": false
-      },
-      {
-        "name": "compound_parts",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "root_word",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "derivation",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "register",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "frequency_bible",
-        "type": "INTEGER",
-        "notnull": false,
-        "default": "0",
-        "pk": false
-      },
-      {
-        "name": "frequency_corpus",
-        "type": "INTEGER",
-        "notnull": false,
-        "default": "0",
-        "pk": false
-      },
-      {
-        "name": "frequency_songs",
-        "type": "INTEGER",
-        "notnull": false,
-        "default": "0",
-        "pk": false
-      },
-      {
-        "name": "bible_books",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "example_zo",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "example_en",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "source_priority",
-        "type": "INTEGER",
-        "notnull": false,
-        "default": "999",
-        "pk": false
-      },
-      {
-        "name": "source_category",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "source_file",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "confidence",
-        "type": "REAL",
-        "notnull": false,
-        "default": "1.0",
-        "pk": false
-      },
-      {
-        "name": "zvs_compliant",
-        "type": "INTEGER",
-        "notnull": false,
-        "default": "1",
-        "pk": false
-      },
-      {
-        "name": "notes",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "created_at",
-        "type": "TIMESTAMP",
-        "notnull": false,
-        "default": "CURRENT_TIMESTAMP",
-        "pk": false
-      },
-      {
-        "name": "updated_at",
-        "type": "TIMESTAMP",
-        "notnull": false,
-        "default": "CURRENT_TIMESTAMP",
-        "pk": false
-      },
-      {
-        "name": "import_batch_id",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      },
-      {
-        "name": "version",
-        "type": "INTEGER",
-        "notnull": false,
-        "default": "1",
-        "pk": false
-      },
-      {
-        "name": "imported_at",
-        "type": "TEXT",
-        "notnull": false,
-        "default": null,
-        "pk": false
-      }
-    ],
-    "matched": 107979,
-    "vocab_only": 0,
-    "zolai_vocab_only": 4300,
-    "vocab_total": 107979,
-    "zolai_vocabulary_total": 112279,
-    "import_total": 180458,
-    "duplicate_count": 0,
-    "zolai_duplicate_count": 0,
-    "join_columns": "vocab.headword = zolai_vocabulary.zolai"
-  },
-  "grammar_reconciliation": {
-    "matched_by_pattern_id": 0,
-    "grammar_total": 5547,
-    "zolai_grammar_total": 13519,
-    "enhanced_total": 5597,
-    "duplicate_pattern_ids_sample": [],
-    "duplicate_pattern_id_count": 0,
-    "import_total": 6983
-  },
-  "proverbs_reconciliation": {
-    "matched": 5072,
-    "proverbs_only": 2750,
-    "idioms_only": 0,
-    "duplicate_zolai_sample": [
-      [
-        "Ama itna kip leh mihing tate tungah a lamdang ama nasepnate hangin amaute in Topa\u2019 tungah lungdamna ko ta uh hen!",
-        4
-      ],
-      [
-        "Jerusalem nungakte aw, ko\u2019 kingaihna nong suknawi loh nadingun, sakhi leh sanang tawh kei tungah hong kiciam un.",
-        2
-      ],
-      [
-        "Kiman\u2019na nei lo, a haihuaipi hi a, a kidaantah ni ciangin a kisia ding uh hi.",
-        2
-      ],
-      [
-        "Kua in khuapi muanhuai-ah kei hong paipih ding hiam? Kua in Edom gamah kei hong paipih ding hiam?",
-        2
-      ],
-      [
-        "Mipilte in a lauhuai thu mu thei-in pelh uh a, mi mawkmawkte in phu suakin thuak uh hi.",
-        2
-      ]
-    ],
-    "duplicate_zolai_count": 21
-  },
-  "dictionary_reconciliation": {
-    "canonical": 103303,
-    "import_total": 156808,
-    "matched_by_zolai": 135543,
-    "canonical_only": 0,
-    "import_only": 44287,
-    "en_zo_canonical": 113750,
-    "en_zo_import": 135276,
-    "duplicate_pairs_sample": [
-      [
-        "aakbu",
-        "cage for fowls",
-        2
-      ],
-      [
-        "aakbuuk",
-        "chicken barn or roost",
-        2
-      ],
-      [
-        "aakgia",
-        "plume,esp tail of feather of cocks",
-        2
-      ],
-      [
-        "aakgil",
-        "chicken roost barn hen- house coop",
-        2
-      ],
-      [
-        "aakkhuang",
-        "(cock)crows",
-        2
-      ]
-    ],
-    "duplicate_pair_count": 1876
-  },
-  "word_alignments_reconciliation": {
-    "canonical": 385120,
-    "import_total": 627000,
-    "matched_by_ref_zo_en": 628722,
-    "canonical_only": 160120,
-    "join_columns": "word_alignments.(ref,zolai_word,english_word) = word_alignments_import.(ref,zo_word,en_word)"
-  },
-  "translations_reconciliation": {
-    "canonical": 212754,
-    "import_total": 135511
-  },
-  "bible_reconciliation": {
-    "canonical": 62751,
-    "import_total": 62204,
-    "enhanced_total": 0,
-    "analysis_total": 30758,
-    "context_total": 1228
-  },
-  "training_reconciliation": {
-    "canonical": 81805,
-    "import_total": 81805,
-    "seed_total": 500,
-    "valid_total": 4693,
-    "qwen3_total": 9386
-  },
-  "phrases_reconciliation": {
-    "canonical": 5000,
-    "import_total": 15000,
-    "bible_import": 14000
-  },
-  "word_usage_reconciliation": {
-    "canonical": 60365,
-    "zolai_total": 85045,
-    "import_total": 7384
-  },
-  "syllable_data": {
-    "canonical": 189554
-  },
-  "wiki": {
-    "content_total": 1688,
-    "lessons_total": 1688
+  "row_counts": {
+    "articles": 6371,
+    "audit_findings": 713,
+    "bible_book_analysis_import": 65,
+    "bible_chapter_analysis_import": 1153,
+    "bible_context": 1228,
+    "bible_verses": 62751,
+    "bible_verses_enhanced": 0,
+    "bible_verses_import": 62204,
+    "corrections": 0,
+    "data_audit_log": 24762,
+    "dictionary": 103303,
+    "dictionary_en_my_import": 0,
+    "dictionary_en_zo": 113750,
+    "dictionary_en_zo_import": 135276,
+    "dictionary_enhanced": 0,
+    "dictionary_import": 156808,
+    "dictionary_my_import": 7840,
+    "dictionary_trilingual_import": 0,
+    "gemini_model_results": 0,
+    "grammar_instructions": 16,
+    "grammar_patterns": 5547,
+    "grammar_patterns_enhanced": 5597,
+    "grammar_patterns_import": 6983,
+    "jsonl_import_log": 92,
+    "knowledge_vectors": 0,
+    "morph_verified": 0,
+    "ngram": 0,
+    "particle_database": 0,
+    "phrase_context_import": 45597,
+    "phrases": 5000,
+    "phrases_from_bible_import": 14000,
+    "phrases_import": 15000,
+    "pos_gold": 0,
+    "pos_verified": 0,
+    "provenance": 255,
+    "proverbs": 7736,
+    "proverbs_idioms": 0,
+    "proverbs_import": 7736,
+    "sentence_patterns_import": 65,
+    "simbu": 4163,
+    "syllable_data": 189554,
+    "tone_patterns": 118,
+    "topic_clusters_import": 12,
+    "training_corpus_qwen3_import": 9386,
+    "training_exercises": 81805,
+    "training_exercises_import": 81805,
+    "training_runs": 2,
+    "training_seed_data_import": 500,
+    "training_valid_sentences_import": 4693,
+    "training_validation": 0,
+    "translations": 212754,
+    "translations_import": 135511,
+    "verb_database": 0,
+    "vocab": 107979,
+    "vocab_import": 180458,
+    "vocabulary_enhanced": 0,
+    "wiki_content": 1688,
+    "wiki_content_fts": 1688,
+    "wiki_content_fts_config": 1,
+    "wiki_content_fts_data": 4141,
+    "wiki_content_fts_docsize": 1688,
+    "wiki_content_fts_idx": 3186,
+    "wiki_lessons": 1688,
+    "word_alignments": 385120,
+    "word_alignments_import": 627000,
+    "word_collocations": 5000,
+    "word_collocations_import": 5000,
+    "word_similarity": 0,
+    "word_usage": 60365,
+    "word_usage_profiles_import": 7384,
+    "zolai_bible_analysis": 30758,
+    "zolai_grammar_patterns": 13519,
+    "zolai_proverbs_idioms": 4984,
+    "zolai_songs": 1032,
+    "zolai_tone_sandhi": 19,
+    "zolai_vocabulary": 112279,
+    "zolai_vocabulary_import": 12692,
+    "zolai_word_usage": 85045,
+    "zvs_corrections_import": 44
   }
 }

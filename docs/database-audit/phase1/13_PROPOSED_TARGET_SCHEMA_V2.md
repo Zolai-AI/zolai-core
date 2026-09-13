@@ -1,17 +1,17 @@
 # 13 — Proposed Target Schema V2
 
-> **Date:** 2026-09-13
+> **Date:** 2026-09-13 (Revised)
 > **Status:** READ-ONLY audit — no changes applied
-> **Source:** 79 current tables, ~3.16M rows
+> **Source:** 79 current tables, ~3.16M total rows
 > **Target:** Domain-based naming, consolidation by function
 
 ---
 
 ## Overview
 
-Current state: **79 tables** (18 canonical, 26 `*_import` staging, 18 `zolai_*` enhanced, 6 FTS, 11 empty/placeholder, 2 runtime).
+Current state: **79 tables** — 27 `*_import` staging tables (1,517,304 rows), 17 empty/placeholder tables, 5 FTS tables, 1 `sqlite_sequence`, and ~30 active tables across canonical, enhanced, runtime, and reference domains.
 
-Target state: **~22 tables** organized by domain — no `zolai_` prefix unless the name would otherwise collide. FTS tables follow SQLite convention (auto-created from triggers).
+Target state: **~22 tables** organized by domain. No `zolai_` prefix unless collision. FTS tables auto-created from triggers. Import staging dropped after migration.
 
 ---
 
@@ -33,8 +33,8 @@ Target state: **~22 tables** organized by domain — no `zolai_` prefix unless t
 | `created_at` | TIMESTAMP | |
 | `updated_at` | TIMESTAMP | |
 
-**Business key:** `(zolai, english_clean)` — 1,876 duplicates detected (some Zolai words map to multiple English meanings).
-**Source tables:** `dictionary` (103,303), `dictionary_import` (156,808 — 44,287 import-only entries).
+**Business key:** `(zolai, english_clean)` — 1,876+ duplicates detected. Some Zolai words map to multiple English meanings (polysemy). UNIQUE constraint NOT recommended on full pair — keep composite business key for deduplication only.
+**Source tables:** `dictionary` (103,303) + `dictionary_import` (156,808). All 103,303 canonical rows match import. 44,287 import-only entries (extras from multiple source files).
 
 ### 2. `dictionary_en_zo` (EN→ZO master)
 | Column | Type | Notes |
@@ -50,14 +50,14 @@ Target state: **~22 tables** organized by domain — no `zolai_` prefix unless t
 | `created_at` | TIMESTAMP | |
 | `updated_at` | TIMESTAMP | |
 
-**Business key:** `(headword, translations)` — functional, but headwords can repeat with different translation sets.
-**Source tables:** `dictionary_en_zo` (113,750), `dictionary_en_zo_import` (135,276).
+**Business key:** `(headword, translations)` — 21 exact duplicates. Headwords repeat with different translation sets (e.g., "abandon" appears 4× with different Zolai translations). UNIQUE constraint NOT recommended.
+**Source tables:** `dictionary_en_zo` (113,750) + `dictionary_en_zo_import` (135,276). 127,695 matched by headword. 69,573 import-only entries. 0 canonical-only (full coverage).
 
 ### 3. `bible_verses` (Parallel corpus)
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | INTEGER PK | |
-| `ref` | TEXT NOT NULL UNIQUE | e.g., "GEN 1:1" |
+| `ref` | TEXT NOT NULL | e.g., "GEN 1:1" |
 | `book` | TEXT | Book code |
 | `book_name` | TEXT | Human-readable |
 | `chapter` | INTEGER | |
@@ -70,8 +70,8 @@ Target state: **~22 tables** organized by domain — no `zolai_` prefix unless t
 | `zo_fcl` | TEXT | Falam Chin |
 | `created_at` | TIMESTAMP | |
 
-**Business key:** `(ref)` — UNIQUE. 62,751 rows.
-**Source tables:** `bible_verses` (62,751), `bible_verses_import` (62,204).
+**Business key:** `(ref)` — 31,649 unique refs but 30,569 refs have 2–3 duplicate rows (different book editions). Recommend UNIQUE on `(ref, book)` or `(ref, zo_tdb77)` to enforce one row per edition. **62,751 total rows.**
+**Source tables:** `bible_verses` (62,751) + `bible_verses_import` (62,204). All 30,569 import refs exist in canonical. 0 import-only refs.
 
 ### 4. `grammar_patterns` (Grammar rules)
 | Column | Type | Notes |
@@ -91,8 +91,10 @@ Target state: **~22 tables** organized by domain — no `zolai_` prefix unless t
 | `source_category` | TEXT | |
 | `created_at` | TIMESTAMP | |
 
-**Business key:** `(pattern_id)` — unique in base table (5,547 rows, 0 duplicates). `zolai_grammar_patterns` has 13,519 rows with `pattern_id=NULL` — these are enriched variants.
-**Source tables:** `grammar_patterns` (5,547), `zolai_grammar_patterns` (13,519), `grammar_patterns_enhanced` (5,597).
+**Business key:** `(pattern_id)` — UNIQUE, 0 duplicates in base table (5,547 rows).
+**Critical finding:** `zolai_grammar_patterns` (13,519 rows) has `pattern_id = NULL` for ALL rows — zero overlap with `grammar_patterns` by pattern_id. `grammar_patterns_enhanced` (5,597 rows) also has `pattern_id = NULL` for ALL rows. These are enriched variants with no foreign key to the base table.
+**Source tables:** `grammar_patterns` (5,547) + `grammar_patterns_enhanced` (5,597) + `zolai_grammar_patterns` (13,519) + `grammar_patterns_import` (6,983) + `grammar_instructions` (16).
+**Merge strategy:** `grammar_patterns` as canonical. `grammar_instructions` (16 rows) merged as `instruction_text` column. `grammar_patterns_enhanced` and `zolai_grammar_patterns` exported to archive (no joinable FK).
 
 ### 5. `translations` (Sentence pairs)
 | Column | Type | Notes |
@@ -106,8 +108,8 @@ Target state: **~22 tables** organized by domain — no `zolai_` prefix unless t
 | `myanmar` | TEXT | |
 | `created_at` | TIMESTAMP | |
 
-**Business key:** `(source, target)` — 212,754 canonical rows. 26,867 matched with import by `(source=zolai, target=english)`.
-**Source tables:** `translations` (212,754), `translations_import` (135,511).
+**Business key:** `(source, target)` — **212,754 canonical rows**. Significant duplication: 67× for `("And the", "{ Topa } in Moses kiangah,")`. Recommend deduplication before migration.
+**Source tables:** `translations` (212,754) + `translations_import` (135,511). Import has 135,511 rows with `zolai`/`english` column names (mapped to `source`/`target`).
 
 ### 6. `word_alignments` (Word-level ZO↔EN)
 | Column | Type | Notes |
@@ -120,14 +122,14 @@ Target state: **~22 tables** organized by domain — no `zolai_` prefix unless t
 | `myanmar` | TEXT | |
 | `created_at` | TIMESTAMP | |
 
-**Business key:** `(ref, zolai_word, english_word)` — composite. 385,120 canonical. 628,722 matched with import (import is a superset).
-**Source tables:** `word_alignments` (385,120), `word_alignments_import` (627,000).
+**Business key:** `(ref, zolai_word, english_word)` — composite. **385,120 canonical rows.** Some duplication (e.g., 2× for certain triples). Import (627,000 rows, 224,696 unique triples) is a superset.
+**Source tables:** `word_alignments` (385,120) + `word_alignments_import` (627,000). Import column names: `zo_word`, `en_word`, `ref`.
 
 ### 7. `vocab` (Word frequency index)
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | INTEGER PK | |
-| `headword` | TEXT NOT NULL UNIQUE | |
+| `headword` | TEXT NOT NULL | |
 | `english` | TEXT | |
 | `frequency` | INTEGER | |
 | `books` | TEXT | JSON array of book codes |
@@ -135,8 +137,8 @@ Target state: **~22 tables** organized by domain — no `zolai_` prefix unless t
 | `myanmar` | TEXT | |
 | `created_at` | TIMESTAMP | |
 
-**Business key:** `(headword)` — UNIQUE, 0 duplicates. 107,979 rows. All 107,979 match `zolai_vocabulary.zolai`; 4,300 `zolai_vocabulary` entries have no freq data.
-**Source tables:** `vocab` (107,979), `vocab_import` (180,458), `zolai_vocabulary` (112,279 — enriched metadata merged in).
+**Business key:** `(headword)` — some duplicates exist (e.g., "aa" appears 2× with different frequencies). **107,979 total rows.** 106,243 overlap with `zolai_vocabulary.zolai`. 1,736 vocab-only, 6,036 zolai_vocabulary-only.
+**Source tables:** `vocab` (107,979) + `vocab_import` (180,458) + `zolai_vocabulary` (112,279 — enriched metadata, merge by COALESCE).
 
 ### 8. `proverbs` (Proverbs & idioms)
 | Column | Type | Notes |
@@ -152,8 +154,8 @@ Target state: **~22 tables** organized by domain — no `zolai_` prefix unless t
 | `source_category` | TEXT | |
 | `created_at` | TIMESTAMP | |
 
-**Business key:** `(zolai)` — 21 duplicates detected (long sentences with repeated text). 7,736 canonical rows; 5,072 matched with `zolai_proverbs_idioms` (4,984 rows).
-**Source tables:** `proverbs` (7,736), `zolai_proverbs_idioms` (4,984).
+**Business key:** `(zolai)` — duplicates exist (max 8× for long proverbs with shared text). **7,736 canonical rows.** 5,072 overlap with `zolai_proverbs_idioms` (4,984 rows). 2,664 proverbs-only (no enriched data).
+**Source tables:** `proverbs` (7,736) + `zolai_proverbs_idioms` (4,984) + `proverbs_import` (7,736). Import uses `zo` column (mapped to `zolai`).
 
 ### 9. `phrases` (Multi-word expressions)
 | Column | Type | Notes |
@@ -167,8 +169,7 @@ Target state: **~22 tables** organized by domain — no `zolai_` prefix unless t
 | `source` | TEXT | |
 | `created_at` | TIMESTAMP | |
 
-**Business key:** `(zo)` — 5,000 canonical. Import tables: `phrases_import` (15,000), `phrases_from_bible_import` (14,000), `phrase_context_import` (45,597).
-**Source tables:** `phrases` (5,000) + import staging.
+**Business key:** `(zo)` — 5,000 canonical rows. Import staging: `phrases_import` (15,000), `phrases_from_bible_import` (14,000), `phrase_context_import` (45,597).
 
 ### 10. `word_usage` (Per-book word profiles)
 | Column | Type | Notes |
@@ -182,8 +183,9 @@ Target state: **~22 tables** organized by domain — no `zolai_` prefix unless t
 | `myanmar` | TEXT | |
 | `created_at` | TIMESTAMP | |
 
-**Business key:** `(word, book)` — composite. `word_usage` (60,365) + `zolai_word_usage` (85,045) — different schemas; merge needed.
-**Source tables:** `word_usage` (60,365), `zolai_word_usage` (85,045).
+**Business key:** `(word, book)` — composite, 0 duplicates. **60,365 canonical rows.**
+**Critical finding:** `zolai_word_usage` (85,045 rows) has DIFFERENT schema (`book_code`, `frequency`, `meanings`, `co_occurring`, `contexts`, `source_category`). Only 1,848 rows overlap by (word+book). 58,517 word_usage-only, 83,197 zolai_word_usage-only. Merge NOT recommended — export `zolai_word_usage` separately.
+**Source tables:** `word_usage` (60,365) + `word_usage_profiles_import` (7,384).
 
 ### 11. `syllable_data` (Syllable segmentation)
 | Column | Type | Notes |
@@ -220,7 +222,8 @@ Target state: **~22 tables** organized by domain — no `zolai_` prefix unless t
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | INTEGER PK | |
-| `book` | TEXT | |
+| `book_code` | TEXT | |
+| `book_name` | TEXT | |
 | `chapter` | INTEGER | |
 | `verse` | INTEGER | |
 | `zolai` | TEXT | |
@@ -232,7 +235,7 @@ Target state: **~22 tables** organized by domain — no `zolai_` prefix unless t
 | `rare_words` | TEXT | |
 | `created_at` | TIMESTAMP | |
 
-**Source tables:** `zolai_bible_analysis` (30,758), `bible_context` (1,228), `bible_book_analysis_import` (65), `bible_chapter_analysis_import` (1,153).
+**Source tables:** `zolai_bible_analysis` (30,758) — single source. `bible_context` (1,228) has different schema (book/chapter/analysis_type/data) and exported separately. Import: `bible_book_analysis_import` (65), `bible_chapter_analysis_import` (1,153).
 
 ### 14. `articles` (Reference articles)
 | Column | Type | Notes |
@@ -273,9 +276,11 @@ Target state: **~22 tables** organized by domain — no `zolai_` prefix unless t
 | `word_count` | INTEGER | |
 | `section_count` | INTEGER | |
 | `content_hash` | TEXT | |
+| `entry_version` | INTEGER | |
 | `created_at` | TIMESTAMP | |
+| `updated_at` | TIMESTAMP | |
 
-**Source tables:** `wiki_content` (1,688), `wiki_lessons` (1,688 — same data, 1:1).
+**Source tables:** `wiki_content` (1,688) + `wiki_lessons` (1,688). 1,656 overlap by title. 32 wiki_content rows have NULL title. `wiki_lessons` has different schema (lesson_type, grammar_patterns, vocabulary_list). Merge: keep `wiki_content` as canonical, merge `wiki_lessons` grammar_patterns/vocabulary_list as JSON columns.
 
 ---
 
@@ -413,16 +418,23 @@ Target state: **~22 tables** organized by domain — no `zolai_` prefix unless t
 
 | Table | Rows | Reason |
 |-------|------|--------|
-| `*_import` (26 tables) | ~1,773,000 | Staging data already consumed |
-| `*_enhanced` (4 tables) | ~5,597 | Empty or merged into canonical |
+| `*_import` (27 tables) | 1,517,304 | Staging data already consumed by canonical |
+| Empty placeholders (17) | 0 | Never populated: `bible_verses_enhanced`, `corrections`, `dictionary_en_my_import`, `dictionary_enhanced`, `dictionary_trilingual_import`, `gemini_model_results`, `knowledge_vectors`, `morph_verified`, `ngram`, `particle_database`, `pos_gold`, `pos_verified`, `proverbs_idioms`, `training_validation`, `verb_database`, `vocabulary_enhanced`, `word_similarity` |
 | FTS tables (5) | — | Auto-rebuilt from triggers |
-| Empty placeholders (11) | 0 | Never populated |
-| `training_exercises` | 81,805 | See migration note below |
-| `grammar_instructions` | 16 | Merged into grammar_patterns |
+| `grammar_patterns_enhanced` | 5,597 | All pattern_id=NULL; exported to JSONL archive |
+| `zolai_grammar_patterns` | 13,519 | All pattern_id=NULL; exported to JSONL archive |
+| `zolai_word_usage` | 85,045 | Different schema from word_usage; exported to JSONL archive |
+| `training_exercises` | 81,805 | Generated artifact; export to JSONL for training |
 | `simbu` | 4,163 | Niche; archive to JSONL |
-| `training_runs` | 2 | Keep as-is (Table 23) |
+| `grammar_instructions` | 16 | Merged into grammar_patterns as instruction_text |
+| `bible_context` | 1,228 | Exported to JSONL; different schema from bible_analysis |
+| `zvs_corrections_import` | 44 | Pipeline artifact |
+| `wiki_lessons` | 1,688 | Merged into wiki_content |
+| `zolai_vocabulary_import` | 12,692 | Staging |
+| `sentence_patterns_import` | 65 | Staging |
+| `topic_clusters_import` | 12 | Staging |
 
-> **Note:** `training_exercises` (81,805 rows) is recommended for export to JSONL + table drop in Phase 2, as it's a generated artifact, not a source-of-truth table. Keeping it during Phase 1 avoids data loss.
+> **Note:** `training_exercises` (81,805 rows) is recommended for export to JSONL + table drop, as it's a generated artifact, not a source-of-truth table. Keeping it during Phase 1 avoids data loss.
 
 ---
 
