@@ -169,6 +169,100 @@ async def db_stats():
         return {"error": str(e)}
 
 
+@router.get("/table-data")
+async def table_data(
+    table: str = Query(...),
+    page: int = Query(1),
+    page_size: int = Query(25),
+    sort_by: str = Query(None),
+    sort_dir: str = Query("asc"),
+):
+    """Get paginated rows from any table with optional sorting."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+
+        # Validate table exists
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        )
+        if not cur.fetchone():
+            cur.close()
+            conn.close()
+            return {"error": f"Table not found: {table}"}
+
+        # Total rows
+        cur.execute(f"SELECT COUNT(*) FROM [{table}]")
+        total_rows = cur.fetchone()[0]
+        total_pages = max(1, (total_rows + page_size - 1) // page_size)
+        page = max(1, min(page, total_pages))
+
+        # Build query
+        offset = (page - 1) * page_size
+        sql = f"SELECT * FROM [{table}]"
+        if sort_by:
+            direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
+            sql += f" ORDER BY [{sort_by}] {direction}"
+        sql += " LIMIT ? OFFSET ?"
+
+        cur.execute(sql, (page_size, offset))
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description]
+
+        cur.close()
+        conn.close()
+        return {
+            "table": table,
+            "columns": cols,
+            "rows": [dict(zip(cols, r)) for r in rows],
+            "total_rows": total_rows,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/table-schema")
+async def table_schema(table: str = Query(...)):
+    """Get column schema for a table via PRAGMA table_info."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+
+        # Validate table exists
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        )
+        if not cur.fetchone():
+            cur.close()
+            conn.close()
+            return {"error": f"Table not found: {table}"}
+
+        cur.execute(f"PRAGMA table_info([{table}])")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        columns = []
+        for r in rows:
+            columns.append({
+                "cid": r[0],
+                "name": r[1],
+                "type": r[2],
+                "notnull": bool(r[3]),
+                "default_value": r[4],
+                "pk": bool(r[5]),
+            })
+
+        return {"table": table, "columns": columns}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # ═══════════════════════════════════════════
 # DICTIONARY TOOLS
 # ═══════════════════════════════════════════
