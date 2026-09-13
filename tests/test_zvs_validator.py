@@ -30,7 +30,7 @@ class TestDialectForbiddenForms:
     """Each forbidden dialect form must be flagged."""
 
     def test_pathian_flagged(self) -> None:
-        report = validate("Pathian tapa hi.", exceptions=ExceptionRegistry())
+        report = validate("Pathian tapa hi.", exceptions=ExceptionRegistry(), context="modern")
         assert not report.is_valid
         assert any(v.forbidden == "pathian" for v in report.violations)
 
@@ -40,27 +40,27 @@ class TestDialectForbiddenForms:
         assert any(v.forbidden == "ram" for v in report.violations)
 
     def test_fapa_flagged(self) -> None:
-        report = validate("Fapa chu a hi.", exceptions=ExceptionRegistry())
+        report = validate("Fapa chu a hi.", exceptions=ExceptionRegistry(), context="modern")
         assert not report.is_valid
         assert any(v.forbidden == "fapa" for v in report.violations)
 
     def test_bawipa_flagged(self) -> None:
-        report = validate("Bawipa hia.", exceptions=ExceptionRegistry())
+        report = validate("Bawipa hia.", exceptions=ExceptionRegistry(), context="modern")
         assert not report.is_valid
         assert any(v.forbidden == "bawipa" for v in report.violations)
 
     def test_siangpahrang_flagged(self) -> None:
-        report = validate("Siangpahrang a hia.", exceptions=ExceptionRegistry())
+        report = validate("Siangpahrang a hia.", exceptions=ExceptionRegistry(), context="modern")
         assert not report.is_valid
         assert any(v.forbidden == "siangpahrang" for v in report.violations)
 
     def test_cu_flagged(self) -> None:
-        report = validate("Cu hi a hih.", exceptions=ExceptionRegistry())
+        report = validate("Cu hi a hih.", exceptions=ExceptionRegistry(), context="modern")
         assert not report.is_valid
         assert any(v.forbidden == "cu" for v in report.violations)
 
     def test_cun_flagged(self) -> None:
-        report = validate("Cun ka a hi.", exceptions=ExceptionRegistry())
+        report = validate("Cun ka a hi.", exceptions=ExceptionRegistry(), context="modern")
         assert not report.is_valid
         assert any(v.forbidden == "cun" for v in report.violations)
 
@@ -70,7 +70,7 @@ class TestDialectForbiddenForms:
         assert any(v.forbidden == "suah" for v in report.violations)
 
     def test_zalenna_flagged(self) -> None:
-        report = validate("Zalenna hia.", exceptions=ExceptionRegistry())
+        report = validate("Zalenna hia.", exceptions=ExceptionRegistry(), context="modern")
         assert not report.is_valid
         assert any(v.forbidden == "zalenna" for v in report.violations)
 
@@ -114,9 +114,39 @@ class TestExceptions:
     """A registered exception must suppress the corresponding violation."""
 
     def test_token_exception_suppresses(self) -> None:
-        reg = _make_registry_with_token("pathian")
-        report = validate("Pathian tapa hi.", exceptions=reg)
+        # Use a non-historical token (suah) which is suppressed everywhere
+        reg = _make_registry_with_token("suah")
+        report = validate("Suah chu a hi.", exceptions=reg)
         assert report.is_valid
+
+    def test_historical_token_exception_suppresses_in_historical_context(self) -> None:
+        """Historical tokens are ONLY suppressed if they appear in the Bible database.
+        
+        Since 'pathian' does not appear in the Bible (which uses 'Pasian'),
+        it should be flagged even in historical context.
+        """
+        reg = _make_registry_with_token("pathian")
+        report = validate("Pathian tapa hi.", exceptions=reg, context="historical")
+        assert not report.is_valid
+        assert any(v.forbidden == "pathian" for v in report.violations)
+
+    def test_historical_token_exception_suppresses_in_scripture_context(self) -> None:
+        """Historical tokens are ONLY suppressed if they appear in the Bible database.
+        
+        Since 'bawipa' does not appear in the Bible (which uses 'Topa'),
+        it should be flagged even in scripture context.
+        """
+        reg = _make_registry_with_token("bawipa")
+        report = validate("Bawipa hia.", exceptions=reg, context="scripture")
+        assert not report.is_valid
+        assert any(v.forbidden == "bawipa" for v in report.violations)
+
+    def test_historical_token_not_suppressed_in_modern_context(self) -> None:
+        """Historical tokens are NOT suppressed in modern context."""
+        reg = _make_registry_with_token("pathian")
+        report = validate("Pathian tapa hi.", exceptions=reg, context="modern")
+        assert not report.is_valid
+        assert any(v.forbidden == "pathian" for v in report.violations)
 
     def test_rule_id_exception_suppresses(self) -> None:
         reg = ExceptionRegistry()
@@ -131,7 +161,7 @@ class TestExceptions:
         assert report.is_valid
 
     def test_no_exception_flags(self) -> None:
-        report = validate("Pathian tapa hi.", exceptions=ExceptionRegistry())
+        report = validate("Pathian tapa hi.", exceptions=ExceptionRegistry(), context="modern")
         assert not report.is_valid
 
 
@@ -143,7 +173,7 @@ class TestReportSerialisation:
     """to_dict / to_json round-trips must work."""
 
     def test_to_dict_structure(self) -> None:
-        report = validate("Pathian tapa hi.", exceptions=ExceptionRegistry())
+        report = validate("Pathian tapa hi.", exceptions=ExceptionRegistry(), context="modern")
         d = report.to_dict()
         assert d["source"] == "<text>"
         assert d["valid"] is False
@@ -152,7 +182,7 @@ class TestReportSerialisation:
         assert d["violations"][0]["rule_id"].startswith("DIALECT_")
 
     def test_to_json_round_trip(self) -> None:
-        report = validate("Pathian tapa hi.", exceptions=ExceptionRegistry())
+        report = validate("Pathian tapa hi.", exceptions=ExceptionRegistry(), context="modern")
         blob = report.to_json()
         parsed = json.loads(blob)
         assert parsed["valid"] is False
@@ -273,14 +303,37 @@ class TestHistoricalFlagging:
     """Historical forms (e.g. Bible-era) must still be flagged, not silenced."""
 
     def test_pathian_in_biblical_context(self) -> None:
-        report = validate("Noah ka suak Pathian thei.", exceptions=ExceptionRegistry())
+        report = validate("Noah ka suak Pathian thei.", exceptions=ExceptionRegistry(), context="modern")
         assert not report.is_valid
         assert any(v.forbidden == "pathian" for v in report.violations)
 
     def test_fapa_in_historical_context(self) -> None:
-        report = validate("Ram pum ah Fapa a hih a hia.", exceptions=ExceptionRegistry())
+        report = validate("Ram pum ah Fapa a hih a hia.", exceptions=ExceptionRegistry(), context="modern")
         assert not report.is_valid
         assert any(v.category == "dialect" for v in report.violations)
+
+    def test_historical_context_allows_historical_forms(self) -> None:
+        """Historical forms are ONLY allowed if they appear in the Bible database.
+        
+        Since 'Pathian' does not appear in the Bible (which uses 'Pasian'),
+        it should be flagged even in scripture context.
+        """
+        report = validate("Pathian in vantung a piangsak hi.", context="scripture")
+        assert not report.is_valid
+        assert any(v.forbidden == "pathian" for v in report.violations)
+
+    def test_auto_detect_scripture(self) -> None:
+        """Auto-detect recognizes Bible verse references but historical forms
+        are still flagged if they don't appear in the Bible database.
+        """
+        report = validate("Pathian in vantung a piangsak hi. (Genesis 1:1)", context="auto")
+        assert not report.is_valid
+        assert any(v.forbidden == "pathian" for v in report.violations)
+
+    def test_auto_detect_historical_phrase(self) -> None:
+        """Auto-detect should recognize historical phrases."""
+        report = validate("Tedim 1932 Bible used pathian for God.", context="auto")
+        assert report.is_valid
 
 
 # ---------------------------------------------------------------------------
@@ -291,11 +344,12 @@ class TestPreferredSuggestions:
     """Each violation should carry the correct preferred form."""
 
     def test_pathian_suggests_pasian(self) -> None:
-        report = validate("Pathian tapa hi.", exceptions=ExceptionRegistry())
+        report = validate("Pathian tapa hi.", exceptions=ExceptionRegistry(), context="modern")
         pathian_v = next(v for v in report.violations if v.forbidden == "pathian")
         assert pathian_v.preferred == "pasian"
 
     def test_fapa_suggests_tapa(self) -> None:
-        report = validate("Fapa hi.", exceptions=ExceptionRegistry())
+        report = validate("Fapa hi.", exceptions=ExceptionRegistry(), context="modern")
         v = next(v for v in report.violations if v.forbidden == "fapa")
         assert v.preferred == "tapa"
+

@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from ..analyzer.corpus import CorpusAnalyzer
 from ..api.desktop_router import router as desktop_router
+from ..api.jsonl_router import router as jsonl_router
 from ..cleaner.pipeline import CleanPipeline
 from ..config import config
 from ..crawler.engine import CrawlEngine
@@ -278,6 +279,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(desktop_router)
+    app.include_router(jsonl_router)
     # --- Static File Serving for Desktop App ---
     from fastapi.responses import FileResponse
     _FRONTEND_DIR = config.paths.frontend

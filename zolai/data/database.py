@@ -20,6 +20,7 @@ CLI:
 from __future__ import annotations
 
 import json
+import re
 import logging
 import os
 import time
@@ -161,6 +162,37 @@ class DatabaseManager:
             ).fetchall()
         return [self._row_to_dict(row, table) for row in rows]
 
+    def search_dictionary(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        """Search dictionary by Zolai or English (exact + LIKE)."""
+        table = Table("dictionary", self.metadata, autoload_with=self.engine)
+        pattern = f"%{query}%"
+        with self.engine.connect() as conn:
+            # Try exact match first (Zolai)
+            rows = conn.execute(
+                table.select().where(
+                    func.lower(table.c.zolai) == query.lower()
+                )
+            ).fetchall()
+            if rows:
+                return [self._row_to_dict(row, table) for row in rows]
+            # Try exact match (English)
+            rows = conn.execute(
+                table.select().where(
+                    func.lower(table.c.english_clean) == query.lower()
+                )
+            ).fetchall()
+            if rows:
+                return [self._row_to_dict(row, table) for row in rows]
+            # Fallback: substring match on Zolai or English
+            rows = conn.execute(
+                table.select().where(
+                    (table.c.zolai.ilike(pattern))
+                    | (table.c.english_clean.ilike(pattern))
+                ).limit(limit)
+            ).fetchall()
+        return [self._row_to_dict(row, table) for row in rows]
+
+
     def search_bible(self, query: str) -> list[dict[str, Any]]:
         """Search Bible verses by Zolai or English text (LIKE match)."""
         table = Table("bible_verses", self.metadata, autoload_with=self.engine)
@@ -174,6 +206,35 @@ class DatabaseManager:
                 ).limit(100)
             ).fetchall()
         return [self._row_to_dict(row, table) for row in rows]
+
+
+    def get_bible_words(self) -> set[str]:
+        """Return a set of all words appearing in the Bible (zo_tdb77 and zo_tedim2010 columns).
+
+        Words are extracted by splitting on whitespace and punctuation,
+        lowercased, and filtered to alphabetic tokens only.
+
+        This is used by the ZVS validator to check if historical forms
+        actually appear in the Bible database.
+        """
+        table = Table("bible_verses", self.metadata, autoload_with=self.engine)
+        words: set[str] = set()
+        # Use a simple regex to extract words
+        word_pattern = re.compile(r"[a-zA-Z]+")
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                table.select().with_only_columns(
+                    table.c.zo_tdb77, table.c.zo_tedim2010
+                ).where(
+                    (table.c.zo_tdb77.isnot(None)) | (table.c.zo_tedim2010.isnot(None))
+                )
+            ).fetchall()
+            for row in rows:
+                for col_val in row:
+                    if col_val:
+                        for word in word_pattern.findall(col_val):
+                            words.add(word.lower())
+        return words
 
     def match_phrase(self, word: str) -> list[dict[str, Any]]:
         """Find phrases containing a word (case-insensitive LIKE)."""

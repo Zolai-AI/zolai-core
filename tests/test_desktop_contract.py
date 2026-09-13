@@ -11,28 +11,84 @@ from zolai.api.server import app, create_app
 # (method, path) for every endpoint the desktop UI calls. THE source of truth.
 # Keep in sync with docs/api-contract.md.
 DESKTOP_CONTRACT = [
+    # Desktop Router - Database Tools
     ("GET", "/desktop/stats"),
     ("GET", "/desktop/tables"),
     ("GET", "/desktop/query"),
+    
+    # Desktop Router - Dictionary Tools
     ("GET", "/desktop/dict/browse"),
     ("GET", "/desktop/dict/non-zolai"),
+    ("GET", "/dictionary/search/all"),
+    ("GET", "/dictionary/search/my"),
+    ("POST", "/dictionary/add"),
+    ("PUT", "/dictionary/update"),
+    ("DELETE", "/dictionary/delete"),
+    ("GET", "/dictionary/stats"),
+    
+    # Desktop Router - Bible Tools
     ("GET", "/desktop/bible/study"),
     ("GET", "/desktop/bible/learn"),
     ("GET", "/desktop/bible/context/book"),
     ("GET", "/desktop/bible/context/word"),
     ("GET", "/desktop/bible/context/topics"),
+    ("GET", "/bible/search"),
+    
+    # Desktop Router - Gemini Tools
     ("GET", "/desktop/gemini/fill-en"),
     ("GET", "/desktop/gemini/fill-my"),
     ("GET", "/desktop/gemini/coverage"),
+    ("GET", "/desktop/gemini/fill"),
+    
+    # Desktop Router - Training Tools
     ("GET", "/desktop/training/generate"),
+    ("GET", "/desktop/training/generate-sentences"),
+    ("GET", "/desktop/training/validate"),
+    ("GET", "/desktop/training/deep-validate"),
     ("GET", "/desktop/training/build"),
     ("GET", "/desktop/training/build-qwen"),
-    ("GET", "/desktop/export/{data_type}"),
+    ("GET", "/desktop/training/export"),
+    ("GET", "/desktop/training/build-corpus"),
+    ("GET", "/desktop/training/corpus-stats"),
+    
+    # Desktop Router - Test & Quiz Tools
     ("GET", "/desktop/test/quiz"),
+    ("GET", "/desktop/test/stats"),
+    
+    # Desktop Router - Grammar Tools
     ("GET", "/desktop/grammar/check"),
+    ("GET", "/desktop/grammar/negation-rules"),
+    
+    # Desktop Router - Paragraph Tools
     ("GET", "/desktop/paragraph/analyze"),
+    ("GET", "/desktop/paragraph/style"),
+    ("GET", "/desktop/paragraph/paraphrase"),
+    
+    # Desktop Router - ZVS Tools
     ("GET", "/desktop/zvs/validate"),
+    ("GET", "/desktop/zvs/forbidden"),
+    
+    # Desktop Router - Pattern Tools
+    ("GET", "/desktop/pattern/stats"),
+    ("GET", "/desktop/pattern/learn"),
+    
+    # Desktop Router - Export Tools
+    ("GET", "/desktop/export/{data_type}"),
+    
+    # Desktop Router - Audit Tools
     ("GET", "/desktop/audit/recent"),
+    
+    # JSONL Pipeline Router
+    ("POST", "/desktop/jsonl/import/all"),
+    ("POST", "/desktop/jsonl/import/file"),
+    ("GET", "/desktop/jsonl/import/status/{batch_id}"),
+    ("GET", "/desktop/jsonl/import/log"),
+    ("POST", "/desktop/jsonl/export/table"),
+    ("POST", "/desktop/jsonl/export/all"),
+    ("GET", "/desktop/jsonl/tables"),
+    
+    # Application Routes
+    ("GET", "/health"),
     ("GET", "/monitor/health"),
     ("GET", "/monitor/coverage"),
     ("GET", "/monitor/audit"),
@@ -42,7 +98,11 @@ DESKTOP_CONTRACT = [
     ("PUT", "/dictionary/update"),
     ("DELETE", "/dictionary/delete"),
     ("GET", "/bible/search"),
-    ("GET", "/health"),
+    ("GET", "/chat/models"),
+    ("POST", "/chat/zolai"),
+    ("POST", "/chat/chat"),
+    ("POST", "/chat/chat/stream"),
+    ("GET", "/chat"),
 ]
 
 
@@ -75,6 +135,21 @@ def test_all_contract_paths_registered():
 def test_gemini_fill_my_present():
     registered = _registered_endpoints()
     assert ("GET", "/desktop/gemini/fill-my") in registered
+
+
+def test_jsonl_endpoints_present():
+    registered = _registered_endpoints()
+    jsonl_endpoints = [
+        ("POST", "/desktop/jsonl/import/all"),
+        ("POST", "/desktop/jsonl/import/file"),
+        ("GET", "/desktop/jsonl/import/status/{batch_id}"),
+        ("GET", "/desktop/jsonl/import/log"),
+        ("POST", "/desktop/jsonl/export/table"),
+        ("POST", "/desktop/jsonl/export/all"),
+        ("GET", "/desktop/jsonl/tables"),
+    ]
+    for ep in jsonl_endpoints:
+        assert ep in registered, f"JSONL endpoint missing: {ep}"
 
 
 def test_fresh_app_matches_module_app():
