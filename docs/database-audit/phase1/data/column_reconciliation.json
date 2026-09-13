@@ -1,0 +1,156 @@
+{
+  "metadata": {
+    "date": "2026-09-13",
+    "status": "READ-ONLY audit",
+    "total_merges": 7,
+    "total_single_source_migrations": 13
+  },
+  "merges": [
+    {
+      "target": "dictionary",
+      "source_tables": ["dictionary", "dictionary_import"],
+      "join_condition": "dictionary.zolai = dictionary_import.zolai",
+      "columns": [
+        {"target_col": "id", "source": "dictionary.id", "decision": "direct"},
+        {"target_col": "zolai", "source": "dictionary.zolai", "decision": "direct"},
+        {"target_col": "english", "source": "dictionary.english", "decision": "direct"},
+        {"target_col": "english_clean", "source": "dictionary.english_clean", "decision": "direct"},
+        {"target_col": "pos", "source": "dictionary.pos", "decision": "direct"},
+        {"target_col": "myanmar", "source": "dictionary.myanmar → dictionary_import.myanmar_word", "decision": "COALESCE"},
+        {"target_col": "source", "source": "dictionary.source", "decision": "direct"},
+        {"target_col": "zvs_compliance", "source": "dictionary.zvs_compliance_status", "decision": "direct"},
+        {"target_col": "entry_version", "source": "dictionary.entry_version", "decision": "direct"},
+        {"target_col": "is_deleted", "source": "dictionary.is_deleted", "decision": "direct"},
+        {"target_col": "created_at", "source": "dictionary.updated_at", "decision": "direct"},
+        {"target_col": "updated_at", "source": "dictionary.updated_at", "decision": "direct"}
+      ]
+    },
+    {
+      "target": "dictionary_en_zo",
+      "source_tables": ["dictionary_en_zo"],
+      "join_condition": null,
+      "columns": [
+        {"target_col": "id", "source": "dictionary_en_zo.id", "decision": "direct"},
+        {"target_col": "headword", "source": "dictionary_en_zo.headword", "decision": "direct"},
+        {"target_col": "translations", "source": "dictionary_en_zo.translations", "decision": "direct"},
+        {"target_col": "pos", "source": "dictionary_en_zo.pos", "decision": "direct"},
+        {"target_col": "source", "source": "dictionary_en_zo.source", "decision": "direct"},
+        {"target_col": "myanmar", "source": "dictionary_en_zo.myanmar", "decision": "direct"},
+        {"target_col": "zvs_compliance", "source": "dictionary_en_zo.zvs_compliance_status", "decision": "direct"},
+        {"target_col": "is_deleted", "source": "dictionary_en_zo.is_deleted", "decision": "direct"},
+        {"target_col": "created_at", "source": "dictionary_en_zo.updated_at", "decision": "direct"},
+        {"target_col": "updated_at", "source": "dictionary_en_zo.updated_at", "decision": "direct"}
+      ],
+      "note": "Import table has 38 columns; only canonical 10 are migrated. Extras archived."
+    },
+    {
+      "target": "vocab",
+      "source_tables": ["vocab", "zolai_vocabulary"],
+      "join_condition": "vocab.headword = zolai_vocabulary.zolai",
+      "columns": [
+        {"target_col": "id", "source": "vocab.id", "decision": "direct"},
+        {"target_col": "headword", "source": "vocab.headword", "decision": "direct"},
+        {"target_col": "english", "source": "vocab.english", "decision": "direct"},
+        {"target_col": "frequency", "source": "vocab.frequency", "decision": "direct"},
+        {"target_col": "books", "source": "vocab.books", "decision": "direct"},
+        {"target_col": "examples", "source": "vocab.examples", "decision": "direct"},
+        {"target_col": "myanmar", "source": "vocab.myanmar → zolai_vocabulary.myanmar", "decision": "COALESCE"},
+        {"target_col": "created_at", "source": "vocab.imported_at", "decision": "direct"},
+        {"target_col": "updated_at", "source": "vocab.imported_at", "decision": "direct"}
+      ]
+    },
+    {
+      "target": "grammar_patterns",
+      "source_tables": ["grammar_patterns", "zolai_grammar_patterns"],
+      "join_condition": "grammar_patterns.pattern_id = zolai_grammar_patterns.pattern_id",
+      "columns": [
+        {"target_col": "id", "source": "grammar_patterns.id", "decision": "direct"},
+        {"target_col": "pattern_id", "source": "grammar_patterns.pattern_id", "decision": "direct"},
+        {"target_col": "pattern_text", "source": "grammar_patterns.pattern → zolai_grammar_patterns.pattern_text", "decision": "COALESCE"},
+        {"target_col": "description", "source": "grammar_patterns.description", "decision": "direct"},
+        {"target_col": "function", "source": "grammar_patterns.function", "decision": "direct"},
+        {"target_col": "examples", "source": "grammar_patterns.examples", "decision": "direct"},
+        {"target_col": "frequency", "source": "grammar_patterns.frequency", "decision": "direct"},
+        {"target_col": "myanmar", "source": "grammar_patterns.myanmar", "decision": "direct"},
+        {"target_col": "tense", "source": "zolai_grammar_patterns.tense", "decision": "direct"},
+        {"target_col": "aspect", "source": "zolai_grammar_patterns.aspect", "decision": "direct"},
+        {"target_col": "negation_type", "source": "zolai_grammar_patterns.negation_type", "decision": "direct"},
+        {"target_col": "question_type", "source": "zolai_grammar_patterns.question_type", "decision": "direct"},
+        {"target_col": "source_category", "source": "zolai_grammar_patterns.source_category", "decision": "direct"},
+        {"target_col": "created_at", "source": "zolai_grammar_patterns.created_at", "decision": "direct"}
+      ],
+      "issue": "zolai_grammar_patterns.pattern_id is NULL for ALL 13,519 rows. LEFT JOIN produces NULLs. Enriched data orphaned."
+    },
+    {
+      "target": "proverbs",
+      "source_tables": ["proverbs", "zolai_proverbs_idioms"],
+      "join_condition": "proverbs.zolai = zolai_proverbs_idioms.zolai",
+      "columns": [
+        {"target_col": "id", "source": "proverbs.id", "decision": "direct"},
+        {"target_col": "zolai", "source": "proverbs.zolai", "decision": "direct"},
+        {"target_col": "english", "source": "proverbs.english", "decision": "direct"},
+        {"target_col": "literal_translation", "source": "zolai_proverbs_idioms.literal_translation", "decision": "direct"},
+        {"target_col": "morpheme_breakdown", "source": "zolai_proverbs_idioms.morpheme_breakdown", "decision": "direct"},
+        {"target_col": "category", "source": "proverbs.category", "decision": "direct"},
+        {"target_col": "theme", "source": "zolai_proverbs_idioms.theme", "decision": "direct"},
+        {"target_col": "cultural_context", "source": "zolai_proverbs_idioms.cultural_context", "decision": "direct"},
+        {"target_col": "source_category", "source": "zolai_proverbs_idioms.source_category", "decision": "direct"},
+        {"target_col": "created_at", "source": "proverbs.imported_at", "decision": "direct"}
+      ]
+    },
+    {
+      "target": "word_usage",
+      "source_tables": ["word_usage"],
+      "join_condition": null,
+      "note": "zolai_word_usage (85,045 rows) has different schema; exported to archive, not merged.",
+      "columns": [
+        {"target_col": "id", "source": "word_usage.id", "decision": "direct"},
+        {"target_col": "word", "source": "word_usage.word", "decision": "direct"},
+        {"target_col": "book", "source": "word_usage.book", "decision": "direct"},
+        {"target_col": "total_freq", "source": "word_usage.total_freq", "decision": "direct"},
+        {"target_col": "meaning_shifts", "source": "word_usage.meaning_shifts", "decision": "direct"},
+        {"target_col": "co_occurring_words", "source": "word_usage.co_occurring_words", "decision": "direct"},
+        {"target_col": "myanmar", "source": "word_usage.myanmar", "decision": "direct"},
+        {"target_col": "created_at", "source": "word_usage.imported_at", "decision": "direct"}
+      ]
+    },
+    {
+      "target": "bible_analysis",
+      "source_tables": ["zolai_bible_analysis"],
+      "join_condition": null,
+      "note": "bible_context (1,228 rows) has different structure; exported to archive.",
+      "columns": [
+        {"target_col": "id", "source": "zolai_bible_analysis.id", "decision": "direct"},
+        {"target_col": "book", "source": "zolai_bible_analysis.book_code", "decision": "direct"},
+        {"target_col": "chapter", "source": "zolai_bible_analysis.chapter", "decision": "direct"},
+        {"target_col": "verse", "source": "zolai_bible_analysis.verse", "decision": "direct"},
+        {"target_col": "zolai", "source": "zolai_bible_analysis.zolai", "decision": "direct"},
+        {"target_col": "english", "source": "zolai_bible_analysis.english", "decision": "direct"},
+        {"target_col": "morpheme_analysis", "source": "zolai_bible_analysis.morpheme_analysis", "decision": "direct"},
+        {"target_col": "grammar_tags", "source": "zolai_bible_analysis.grammar_tags", "decision": "direct"},
+        {"target_col": "tone_analysis", "source": "zolai_bible_analysis.tone_analysis", "decision": "direct"},
+        {"target_col": "compounds_found", "source": "zolai_bible_analysis.compounds_found", "decision": "direct"},
+        {"target_col": "rare_words", "source": "zolai_bible_analysis.rare_words", "decision": "direct"},
+        {"target_col": "created_at", "source": "zolai_bible_analysis.created_at", "decision": "direct"}
+      ]
+    }
+  ],
+  "single_source_migrations": [
+    {"target": "bible_verses", "source": "bible_verses", "action": "direct_copy"},
+    {"target": "translations", "source": "translations", "action": "direct_copy"},
+    {"target": "word_alignments", "source": "word_alignments", "action": "direct_copy"},
+    {"target": "phrases", "source": "phrases", "action": "direct_copy"},
+    {"target": "syllable_data", "source": "syllable_data", "action": "direct_copy"},
+    {"target": "word_collocations", "source": "word_collocations", "action": "direct_copy"},
+    {"target": "articles", "source": "articles", "action": "rename_drop_prefix"},
+    {"target": "songs", "source": "zolai_songs", "action": "rename_drop_prefix"},
+    {"target": "wiki_content", "source": "wiki_content", "action": "direct_copy"},
+    {"target": "import_log", "source": "jsonl_import_log", "action": "rename_drop_prefix"},
+    {"target": "data_audit_log", "source": "data_audit_log", "action": "direct_copy"},
+    {"target": "audit_findings", "source": "audit_findings", "action": "direct_copy"},
+    {"target": "provenance", "source": "provenance", "action": "direct_copy"},
+    {"target": "tone_sandhi", "source": "zolai_tone_sandhi", "action": "rename_drop_prefix"},
+    {"target": "tone_patterns", "source": "tone_patterns", "action": "direct_copy"},
+    {"target": "training_runs", "source": "training_runs", "action": "direct_copy"}
+  ]
+}

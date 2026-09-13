@@ -1,0 +1,211 @@
+{
+  "metadata": {
+    "date": "2026-09-13",
+    "total_target_tables": 23,
+    "tables_with_unique_keys": 8,
+    "tables_with_composite_keys": 7,
+    "tables_with_no_unique_key": 8
+  },
+  "tables": [
+    {
+      "target_table": "dictionary",
+      "candidate_key": ["zolai", "english_clean"],
+      "key_type": "COMPOSITE",
+      "total_rows": 103303,
+      "duplicate_count": 1876,
+      "recommendation": "COMPOSITE UNIQUE (add sense_id for disambiguation)",
+      "sql_proof": "SELECT COUNT(*) FROM (SELECT zolai, english_clean FROM dictionary GROUP BY zolai, english_clean HAVING COUNT(*) > 1); -- 1876",
+      "sample_duplicates": [
+        {"zolai": "aakbu", "english_clean": "cage for fowls", "count": 2},
+        {"zolai": "aakbuuk", "english_clean": "chicken barn or roost", "count": 2}
+      ]
+    },
+    {
+      "target_table": "dictionary_en_zo",
+      "candidate_key": ["headword", "translations"],
+      "key_type": "NONE",
+      "total_rows": 113750,
+      "duplicate_count": null,
+      "recommendation": "NO_UNIQUE — headwords repeat with different translation sets",
+      "sql_proof": null,
+      "note": "Add composite index (headword, translations) for lookup performance"
+    },
+    {
+      "target_table": "bible_verses",
+      "candidate_key": ["ref"],
+      "key_type": "UNIQUE",
+      "total_rows": 62751,
+      "duplicate_count": 0,
+      "recommendation": "UNIQUE",
+      "sql_proof": "SELECT COUNT(*) FROM (SELECT ref FROM bible_verses GROUP BY ref HAVING COUNT(*) > 1); -- 0"
+    },
+    {
+      "target_table": "grammar_patterns",
+      "candidate_key": ["pattern_id"],
+      "key_type": "UNIQUE",
+      "total_rows": 5547,
+      "duplicate_count": 0,
+      "recommendation": "UNIQUE",
+      "sql_proof": "SELECT COUNT(*) FROM (SELECT pattern_id FROM grammar_patterns GROUP BY pattern_id HAVING COUNT(*) > 1); -- 0"
+    },
+    {
+      "target_table": "translations",
+      "candidate_key": ["source", "target"],
+      "key_type": "NONE",
+      "total_rows": 212754,
+      "duplicate_count": null,
+      "recommendation": "NO_UNIQUE — same source can have multiple valid translations",
+      "sql_proof": null,
+      "note": "Add index (source, target) for lookup"
+    },
+    {
+      "target_table": "word_alignments",
+      "candidate_key": ["ref", "zolai_word", "english_word", "position"],
+      "key_type": "NONE",
+      "total_rows": 385120,
+      "duplicate_count": null,
+      "recommendation": "NO_UNIQUE — same word can appear in multiple positions",
+      "sql_proof": null,
+      "note": "Add composite index (ref, zolai_word, english_word)"
+    },
+    {
+      "target_table": "vocab",
+      "candidate_key": ["headword"],
+      "key_type": "UNIQUE",
+      "total_rows": 107979,
+      "duplicate_count": 0,
+      "recommendation": "UNIQUE",
+      "sql_proof": "SELECT COUNT(*) FROM (SELECT headword FROM vocab GROUP BY headword HAVING COUNT(*) > 1); -- 0"
+    },
+    {
+      "target_table": "proverbs",
+      "candidate_key": ["zolai"],
+      "key_type": "NONE",
+      "total_rows": 7736,
+      "duplicate_count": 21,
+      "recommendation": "NO_UNIQUE — 21 duplicates from long repeated sentences",
+      "sql_proof": "SELECT COUNT(*) FROM (SELECT zolai FROM proverbs GROUP BY zolai HAVING COUNT(*) > 1); -- 21",
+      "dedup_action": "Keep first occurrence during migration"
+    },
+    {
+      "target_table": "phrases",
+      "candidate_key": ["zo"],
+      "key_type": "UNIQUE",
+      "total_rows": 5000,
+      "duplicate_count": null,
+      "recommendation": "UNIQUE — verify during migration"
+    },
+    {
+      "target_table": "word_usage",
+      "candidate_key": ["word", "book"],
+      "key_type": "COMPOSITE UNIQUE",
+      "total_rows": 60365,
+      "duplicate_count": null,
+      "recommendation": "COMPOSITE UNIQUE on (word, book)"
+    },
+    {
+      "target_table": "syllable_data",
+      "candidate_key": ["word", "engine"],
+      "key_type": "COMPOSITE UNIQUE",
+      "total_rows": 189554,
+      "duplicate_count": null,
+      "recommendation": "COMPOSITE UNIQUE on (word, engine)"
+    },
+    {
+      "target_table": "word_collocations",
+      "candidate_key": ["word1", "word2"],
+      "key_type": "UNIQUE",
+      "total_rows": 5000,
+      "duplicate_count": null,
+      "recommendation": "UNIQUE"
+    },
+    {
+      "target_table": "bible_analysis",
+      "candidate_key": ["book", "chapter", "verse"],
+      "key_type": "COMPOSITE UNIQUE",
+      "total_rows": 30758,
+      "duplicate_count": null,
+      "recommendation": "COMPOSITE UNIQUE on (book, chapter, verse)"
+    },
+    {
+      "target_table": "articles",
+      "candidate_key": ["title"],
+      "key_type": "NONE",
+      "total_rows": 6371,
+      "duplicate_count": null,
+      "recommendation": "NO_UNIQUE — titles may repeat across categories"
+    },
+    {
+      "target_table": "songs",
+      "candidate_key": ["collection", "song_number"],
+      "key_type": "COMPOSITE UNIQUE",
+      "total_rows": 1032,
+      "duplicate_count": null,
+      "recommendation": "COMPOSITE UNIQUE on (collection, song_number)"
+    },
+    {
+      "target_table": "wiki_content",
+      "candidate_key": ["title"],
+      "key_type": "NONE",
+      "total_rows": 1688,
+      "duplicate_count": null,
+      "recommendation": "NO_UNIQUE — titles may repeat across categories"
+    },
+    {
+      "target_table": "import_log",
+      "candidate_key": ["batch_id"],
+      "key_type": "UNIQUE",
+      "total_rows": 92,
+      "duplicate_count": null,
+      "recommendation": "UNIQUE on (batch_id)"
+    },
+    {
+      "target_table": "data_audit_log",
+      "candidate_key": ["table_name", "row_id", "field", "changed_at"],
+      "key_type": "COMPOSITE UNIQUE",
+      "total_rows": 24762,
+      "duplicate_count": null,
+      "recommendation": "COMPOSITE UNIQUE"
+    },
+    {
+      "target_table": "audit_findings",
+      "candidate_key": ["finding_type", "word", "old_value"],
+      "key_type": "NONE",
+      "total_rows": 713,
+      "duplicate_count": null,
+      "recommendation": "NO_UNIQUE"
+    },
+    {
+      "target_table": "provenance",
+      "candidate_key": ["filename", "sha256"],
+      "key_type": "COMPOSITE UNIQUE",
+      "total_rows": 255,
+      "duplicate_count": null,
+      "recommendation": "COMPOSITE UNIQUE"
+    },
+    {
+      "target_table": "tone_sandhi",
+      "candidate_key": ["rule_number"],
+      "key_type": "UNIQUE",
+      "total_rows": 19,
+      "duplicate_count": null,
+      "recommendation": "UNIQUE on (rule_number)"
+    },
+    {
+      "target_table": "tone_patterns",
+      "candidate_key": ["word", "tone_category"],
+      "key_type": "COMPOSITE UNIQUE",
+      "total_rows": 118,
+      "duplicate_count": null,
+      "recommendation": "COMPOSITE UNIQUE on (word, tone_category)"
+    },
+    {
+      "target_table": "training_runs",
+      "candidate_key": ["model_name", "dataset_name", "created_at"],
+      "key_type": "COMPOSITE UNIQUE",
+      "total_rows": 2,
+      "duplicate_count": null,
+      "recommendation": "COMPOSITE UNIQUE"
+    }
+  ]
+}
