@@ -80,8 +80,11 @@ def _parse_categories(value: str | None) -> Iterable[str] | None:
     return tuple(c.strip() for c in value.split(",") if c.strip())
 
 
-def _build_exceptions(args: argparse.Namespace) -> ExceptionRegistry:
+def _build_exceptions(args: argparse.Namespace) -> ExceptionRegistry | None:
+    """Build exception registry from CLI args. Returns None if no exceptions requested."""
     registry = ExceptionRegistry()
+    has_exceptions = False
+
     if getattr(args, "use_default_exceptions", False):
         # Merge the seeded historical exceptions into the CLI's registry.
         for rule_id in DEFAULT_EXCEPTIONS.rule_ids:
@@ -90,13 +93,19 @@ def _build_exceptions(args: argparse.Namespace) -> ExceptionRegistry:
             registry.add_token(token)
         for phrase in DEFAULT_EXCEPTIONS.phrases:
             registry.add_phrase(phrase)
+        has_exceptions = True
+
     for rule_id in args.exclude_rules or ():
         registry.add_rule(rule_id)
+        has_exceptions = True
     for token in args.exclude_tokens or ():
         registry.add_token(token)
+        has_exceptions = True
     for phrase in args.allow_phrase or ():
         registry.add_phrase(phrase)
-    return registry
+        has_exceptions = True
+
+    return registry if has_exceptions else None
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -133,6 +142,16 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Merge the seeded historical DEFAULT_EXCEPTIONS into this run.",
     )
+    validate_p.add_argument(
+        "--context",
+        choices=["modern", "historical", "scripture", "auto"],
+        default="auto",
+        help=(
+            "Validation context: modern (flags historical forms), historical "
+            "(allows historical tokens), scripture (allows for Bible text), "
+            "auto (detect from content). Default: auto"
+        ),
+    )
     return parser
 
 
@@ -149,6 +168,7 @@ def _run_validate(args: argparse.Namespace) -> int:
             include_noisy=args.noisy,
             exceptions=registry,
             disabled_rules=args.exclude_rules,
+            context=args.context,
         )
         reports.append(report)
 
@@ -173,3 +193,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
