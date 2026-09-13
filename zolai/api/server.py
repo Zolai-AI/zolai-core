@@ -6,7 +6,8 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Request, Depends
+from fastapi.security import APIKeyHeader, APIKeyQuery
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -271,7 +272,58 @@ def create_app() -> FastAPI:
         yield
         logger.info("Zolai API shutting down")
 
-    app = FastAPI(
+    # API Key Configuration
+API_KEY_NAME = "X-API-Key"
+API_KEY_QUERY = "api_key"
+API_KEYS = {"dev-key-123": "development", "admin-key-456": "admin"}  # In production, use env var or secure store
+
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+api_key_query = APIKeyQuery(name=API_KEY_QUERY, auto_error=False)
+
+from fastapi import Request, Depends
+from fastapi.security import APIKeyHeader, APIKeyQuery
+from fastapi.responses import JSONResponse
+
+async def get_api_key(
+    api_key_header_val: str = Depends(api_key_header),
+    api_key_query_val: str = Depends(api_key_query),
+):
+    """Validate API key from header or query parameter."""
+    api_key = api_key_header_val or api_key_query_val
+    if api_key and api_key in API_KEYS:
+        return API_KEYS[api_key]  # Return role
+    raise HTTPException(status_code=403, detail="Invalid or missing API key")
+
+# Optional: public endpoints that don't require auth
+PUBLIC_ENDPOINTS = {
+    "/health", "/docs", "/openapi.json", "/redoc",
+    "/chat/models", "/chat/chat", "/chat/chat/stream", "/chat",
+    "/chat/zolai",  # Zolai chat is public but rate-limited
+    "/desktop/stats", "/desktop/tables", "/desktop/query",  # Dashboard read endpoints
+    "/dictionary/search/all", "/dictionary/search/my", "/dictionary/stats",
+    "/bible/search", "/monitor/health", "/monitor/coverage", "/monitor/audit",
+}
+
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class APIKeyMiddleware(BaseHTTPMiddleware):
+    """Middleware to enforce API key on protected endpoints."""
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path in PUBLIC_ENDPOINTS:
+            return await call_next(request)
+        
+        # Skip for OPTIONS (CORS preflight)
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        
+        api_key = request.headers.get(API_KEY_NAME) or request.query_params.get(API_KEY_QUERY)
+        if not api_key or api_key not in API_KEYS:
+            return JSONResponse(status_code=403, content={"detail": "Invalid or missing API key"})
+        
+        request.state.api_key_role = API_KEYS[api_key]
+        return await call_next(request)
+
+app = FastAPI(
         title="Zolai Toolkit API",
         description="REST API for Zolai language data pipeline",
         version="1.0.0",
@@ -529,13 +581,86 @@ def create_app() -> FastAPI:
         return {"success": r, "word": word, "field": field}
 
     @app.delete("/dictionary/delete")
-    async def dictionary_delete(word: str):
-        """Delete a dictionary entry (soft delete — marks as deleted in audit)."""
-        from ..data.database import get_manager
-
-        db = get_manager()
-        db._log_change("dictionary", 0, "zolai", word, "DELETED", "api_delete")
-        return {"success": True, "word": word}
+    async def dictionary_delete(word: str, deleted_by: str = "api_user", reason: str = "api_delete"):
+        """
+        Soft delete a dictionary entry with full audit trail.
+        
+        Args:
+            word: The word to delete
+            deleted_by: Identifier of who/what initiated the delete (observer)
+            reason: Reason for deletion
+        
+        Returns:
+            Full audit trail of what was deleted across all tables
+        """
+        import sqlite3
+        from datetime import datetime, timezone
+        from ..config import config
+        
+        db_path = config.paths.zolai_db
+        conn = sqlite3.connect(str(db_path))
+        cur = conn.cursor()
+        
+        now = datetime.now(timezone.utc).isoformat()
+        deleted_by_id = f"{deleted_by}@{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+        
+        results = {"word": word, "deleted_by": deleted_by, "deleted_at": now, "tables_affected": []}
+        
+        # Tables to soft delete from (with their primary key column)
+        tables_to_delete = [
+            ("dictionary", "zolai"),
+            ("dictionary_en_zo", "english"),
+            ("dictionary_import", "zolai"),
+            ("dictionary_en_zo_import", "english"),
+        ]
+        
+        for table, pk_col in tables_to_delete:
+            # First, check if record exists and get its data for audit
+            cur.execute(f'SELECT * FROM "{table}" WHERE "{tables_to_delete[0][1] if table == tables_to_delete[0][0] else (table == "dictionary_en_zo" and "english" or table == "dictionary_import" and "zolai" or "english")}" = ?', (word,))
+            existing = cur.fetchone()
+            
+            if existing:
+                # Get column names
+                cur.execute(f'PRAGMA table_info("{table}")')
+                cols = [col[1] for col in cur.fetchall()]
+                
+                # Log to data_audit_log before deletion
+                cur.execute(
+                    """INSERT INTO data_audit_log (table_name, row_id, field, old_value, new_value, changed_at, reason)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (table, 0, "is_deleted", "0", "1", now, f"{reason} by {deleted_by}")
+                )
+                
+                # Also log the deleted_by info
+                cur.execute(
+                    """INSERT INTO data_audit_log (table_name, row_id, field, old_value, new_value, changed_at, reason)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (table, 0, "deleted_by", "", deleted_by_id, now, f"{reason} by {deleted_by}")
+                )
+                
+                # Soft delete
+                pk_val = "zolai" if "dictionary" in table and "en_zo" not in table else "english"
+                cur.execute(
+                    f'UPDATE "{table}" SET is_deleted = 1, deleted_at = ? WHERE "{pk_val}" = ?',
+                    (now, word)
+                )
+                rows_affected = cur.rowcount
+                
+                if rows_affected > 0:
+                    results["tables_affected"].append({
+                        "table": table,
+                        "rows_affected": rows_affected,
+                        "primary_key": word
+                    })
+        
+        conn.commit()
+        conn.close()
+        
+        total_affected = sum(t["rows_affected"] for t in results["tables_affected"])
+        results["success"] = total_affected > 0
+        results["total_rows_affected"] = total_affected
+        
+        return results
 
     @app.get("/dictionary/search/all")
     async def dictionary_search_all(q: str, limit: int = 20):
