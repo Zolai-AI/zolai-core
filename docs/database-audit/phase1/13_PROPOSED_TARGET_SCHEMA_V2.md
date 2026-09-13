@@ -137,8 +137,8 @@ Target state: **~22 tables** organized by domain. No `zolai_` prefix unless coll
 | `myanmar` | TEXT | |
 | `created_at` | TIMESTAMP | |
 
-**Business key:** `(headword)` — some duplicates exist (e.g., "aa" appears 2× with different frequencies). **107,979 total rows.** 106,243 overlap with `zolai_vocabulary.zolai`. 1,736 vocab-only, 6,036 zolai_vocabulary-only.
-**Source tables:** `vocab` (107,979) + `vocab_import` (180,458) + `zolai_vocabulary` (112,279 — enriched metadata, merge by COALESCE).
+**Business key:** `(headword)` — some duplicates exist (e.g., "aa" appears 2× with different frequencies). **107,979 total rows** (107,049 unique headwords). 76,911 unique words overlap with `zolai_vocabulary.zolai` (85,310 unique). 30,138 vocab-only unique words, 8,399 zolai_vocabulary-only unique words. 115,448 total unique words across both tables.
+**Source tables:** `vocab` (107,979) + `vocab_import` (180,458) + `zolai_vocabulary` (112,279 — enriched metadata, merge by COALESCE). Target ~115,448 unique words.
 
 ### 8. `proverbs` (Proverbs & idioms)
 | Column | Type | Notes |

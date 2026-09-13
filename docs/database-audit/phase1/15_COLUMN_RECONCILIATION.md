@@ -68,10 +68,11 @@
 | `vocab` | `imported_at` | `updated_at` | rename | |
 
 **Join:** `vocab.headword = zolai_vocabulary.zolai`
-**Overlap:** 106,243
-**Vocab only:** 1,736 (freq data without enriched metadata)
-**zolai_vocabulary only:** 6,036 (enriched metadata without freq data)
-**Issue:** Both tables have duplicate headwords (vocab: "aa" 2×; zolai_vocabulary: "khem" 4×). DISTINCT needed.
+**Overlap (unique words):** 76,911 (vocab: 107,049 unique; zolai_vocabulary: 85,310 unique)
+**Vocab only (unique):** 30,138 (freq data without enriched metadata)
+**zolai_vocabulary only (unique):** 8,399 (enriched metadata without freq data)
+**Total unique union:** 115,448
+**Issue:** Both tables have duplicate headwords (vocab: "aa" 2×; zolai_vocabulary: "khem" 4×). DISTINCT on headword needed. Target ~115,448 unique words.
 
 ---
 

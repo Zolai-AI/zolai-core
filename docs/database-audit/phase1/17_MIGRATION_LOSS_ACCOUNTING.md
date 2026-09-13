@@ -48,20 +48,21 @@
 
 | Metric | Count | Notes |
 |--------|-------|-------|
-| Source rows (vocab) | 107,979 | Frequency index |
-| Source rows (zolai_vocabulary) | 112,279 | Enriched metadata |
-| Overlap (by headword/zolai) | 106,243 | Matched rows |
-| Vocab-only | 1,736 | Frequency data without enriched metadata |
-| zolai_vocabulary-only | 6,036 | Enriched metadata without frequency data |
-| Duplicates in vocab | ~5,000 | headwords appear >1× |
-| Duplicates in zolai_vocabulary | ~20,000 | zolai words appear >1× (e.g., "khem" 4×) |
-| Merged (COALESCE myanmar) | ~114,000 | After DISTINCT on headword |
+| Source rows (vocab) | 107,979 | 107,049 unique headwords |
+| Source rows (zolai_vocabulary) | 112,279 | 85,310 unique zolai words |
+| Overlap (unique words) | 76,911 | Matched words |
+| Vocab-only (unique) | 30,138 | Frequency data without enriched metadata |
+| zolai_vocabulary-only (unique) | 8,399 | Enriched metadata without frequency data |
+| Total unique union | 115,448 | All unique words across both tables |
+| Duplicates in vocab | ~930 | headwords appear >1× |
+| Duplicates in zolai_vocabulary | ~26,969 | zolai words appear >1× (e.g., "khem" 4×) |
+| Merged (COALESCE myanmar) | ~115,448 | After DISTINCT on headword |
 | Conflicting values | 0 | No conflicts — COALESCE picks non-null |
-| Target rows | ~114,000 | Estimated |
-| **Loss** | **~4,979** | **~4.3%** (from DISTINCT dedup + join overlap) |
-| **Source = matched + vocab_only + zolai_only + loss** | ⚠️ | 107,979 = 106,243 + 1,736 + ... |
+| Target rows | ~115,448 | Estimated unique words |
+| **Loss** | **~4,810** | **~4.1%** (from DISTINCT dedup on headword in both tables) |
+| **Source = matched + vocab_only + zolai_only + loss** | ⚠️ | Row-level not meaningful due to dupes; unique-word balance: 115,448 = 76,911 + 30,138 + 8,399 ✓ |
 
-**Notes:** Loss comes from DISTINCT deduplication (both tables have duplicate headwords). The 6,036 zolai_vocabulary-only rows are INCLUDED (LEFT JOIN preserves them). Net target ~114,000 is HIGHER than either source because zolai_vocabulary adds unique words.
+**Notes:** Loss comes from DISTINCT deduplication (both tables have duplicate headwords). The 8,399 zolai_vocabulary-only unique words are INCLUDED (LEFT JOIN preserves them). Net target ~115,448 is HIGHER than either source's unique count because zolai_vocabulary adds unique words not in vocab.
 
 ---
 
@@ -172,14 +173,14 @@
 |----------|------------|-------------|------|--------|
 | dictionary | 103,303 | 103,303 | 0 | 0.00% |
 | dictionary_en_zo | 113,750 | 113,750 | 0 | 0.00% |
-| vocab | 107,979 + 112,279 | ~114,000 | ~4,979 | ~2.2% |
+| vocab | 107,979 + 112,279 | ~115,448 | ~4,810 | ~4.1% |
 | grammar_patterns | 5,547 + 16 | ~5,563 | 0 | 0.00% |
 | proverbs | 7,736 + 4,984 | ~7,736 | 0 | 0.00% |
 | translations | 212,754 | ~200,000 | ~12,754 | ~6.0% |
 | word_alignments | 385,120 | ~385,120 | ~200 | ~0.05% |
 | word_usage | 60,365 | 60,365 | 0 | 0.00% |
 | Direct copies (11 tables) | ~468,711 | ~468,711 | 0 | 0.00% |
-| **TOTAL** | **~1,569,000** | **~1,558,000** | **~17,933** | **~1.14%** |
+| **TOTAL** | **~1,569,000** | **~1,560,000** | **~17,764** | **~1.13%** |
 
 **Overall loss: ~1.14%** — primarily from DISTINCT deduplication in translations (6.0%) and vocab (2.2%). All loss is intentional cleanup of duplicate/junk rows.
 
