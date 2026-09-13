@@ -29,7 +29,7 @@ def migrate_bible_analysis(conn: sqlite3.Connection) -> int:
     print("Migrating bible_context → bible_analysis_v2 ...")
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO bible_analysis_v2 (
+        INSERT OR IGNORE INTO bible_analysis_v2 (
             book, chapter, analysis_type, data,
             import_batch_id, source_file, content_hash
         )
@@ -54,7 +54,7 @@ def migrate_articles(conn: sqlite3.Connection) -> int:
     print("Migrating articles → articles_v2 ...")
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO articles_v2 (
+        INSERT OR IGNORE INTO articles_v2 (
             title, content, excerpt, categories, date, link, language,
             import_batch_id, source_file, content_hash
         )
@@ -78,7 +78,7 @@ def migrate_songs(conn: sqlite3.Connection) -> int:
     print("Migrating zolai_songs → songs_v2 ...")
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO songs_v2 (
+        INSERT OR IGNORE INTO songs_v2 (
             collection, song_number, title, text, source,
             import_batch_id, source_file, content_hash
         )
@@ -102,7 +102,7 @@ def migrate_wiki_content(conn: sqlite3.Connection) -> int:
     print("Migrating wiki_content → wiki_content_v2 ...")
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO wiki_content_v2 (
+        INSERT OR IGNORE INTO wiki_content_v2 (
             wiki_category, source_path, title, content,
             word_count, section_count, content_hash,
             entry_version,
@@ -125,7 +125,7 @@ def migrate_data_audit_log(conn: sqlite3.Connection) -> int:
     print("Migrating data_audit_log → data_audit_log_v2 ...")
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO data_audit_log_v2 (
+        INSERT OR IGNORE INTO data_audit_log_v2 (
             table_name, row_id, field, old_value, new_value,
             changed_at, reason, content_hash
         )
@@ -150,7 +150,7 @@ def migrate_audit_findings(conn: sqlite3.Connection) -> int:
     print("Migrating audit_findings → audit_findings_v2 ...")
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO audit_findings_v2 (
+        INSERT OR IGNORE INTO audit_findings_v2 (
             finding_type, word, old_value, new_value, source,
             confidence, verified_by, entry_id,
             import_batch_id, source_file, content_hash
@@ -176,7 +176,7 @@ def migrate_provenance(conn: sqlite3.Connection) -> int:
     print("Migrating provenance → provenance_v2 ...")
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO provenance_v2 (
+        INSERT OR IGNORE INTO provenance_v2 (
             filename, size_bytes, sha256, row_count, source,
             generator_script, version, status, updated_at, change_log,
             content_hash
@@ -201,7 +201,7 @@ def migrate_import_log(conn: sqlite3.Connection) -> int:
     print("Migrating jsonl_import_log → import_log_v2 ...")
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO import_log_v2 (
+        INSERT OR IGNORE INTO import_log_v2 (
             batch_id, source_file, table_name, rows_imported, sha256,
             imported_at, version, status, error_message,
             content_hash
@@ -226,7 +226,7 @@ def migrate_tone_sandhi(conn: sqlite3.Connection) -> int:
     print("Migrating zolai_tone_sandhi → tone_sandhi_v2 ...")
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO tone_sandhi_v2 (
+        INSERT OR IGNORE INTO tone_sandhi_v2 (
             rule_number, rule_name, underlying_pattern, surface_pattern,
             condition, examples, domain, source_category, source_file,
             import_batch_id, content_hash
@@ -252,7 +252,7 @@ def migrate_tone_patterns(conn: sqlite3.Connection) -> int:
     print("Migrating tone_patterns → tone_patterns_v2 ...")
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO tone_patterns_v2 (
+        INSERT OR IGNORE INTO tone_patterns_v2 (
             word, tone_category, meaning_t1, meaning_t3, meaning_t4,
             sandhi_rules, source_category, source_file,
             import_batch_id, content_hash
@@ -278,7 +278,7 @@ def migrate_training_runs(conn: sqlite3.Connection) -> int:
     print("Migrating training_runs → training_runs_v2 ...")
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO training_runs_v2 (
+        INSERT OR IGNORE INTO training_runs_v2 (
             model_name, dataset_name, entry_count, entry_version,
             update_remarks, metrics_json, status, completed_at,
             test_type, test_date, total_tests, passed_tests, score,
