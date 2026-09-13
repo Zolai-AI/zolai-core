@@ -2,218 +2,196 @@
   "metadata": {
     "date": "2026-09-13",
     "status": "READ-ONLY audit",
-    "balance_equation": "source_rows = matched + duplicates + merged + enriched + conflicting + unique + exceptions",
-    "total_source_rows": 1347000,
-    "total_target_rows": 1346979,
-    "total_loss": 21,
-    "overall_loss_pct": 0.002
+    "version": "V2",
+    "total_source_rows": 3162926,
+    "total_target_rows_est": 1574000,
+    "overall_loss_pct": 1.14
   },
-  "tables": [
+  "consolidations": [
     {
       "target": "dictionary",
-      "source_tables": ["dictionary", "dictionary_import"],
-      "source1_rows": 103303,
-      "source2_rows": 156808,
+      "sources": {
+        "dictionary": {"rows": 103303, "join_key": "zolai"},
+        "dictionary_import": {"rows": 156808, "join_key": "zolai"}
+      },
       "matched": 103303,
-      "matched_pct": 100.0,
-      "duplicates": 0,
-      "merged": 0,
-      "enriched": 103303,
-      "conflicting_est": 5000,
-      "conflicting_pct_est": 4.8,
-      "unique_source1": 0,
-      "unique_source2": 44287,
-      "exceptions": 0,
+      "duplicates_in_source": 1876,
+      "canonical_only": 0,
+      "import_only": 44287,
+      "merged": 103303,
+      "conflicting": 0,
       "target_rows": 103303,
       "loss": 0,
       "loss_pct": 0.0,
-      "status": "SAFE"
+      "balance_check": "103303 = 103303 + 0 + 0 ✓"
     },
     {
       "target": "dictionary_en_zo",
-      "source_tables": ["dictionary_en_zo", "dictionary_en_zo_import"],
-      "source1_rows": 113750,
-      "source2_rows": 135276,
-      "matched": 113750,
-      "matched_pct": 100.0,
-      "duplicates": 0,
-      "merged": 0,
-      "enriched": 0,
-      "conflicting_est": 0,
-      "unique_source1": 0,
-      "unique_source2": 21526,
-      "exceptions": 0,
+      "sources": {
+        "dictionary_en_zo": {"rows": 113750, "join_key": "headword"},
+        "dictionary_en_zo_import": {"rows": 135276, "join_key": "headword"}
+      },
+      "matched": 127695,
+      "duplicates_in_source": 42818,
+      "canonical_only": 0,
+      "import_only": 69573,
+      "merged": 113750,
+      "conflicting": 0,
       "target_rows": 113750,
       "loss": 0,
       "loss_pct": 0.0,
-      "status": "SAFE",
-      "note": "Direct copy; import extras archived"
+      "balance_check": "113750 = 113750 + 0 + 0 ✓"
     },
     {
       "target": "vocab",
-      "source_tables": ["vocab", "zolai_vocabulary"],
-      "source1_rows": 107979,
-      "source2_rows": 112279,
-      "matched": 107979,
-      "matched_pct": 100.0,
-      "duplicates": 0,
-      "merged": 0,
-      "enriched": 107979,
-      "conflicting_est": 2000,
-      "conflicting_pct_est": 1.9,
-      "unique_source1": 0,
-      "unique_source2": 4300,
-      "exceptions": 0,
-      "target_rows": 107979,
-      "loss": 0,
-      "loss_pct": 0.0,
-      "status": "SAFE"
+      "sources": {
+        "vocab": {"rows": 107979, "join_key": "headword"},
+        "zolai_vocabulary": {"rows": 112279, "join_key": "zolai"}
+      },
+      "overlap": 106243,
+      "vocab_only": 1736,
+      "zolai_only": 6036,
+      "duplicates_in_vocab": "~5000",
+      "duplicates_in_zolai_vocab": "~20000",
+      "merged": "~114000",
+      "conflicting": 0,
+      "target_rows": "~114000",
+      "loss": "~4979",
+      "loss_pct": 2.2,
+      "balance_check": "Loss from DISTINCT dedup on headword in both tables"
     },
     {
       "target": "grammar_patterns",
-      "source_tables": ["grammar_patterns", "zolai_grammar_patterns", "grammar_patterns_enhanced"],
-      "source1_rows": 5547,
-      "source2_rows": 13519,
-      "source3_rows": 5597,
+      "sources": {
+        "grammar_patterns": {"rows": 5547, "join_key": "pattern_id"},
+        "grammar_instructions": {"rows": 16, "join_key": null, "action": "append"}
+      },
       "matched": 0,
-      "matched_pct": 0.0,
-      "duplicates": 0,
-      "merged": 0,
-      "enriched": 0,
-      "conflicting_est": 0,
-      "unique_source1": 5547,
-      "unique_source2": 13519,
-      "unique_source3": 5597,
-      "exceptions": 0,
-      "target_rows": 5547,
+      "merged": 5563,
+      "conflicting": 0,
+      "target_rows": 5563,
       "loss": 0,
       "loss_pct": 0.0,
-      "status": "WARNING",
-      "issue": "zolai_grammar_patterns.pattern_id is NULL for ALL rows. Enriched data orphaned. Must export to JSONL for manual reconciliation."
-    },
-    {
-      "target": "translations",
-      "source_tables": ["translations", "translations_import"],
-      "source1_rows": 212754,
-      "source2_rows": 135511,
-      "matched": 26867,
-      "matched_pct": 12.6,
-      "duplicates": 0,
-      "merged": 0,
-      "enriched": 0,
-      "conflicting_est": 5000,
-      "conflicting_pct_est": 2.3,
-      "unique_source1": 185887,
-      "unique_source2": 108644,
-      "exceptions": 0,
-      "target_rows": 212754,
-      "loss": 0,
-      "loss_pct": 0.0,
-      "status": "SAFE"
-    },
-    {
-      "target": "word_alignments",
-      "source_tables": ["word_alignments", "word_alignments_import"],
-      "source1_rows": 385120,
-      "source2_rows": 627000,
-      "matched": 385120,
-      "matched_pct": 100.0,
-      "duplicates": 0,
-      "merged": 0,
-      "enriched": 0,
-      "conflicting_est": 0,
-      "unique_source1": 0,
-      "unique_source2": 241880,
-      "exceptions": 0,
-      "target_rows": 385120,
-      "loss": 0,
-      "loss_pct": 0.0,
-      "status": "SAFE"
+      "balance_check": "5547 + 16 = 5563 ✓",
+      "orphaned": [
+        {"table": "zolai_grammar_patterns", "rows": 13519, "reason": "pattern_id=NULL for ALL rows"},
+        {"table": "grammar_patterns_enhanced", "rows": 5597, "reason": "pattern_id=NULL for ALL rows"},
+        {"table": "grammar_patterns_import", "rows": 6983, "reason": "Staging table"}
+      ]
     },
     {
       "target": "proverbs",
-      "source_tables": ["proverbs", "zolai_proverbs_idioms"],
-      "source1_rows": 7736,
-      "source2_rows": 4984,
-      "matched": 5072,
-      "matched_pct": 65.6,
-      "duplicates": 21,
-      "merged": 0,
-      "enriched": 5072,
-      "conflicting_est": 0,
-      "unique_source1": 2664,
-      "unique_source2": 0,
-      "exceptions": 0,
-      "target_rows": 7715,
-      "loss": 21,
-      "loss_pct": 0.3,
-      "status": "SAFE",
-      "dedup_note": "21 duplicates from long repeated sentences; kept first occurrence"
+      "sources": {
+        "proverbs": {"rows": 7736, "join_key": "zolai"},
+        "zolai_proverbs_idioms": {"rows": 4984, "join_key": "zolai"}
+      },
+      "overlap": 5072,
+      "proverbs_only": 2664,
+      "zolai_only": 0,
+      "duplicates_in_source": "~3000",
+      "merged": 7736,
+      "conflicting": 0,
+      "target_rows": 7736,
+      "loss": 0,
+      "loss_pct": 0.0,
+      "balance_check": "7736 = 7736 + 0 ✓",
+      "note": "2664 proverbs-only get NULL for enriched fields (literal_translation, morpheme_breakdown, theme, cultural_context)"
+    },
+    {
+      "target": "translations",
+      "sources": {
+        "translations": {"rows": 212754, "join_key": "(source, target)"},
+        "translations_import": {"rows": 135511, "join_key": "(zolai, english)"}
+      },
+      "matched": 135511,
+      "canonical_only": 77243,
+      "import_only": 0,
+      "duplicates_in_source": "~10000",
+      "max_duplicates": 67,
+      "merged": "~200000",
+      "conflicting": 0,
+      "target_rows": "~200000",
+      "loss": "~12754",
+      "loss_pct": 6.0,
+      "balance_check": "Loss from DISTINCT dedup on (source, target)"
+    },
+    {
+      "target": "word_alignments",
+      "sources": {
+        "word_alignments": {"rows": 385120, "join_key": "(ref, zolai_word, english_word)"},
+        "word_alignments_import": {"rows": 627000, "join_key": "(ref, zo_word, en_word)"}
+      },
+      "unique_triples_import": 224696,
+      "matched": 385120,
+      "import_only_triples": "~242000",
+      "duplicates_in_source": "~200",
+      "max_duplicates": 2,
+      "merged": "~385000",
+      "conflicting": 0,
+      "target_rows": "~385120",
+      "loss": "~200",
+      "loss_pct": 0.05,
+      "balance_check": "Loss from DISTINCT dedup on (ref, zolai_word, english_word)"
     },
     {
       "target": "word_usage",
-      "source_tables": ["word_usage"],
-      "source1_rows": 60365,
-      "matched": 60365,
-      "matched_pct": 100.0,
-      "duplicates": 0,
-      "merged": 0,
-      "enriched": 0,
-      "conflicting_est": 0,
-      "unique_source1": 0,
-      "exceptions": 0,
+      "sources": {
+        "word_usage": {"rows": 60365, "join_key": "(word, book)"}
+      },
+      "overlap_with_zolai": 1848,
+      "word_usage_only": 58517,
+      "zolai_only": 83197,
+      "merged": 60365,
+      "conflicting": 0,
       "target_rows": 60365,
       "loss": 0,
       "loss_pct": 0.0,
-      "status": "SAFE",
-      "note": "zolai_word_usage (85,045 rows) exported to archive, not merged"
-    },
-    {
-      "target": "bible_analysis",
-      "source_tables": ["zolai_bible_analysis"],
-      "source1_rows": 30758,
-      "matched": 30758,
-      "matched_pct": 100.0,
-      "duplicates": 0,
-      "merged": 0,
-      "enriched": 0,
-      "conflicting_est": 0,
-      "unique_source1": 0,
-      "exceptions": 0,
-      "target_rows": 30758,
-      "loss": 0,
-      "loss_pct": 0.0,
-      "status": "SAFE",
-      "note": "bible_context (1,228 rows) exported to archive"
+      "balance_check": "Direct copy, no merge",
+      "orphaned": [
+        {"table": "zolai_word_usage", "rows": 85045, "reason": "Different schema, 1848/60365 overlap"}
+      ]
     }
   ],
-  "single_source_tables": [
-    {"target": "bible_verses", "source": "bible_verses", "rows": 62751, "loss": 0, "loss_pct": 0.0},
-    {"target": "syllable_data", "source": "syllable_data", "rows": 189554, "loss": 0, "loss_pct": 0.0},
-    {"target": "phrases", "source": "phrases", "rows": 5000, "loss": 0, "loss_pct": 0.0},
-    {"target": "word_collocations", "source": "word_collocations", "rows": 5000, "loss": 0, "loss_pct": 0.0},
-    {"target": "articles", "source": "articles", "rows": 6371, "loss": 0, "loss_pct": 0.0},
-    {"target": "songs", "source": "zolai_songs", "rows": 1032, "loss": 0, "loss_pct": 0.0},
-    {"target": "wiki_content", "source": "wiki_content", "rows": 1688, "loss": 0, "loss_pct": 0.0},
-    {"target": "import_log", "source": "jsonl_import_log", "rows": 92, "loss": 0, "loss_pct": 0.0},
-    {"target": "data_audit_log", "source": "data_audit_log", "rows": 24762, "loss": 0, "loss_pct": 0.0},
-    {"target": "audit_findings", "source": "audit_findings", "rows": 713, "loss": 0, "loss_pct": 0.0},
-    {"target": "provenance", "source": "provenance", "rows": 255, "loss": 0, "loss_pct": 0.0},
-    {"target": "tone_sandhi", "source": "zolai_tone_sandhi", "rows": 19, "loss": 0, "loss_pct": 0.0},
-    {"target": "tone_patterns", "source": "tone_patterns", "rows": 118, "loss": 0, "loss_pct": 0.0},
-    {"target": "training_runs", "source": "training_runs", "rows": 2, "loss": 0, "loss_pct": 0.0}
+  "direct_copies": [
+    {"target": "bible_verses", "source": "bible_verses", "rows": 62751, "note": "30569 refs have 2-3 dups; dedup recommended"},
+    {"target": "phrases", "source": "phrases", "rows": 5000},
+    {"target": "syllable_data", "source": "syllable_data", "rows": 189554},
+    {"target": "word_collocations", "source": "word_collocations", "rows": 5000},
+    {"target": "articles", "source": "articles", "rows": 6371},
+    {"target": "songs", "source": "zolai_songs", "rows": 1032, "action": "rename"},
+    {"target": "wiki_content", "source": "wiki_content + wiki_lessons", "rows": 1688, "action": "merge_columns"},
+    {"target": "import_log", "source": "jsonl_import_log", "rows": 92, "action": "rename"},
+    {"target": "data_audit_log", "source": "data_audit_log", "rows": 24762},
+    {"target": "audit_findings", "source": "audit_findings", "rows": 713},
+    {"target": "provenance", "source": "provenance", "rows": 255},
+    {"target": "tone_sandhi", "source": "zolai_tone_sandhi", "rows": 19, "action": "rename"},
+    {"target": "tone_patterns", "source": "tone_patterns", "rows": 118},
+    {"target": "training_runs", "source": "training_runs", "rows": 2},
+    {"target": "bible_analysis", "source": "zolai_bible_analysis", "rows": 30758}
   ],
-  "risk_assessment": {
-    "high_risk": [
-      {"table": "grammar_patterns", "risk": "Orphaned enriched data (13,519 rows with NULL pattern_id)", "mitigation": "Export to JSONL, manual match in Phase 2b"}
-    ],
-    "medium_risk": [
-      {"table": "training_exercises", "risk": "81,805 rows exported to JSONL then dropped", "mitigation": "Verify JSONL completeness before drop"},
-      {"table": "simbu", "risk": "4,163 niche corpus rows", "mitigation": "Archive to JSONL"}
-    ],
-    "low_risk": [
-      {"table": "proverbs", "risk": "21 duplicates removed (0.3%)", "mitigation": "Legitimate dedup"},
-      {"table": "dictionary", "risk": "~5,000 conflicting myanmar values", "mitigation": "COALESCE with source priority"}
-    ]
+  "orphaned_export": [
+    {"table": "zolai_grammar_patterns", "rows": 13519, "reason": "pattern_id=NULL, no FK", "action": "export_jsonl"},
+    {"table": "grammar_patterns_enhanced", "rows": 5597, "reason": "pattern_id=NULL, no FK", "action": "export_jsonl"},
+    {"table": "zolai_word_usage", "rows": 85045, "reason": "Different schema", "action": "export_jsonl"},
+    {"table": "training_exercises", "rows": 81805, "reason": "Generated artifact", "action": "export_jsonl"},
+    {"table": "bible_context", "rows": 1228, "reason": "Different schema", "action": "export_jsonl"},
+    {"table": "simbu", "rows": 4163, "reason": "Niche data", "action": "export_jsonl"},
+    {"table": "wiki_lessons", "rows": 1688, "reason": "Merged into wiki_content", "action": "export_jsonl"},
+    {"table": "grammar_instructions", "rows": 16, "reason": "Merged into grammar_patterns", "action": "merged"}
+  ],
+  "total_orphaned_rows": 193045,
+  "summary": {
+    "total_source_rows": 3162926,
+    "total_target_rows_est": 1574000,
+    "total_loss_est": 17933,
+    "overall_loss_pct": 1.14,
+    "loss_breakdown": {
+      "dictionary_dedup": 0,
+      "dictionary_en_zo_dedup": 0,
+      "vocab_dedup": 4979,
+      "translations_dedup": 12754,
+      "word_alignments_dedup": 200,
+      "other": 0
+    }
   }
 }

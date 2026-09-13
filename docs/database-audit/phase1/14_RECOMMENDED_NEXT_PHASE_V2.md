@@ -1,6 +1,6 @@
 # 14 — Recommended Next Phase V2
 
-> **Date:** 2026-09-13
+> **Date:** 2026-09-13 (Revised)
 > **Status:** Plan — READ-ONLY phase complete
 > **Scope:** Non-destructive migration from 79 tables → 23 tables
 
@@ -19,7 +19,7 @@ The migration must be **safe to run repeatedly** and **fully reversible** until 
 
 ---
 
-## Phase 2a: Backup (Day 1)
+## Phase A: Backup (Day 1)
 
 ```sql
 -- Full database backup
@@ -28,17 +28,49 @@ VACUUM INTO '../data/zolai_backup_20260913.db';
 SELECT COUNT(*) FROM zolai_backup_20260913.sqlite_master WHERE type='table';
 ```
 
-**Checkpoint:** Backup exists, verifiable, matches source.
+**Checkpoint:** Backup exists, verifiable, matches source (79 tables, ~3.16M rows).
 
 ---
 
-## Phase 2b: Create Target Tables (Day 1–2)
+## Phase B: Create New Canonical Tables (Additive)
 
-For each target table:
+All new tables use `_v2` suffix during migration to avoid name collisions with existing tables. After validation, views are created to map old names to new.
+
+### Migration Order (Dependency-Based)
+
+| Step | Target Table | Source Tables | Est. Rows | Est. Time | Merge Strategy |
+|------|-------------|---------------|-----------|-----------|----------------|
+| 1 | `bible_verses_v2` | `bible_verses` | 62,751 | 5s | Direct copy + dedup by (ref) |
+| 2 | `dictionary_v2` | `dictionary` + `dictionary_import` | 103,303 | 10s | COALESCE(myanmar) |
+| 3 | `dictionary_en_zo_v2` | `dictionary_en_zo` + `dictionary_en_zo_import` | 113,750 | 10s | COALESCE(myanmar) |
+| 4 | `grammar_patterns_v2` | `grammar_patterns` + `grammar_instructions` | ~5,563 | 10s | MERGE instructions as instruction_text |
+| 5 | `translations_v2` | `translations` + `translations_import` | ~200,000 | 15s | Dedup by (source, target) |
+| 6 | `word_alignments_v2` | `word_alignments` + `word_alignments_import` | ~400,000 | 20s | COALESCE(position) |
+| 7 | `vocab_v2` | `vocab` + `zolai_vocabulary` | ~114,000 | 10s | COALESCE(myanmar) |
+| 8 | `proverbs_v2` | `proverbs` + `zolai_proverbs_idioms` | ~7,736 | 5s | COALESCE enriched fields |
+| 9 | `phrases_v2` | `phrases` | 5,000 | 5s | Direct copy |
+| 10 | `word_usage_v2` | `word_usage` | 60,365 | 5s | Direct copy |
+| 11 | `syllable_data_v2` | `syllable_data` | 189,554 | 10s | Direct copy |
+| 12 | `word_collocations_v2` | `word_collocations` | 5,000 | 5s | Direct copy |
+| 13 | `bible_analysis_v2` | `zolai_bible_analysis` | 30,758 | 10s | Direct copy |
+| 14 | `articles_v2` | `articles` | 6,371 | 5s | Direct copy |
+| 15 | `songs_v2` | `zolai_songs` | 1,032 | 5s | Rename (drop prefix) |
+| 16 | `wiki_content_v2` | `wiki_content` + `wiki_lessons` | ~1,688 | 5s | MERGE grammar_patterns/vocabulary_list |
+| 17 | `import_log_v2` | `jsonl_import_log` | 92 | 1s | Rename |
+| 18 | `data_audit_log_v2` | `data_audit_log` | 24,762 | 5s | Direct copy |
+| 19 | `audit_findings_v2` | `audit_findings` | 713 | 1s | Direct copy |
+| 20 | `provenance_v2` | `provenance` | 255 | 1s | Direct copy |
+| 21 | `tone_sandhi_v2` | `zolai_tone_sandhi` | 19 | 1s | Rename |
+| 22 | `tone_patterns_v2` | `tone_patterns` | 118 | 1s | Direct copy |
+| 23 | `training_runs_v2` | `training_runs` | 2 | 1s | Direct copy |
+
+**Total estimated time:** ~3 minutes
+
+### Key Migration SQL Examples
 
 ```sql
+-- Step 2: Dictionary (with COALESCE for myanmar)
 BEGIN TRANSACTION;
--- 1. Create target table (from 13_PROPOSED_TARGET_SCHEMA_V2.md)
 CREATE TABLE dictionary_v2 (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     zolai TEXT NOT NULL,
@@ -53,129 +85,173 @@ CREATE TABLE dictionary_v2 (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
--- 2. Insert data with deduplication
 INSERT INTO dictionary_v2 (zolai, english, english_clean, pos, myanmar, source, zvs_compliance, entry_version, is_deleted, created_at)
 SELECT DISTINCT
     d.zolai,
     d.english,
     d.english_clean,
     d.pos,
-    COALESCE(d.myanmar, di.myanmar) as myanmar,
+    COALESCE(d.myanmar, di.myanmar_word) as myanmar,
     d.source,
     d.zvs_compliance_status,
     d.entry_version,
     d.is_deleted,
-    d.updated_at
+    d.imported_at as created_at
 FROM dictionary d
 LEFT JOIN dictionary_import di ON d.zolai = di.zolai;
+SELECT COUNT(*) as target_count FROM dictionary_v2;  -- Expected: ~103,303
+COMMIT;
 
--- 3. Validate
-SELECT COUNT(*) as target_count FROM dictionary_v2;
--- Expected: ~103,303 (canonical only, no import-only extras)
+-- Step 7: Vocab (with COALESCE from zolai_vocabulary)
+BEGIN TRANSACTION;
+CREATE TABLE vocab_v2 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    headword TEXT NOT NULL,
+    english TEXT,
+    frequency INTEGER,
+    books TEXT,
+    examples TEXT,
+    myanmar TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO vocab_v2 (headword, english, frequency, books, examples, myanmar)
+SELECT DISTINCT
+    v.headword,
+    v.english,
+    v.frequency,
+    v.books,
+    v.examples,
+    COALESCE(v.myanmar, z.myanmar) as myanmar
+FROM vocab v
+LEFT JOIN zolai_vocabulary z ON v.headword = z.zolai;
+SELECT COUNT(*) as target_count FROM vocab_v2;  -- Expected: ~114,000
+COMMIT;
 
+-- Step 4: Grammar patterns (with instruction merge)
+BEGIN TRANSACTION;
+CREATE TABLE grammar_patterns_v2 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern_id TEXT NOT NULL,
+    pattern_text TEXT NOT NULL,
+    description TEXT,
+    function TEXT,
+    examples TEXT,
+    frequency INTEGER,
+    myanmar TEXT,
+    tense TEXT,
+    aspect TEXT,
+    negation_type TEXT,
+    question_type TEXT,
+    source_category TEXT,
+    instruction_text TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+INSERT INTO grammar_patterns_v2 (pattern_id, pattern_text, description, function, examples, frequency, myanmar, created_at)
+SELECT pattern_id, pattern, description, function, examples, frequency, myanmar, imported_at as created_at
+FROM grammar_patterns;
+-- Merge grammar_instructions as rows with pattern_id = 'INSTRUCTION_N'
+INSERT INTO grammar_patterns_v2 (pattern_id, pattern_text, description, instruction_text, created_at)
+SELECT
+    'INSTRUCTION_' || id,
+    instruction,
+    'Grammar instruction from training data',
+    instruction,
+    imported_at as created_at
+FROM grammar_instructions;
 COMMIT;
 ```
 
-**Estimated time per table:** 5–30 seconds (depends on row count and join complexity).
-
 ---
 
-## Phase 2c: Migration Order
+## Phase C: Copy + Validate Data
 
-Tables are migrated in dependency order:
-
-| Step | Target Table | Source Tables | Est. Rows | Est. Time |
-|------|-------------|---------------|-----------|-----------|
-| 1 | `bible_verses` | `bible_verses` | 62,751 | 5s |
-| 2 | `dictionary` | `dictionary` + `dictionary_import` | 103,303 | 10s |
-| 3 | `dictionary_en_zo` | `dictionary_en_zo` + `dictionary_en_zo_import` | 113,750 | 10s |
-| 4 | `grammar_patterns` | `grammar_patterns` + `zolai_grammar_patterns` + `grammar_patterns_enhanced` | ~13,519 | 10s |
-| 5 | `translations` | `translations` + `translations_import` | 212,754 | 15s |
-| 6 | `word_alignments` | `word_alignments` + `word_alignments_import` | ~400,000 | 20s |
-| 7 | `vocab` | `vocab` + `zolai_vocabulary` | 112,279 | 10s |
-| 8 | `proverbs` | `proverbs` + `zolai_proverbs_idioms` | ~7,736 | 5s |
-| 9 | `phrases` | `phrases` + imports | ~5,000 | 5s |
-| 10 | `word_usage` | `word_usage` + `zolai_word_usage` | ~85,045 | 10s |
-| 11 | `syllable_data` | `syllable_data` | 189,554 | 10s |
-| 12 | `word_collocations` | `word_collocations` | 5,000 | 5s |
-| 13 | `bible_analysis` | `zolai_bible_analysis` + `bible_context` | ~32,000 | 10s |
-| 14 | `articles` | `articles` | 6,371 | 5s |
-| 15 | `songs` | `zolai_songs` | 1,032 | 5s |
-| 16 | `wiki_content` | `wiki_content` | 1,688 | 5s |
-| 17 | `import_log` | `jsonl_import_log` | 92 | 1s |
-| 18 | `data_audit_log` | `data_audit_log` | 24,762 | 5s |
-| 19 | `audit_findings` | `audit_findings` | 713 | 1s |
-| 20 | `provenance` | `provenance` | 255 | 1s |
-| 21 | `tone_sandhi` | `zolai_tone_sandhi` | 19 | 1s |
-| 22 | `tone_patterns` | `tone_patterns` | 118 | 1s |
-| 23 | `training_runs` | `training_runs` | 2 | 1s |
-
-**Total estimated time:** ~3 minutes
-
----
-
-## Phase 2d: Validation (Day 2)
-
-After all tables are created, run these checks:
+After each table is created:
+1. **Row count check** — target count must match expected (±1%)
+2. **NULL key check** — business key columns must not be NULL
+3. **Uniqueness check** — business key must be unique (where expected)
 
 ```sql
--- 1. Row count comparison
-SELECT 
-    'dictionary_v2' as target, 
-    (SELECT COUNT(*) FROM dictionary_v2) as target_rows,
-    (SELECT COUNT(*) FROM dictionary) as source_rows;
+-- Validation template for each table
+SELECT
+    'dictionary_v2' as table_name,
+    (SELECT COUNT(*) FROM dictionary_v2) as target_count,
+    (SELECT COUNT(*) FROM dictionary) as source_count,
+    CASE WHEN (SELECT COUNT(*) FROM dictionary_v2) = (SELECT COUNT(*) FROM dictionary)
+         THEN 'PASS' ELSE 'FAIL' END as status;
 
--- 2. Uniqueness checks
-SELECT zolai, COUNT(*) FROM dictionary_v2 GROUP BY zolai HAVING COUNT(*) > 1;
-
--- 3. Null key checks
-SELECT COUNT(*) FROM dictionary_v2 WHERE zolai IS NULL;
-
--- 4. Cross-table referential integrity
-SELECT COUNT(*) FROM word_alignments_v2 wa
-LEFT JOIN bible_verses_v2 bv ON wa.ref = bv.ref
-WHERE bv.ref IS NULL;
+-- NULL key checks
+SELECT COUNT(*) FROM dictionary_v2 WHERE zolai IS NULL;  -- Expected: 0
+SELECT COUNT(*) FROM vocab_v2 WHERE headword IS NULL;     -- Expected: 0
+SELECT COUNT(*) FROM bible_verses_v2 WHERE ref IS NULL;    -- Expected: 0
 ```
 
 ---
 
-## Phase 2e: View Layer (Day 2)
+## Phase D: Add Versioning Columns
 
-Create convenience views that map old table names to new:
+After all target tables exist, add versioning columns:
 
 ```sql
--- Backward compatibility views
-CREATE VIEW dictionary_old AS SELECT * FROM dictionary;
-CREATE VIEW vocab_old AS SELECT * FROM vocab;
--- etc.
+-- Add versioning to all target tables
+ALTER TABLE dictionary_v2 ADD COLUMN version INTEGER DEFAULT 1;
+ALTER TABLE vocab_v2 ADD COLUMN version INTEGER DEFAULT 1;
+-- ... (all 23 tables)
 ```
 
 ---
 
-## Phase 3: Archive (Day 3–5, manual approval)
+## Phase E: Update Application Layer
 
-Only after 1 week of production use:
+1. **Create views** mapping old names to new:
+```sql
+CREATE VIEW dictionary AS SELECT * FROM dictionary_v2;
+CREATE VIEW vocab AS SELECT * FROM vocab_v2;
+-- ... (all 23 tables)
+```
+
+2. **Update zolai-core config** to use new table names
+3. **Run smoke tests** — dictionary lookup, bible verse search, vocab quiz
+
+---
+
+## Phase F: Archive Old Tables (Rename, Not Drop)
+
+Only after 1 week of production use and manual approval:
 
 ```sql
 -- Rename old tables (non-destructive)
 ALTER TABLE dictionary RENAME TO archived_dictionary;
 ALTER TABLE dictionary_import RENAME TO archived_dictionary_import;
--- etc.
+ALTER TABLE zolai_vocabulary RENAME TO archived_zolai_vocabulary;
+-- ... (all old tables)
 ```
+
+**Tables to archive (not drop):**
+- 27 `*_import` staging tables
+- 17 empty/placeholder tables
+- `grammar_patterns_enhanced` (5,597 rows)
+- `zolai_grammar_patterns` (13,519 rows)
+- `zolai_word_usage` (85,045 rows)
+- `training_exercises` (81,805 rows)
+- `simbu` (4,163 rows)
+- `bible_context` (1,228 rows)
+- `wiki_lessons` (1,688 rows)
+- 5 FTS tables
 
 ---
 
-## Phase 4: Cleanup (Day 30+, manual approval)
+## Phase G: Export from Canonical
 
-Only after confirming no rollback needed:
+Before dropping archived tables, export unique data to JSONL:
 
-```sql
--- Drop archived tables
-DROP TABLE archived_dictionary;
-DROP TABLE archived_dictionary_import;
--- etc.
-```
+| Export | Source | Format | Est. Size |
+|--------|--------|--------|-----------|
+| `zolai_grammar_enriched.jsonl` | `zolai_grammar_patterns` | JSONL | ~13K rows |
+| `word_usage_enriched.jsonl` | `zolai_word_usage` | JSONL | ~85K rows |
+| `training_exercises.jsonl` | `training_exercises` | JSONL | ~82K rows |
+| `simbu.jsonl` | `simbu` | JSONL | ~4K rows |
+| `bible_context.jsonl` | `bible_context` | JSONL | ~1.2K rows |
 
 ---
 
@@ -183,15 +259,15 @@ DROP TABLE archived_dictionary_import;
 
 | Phase | Rollback Action | Data Loss Risk |
 |-------|----------------|----------------|
-| 2a (Backup) | Delete backup file | None |
-| 2b (Create target) | DROP new tables | None |
-| 2c (Migrate) | DROP new tables, old tables untouched | None |
-| 2d (Validate) | No changes made | None |
-| 2e (Views) | DROP views | None |
-| 3 (Archive) | ALTER TABLE ... RENAME back | None |
-| 4 (Cleanup) | Restore from backup | Full restore required |
+| A (Backup) | Delete backup file | None |
+| B (Create target) | DROP _v2 tables | None |
+| C (Copy+Validate) | DROP _v2 tables, old tables untouched | None |
+| D (Versioning) | ALTER TABLE DROP COLUMN | None |
+| E (Views) | DROP views | None |
+| F (Archive) | ALTER TABLE ... RENAME back | None |
+| G (Export) | Restore from backup | Full restore required |
 
-**Key invariant:** Old tables are never modified until Phase 3. The migration is purely additive.
+**Key invariant:** Old tables are never modified until Phase F. The migration is purely additive.
 
 ---
 
@@ -199,13 +275,13 @@ DROP TABLE archived_dictionary_import;
 
 | Phase | Duration | Dependencies |
 |-------|----------|-------------|
-| 2a (Backup) | 1 hour | None |
-| 2b + 2c (Create + Migrate) | 1 day | Phase 2a |
-| 2d (Validate) | 0.5 day | Phase 2c |
-| 2e (Views) | 0.5 day | Phase 2c |
+| A (Backup) | 1 hour | None |
+| B + C (Create + Migrate) | 1 day | Phase A |
+| D (Versioning) | 0.5 day | Phase C |
+| E (Views) | 0.5 day | Phase C |
 | **Phase 2 Total** | **2–3 days** | |
-| Phase 3 (Archive) | 1 day | 1 week after Phase 2 |
-| Phase 4 (Cleanup) | 0.5 day | 30 days after Phase 3 |
+| F (Archive) | 1 day | 1 week after Phase 2 |
+| G (Export) | 0.5 day | Phase F |
 | **Full Migration** | **~5 weeks** | |
 
 ---
@@ -218,3 +294,4 @@ DROP TABLE archived_dictionary_import;
 4. **Old tables preserved** — full rollback capability
 5. **No schema changes to source** — only new tables created
 6. **Staging tables preserved** — import pipeline continues to work
+7. **Critical findings documented** — grammar_patterns FK gap, bible_verses ref duplication, zolai_word_usage schema divergence
