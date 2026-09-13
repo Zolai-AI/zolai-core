@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..shared.utils import KNOWLEDGE_DIR, load_jsonl, save_json
+from ..shared.utils import KNOWLEDGE_DIR, save_json
 
 logger = logging.getLogger(__name__)
 
@@ -34,25 +34,45 @@ class DictionaryManager:
         self._load()
 
     def _load(self):
-        """Load dictionary from file."""
-        if self.dict_path.exists():
+        """Load dictionary from the canonical DB (DB-first serving path).
+
+        Search reads come from the ``dictionary`` table rather than a JSON/JSONL
+        file. A local JSON file is only used as a legacy overlay when the DB has
+        no rows (defensive, e.g. pointing at a standalone module copy).
+        """
+        try:
+            from ..data.repositories import get_repositories
+
+            repos = get_repositories()
+            entries = repos["dictionary"].all_records(
+                ["zolai", "english", "pos", "source"]
+            )
+            self.entries = [
+                {
+                    "zolai": (e.get("zolai") or "").strip(),
+                    "english": (e.get("english") or "").strip(),
+                    "pos": e.get("pos") or "",
+                    "source": e.get("source") or "",
+                }
+                for e in entries
+            ]
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Dictionary DB load failed (%s); falling back to file", exc)
+            self.entries = []
+        if not self.entries and self.dict_path.exists():
             try:
-                if self.dict_path.suffix == '.jsonl':
-                    self.entries = load_jsonl(self.dict_path)
-                else:
-                    data = json.loads(self.dict_path.read_text(encoding='utf-8'))
-                    if isinstance(data, list):
-                        self.entries = data
-                    elif isinstance(data, dict):
-                        # Convert dict format {en: zo} to entries
-                        self.entries = [
-                            {"zolai": v, "english": k, "pos": "", "source": "dict"}
-                            for k, v in data.items()
-                        ]
-                self._rebuild_index()
-                logger.info(f"Loaded {len(self.entries)} dictionary entries")
+                data = json.loads(self.dict_path.read_text(encoding='utf-8'))
+                if isinstance(data, list):
+                    self.entries = data
+                elif isinstance(data, dict):
+                    self.entries = [
+                        {"zolai": v, "english": k, "pos": "", "source": "dict"}
+                        for k, v in data.items()
+                    ]
             except Exception as e:
-                logger.warning(f"Error loading dictionary: {e}")
+                logger.warning(f"Error loading dictionary file: {e}")
+        self._rebuild_index()
+        logger.info(f"Loaded {len(self.entries)} dictionary entries (DB-first)")
 
     def _rebuild_index(self):
         """Rebuild search index."""

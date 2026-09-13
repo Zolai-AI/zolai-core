@@ -37,46 +37,31 @@ class WordAttestation:
         self._load_()
 
     def _load_bible(self) -> None:
-        bible_path = DATA_DIR / "bible" / "parallel_corpus_v1.jsonl"
-        if not bible_path.exists():
-            return
-        with open(bible_path, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    entry = json.loads(line)
-                    zo = entry.get("zo_tdb77") or ""
-                    words = re.findall(r"\b[a-zA-Z\u0100-\u024F'-]+\b", zo.lower())
-                    self.bible_words.update(w for w in words if len(w) >= 2)
-                except (json.JSONDecodeError, AttributeError):
-                    continue
+        from ..data.repositories import get_repositories
+
+        repos = get_repositories()
+        for r in repos["bible"].all_records(["zo_tdb77", "zo_tedim2010"]):
+            zo = (r.get("zo_tdb77") or r.get("zo_tedim2010") or "")
+            words = re.findall(r"\b[a-zA-Z\u0100-\u024F'-]+\b", zo.lower())
+            self.bible_words.update(w for w in words if len(w) >= 2)
 
     def _load_dict(self) -> None:
-        dict_path = DATA_DIR / "dictionary" / "processed" / "dict_zo_en_master_v1.jsonl"
-        if not dict_path.exists():
-            return
-        with open(dict_path, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    entry = json.loads(line)
-                    zolai = str(entry.get("zolai", "")).lower().strip()
-                    if zolai and len(zolai) >= 2:
-                        self.dict_words.add(zolai)
-                except (json.JSONDecodeError, AttributeError):
-                    continue
+        from ..data.repositories import get_repositories
+
+        repos = get_repositories()
+        for r in repos["dictionary"].all_records(["zolai"]):
+            zolai = (r.get("zolai") or "").lower().strip()
+            if zolai and len(zolai) >= 2:
+                self.dict_words.add(zolai)
 
     def _load_parallel(self) -> None:
-        parallel_path = DATA_DIR / "parallel" / "zo_en_pairs_combined_v1.jsonl"
-        if not parallel_path.exists():
-            return
-        with open(parallel_path, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    entry = json.loads(line)
-                    zo = entry.get("zolai", "")
-                    words = re.findall(r"\b[a-zA-Z\u0100-\u024F'-]+\b", zo.lower())
-                    self.corpus_words.update(w for w in words if len(w) >= 2)
-                except (json.JSONDecodeError, AttributeError):
-                    continue
+        from ..data.repositories import get_repositories
+
+        repos = get_repositories()
+        for r in repos["translation"].all_records(["target"]):
+            zo = r.get("target") or ""
+            words = re.findall(r"\b[a-zA-Z\u0100-\u024F'-]+\b", zo.lower())
+            self.corpus_words.update(w for w in words if len(w) >= 2)
 
     def _load_corpus(self) -> None:
         corpus_dir = DATA_DIR / "online" / "-corpus"

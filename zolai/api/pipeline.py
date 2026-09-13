@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import random
 import subprocess
 import uuid
 from pathlib import Path
@@ -20,6 +19,8 @@ _jobs: dict[str, dict] = {}
 ROOT = Path(__file__).parent.parent.parent  # zolai project root
 SCRIPTS = ROOT / "scripts"
 DATA = ROOT / "data"
+
+_db: object | None = None
 
 
 # ── Models ─────────────────────────────────────────────────────────────────
@@ -125,27 +126,20 @@ async def pipeline_trigger():
 
 @router.get("/vocab/daily")
 async def vocab_daily(level: str = "a1"):
-    """Return a random vocab word for the daily lesson."""
-    dict_path = DATA / "dictionary" / "processed" / "dict_master_v2.json"
-    if not dict_path.exists():
+    """Return a random vocab word for the daily lesson (DB-backed)."""
+    from ..data.repositories import get_repositories
+
+    repos = get_repositories()
+    row = repos["dictionary"].random_row()
+    if not row or not row.get("zolai"):
         raise HTTPException(status_code=503, detail="Dictionary not available")
-
-    with open(dict_path, encoding="utf-8") as f:
-        entries = json.load(f)
-
-    # Filter by level if tagged, else use all
-    pool = [e for e in entries if e.get("level", "a1").lower() == level.lower()]
-    if not pool:
-        pool = entries
-
-    entry = random.choice(pool)
     return {
-        "word": entry.get("zolai", ""),
-        "english": entry.get("english", ""),
-        "pos": entry.get("pos", ""),
-        "example_zo": entry.get("example", ""),
-        "example_en": entry.get("example_en", ""),
-        "grammar_tip": entry.get("notes", ""),
+        "word": row.get("zolai", ""),
+        "english": row.get("english", ""),
+        "pos": row.get("pos", ""),
+        "example_zo": "",
+        "example_en": "",
+        "grammar_tip": "",
         "level": level,
     }
 
@@ -220,13 +214,19 @@ class CorpusAddRequest(BaseModel):
 
 @router.post("/dictionary/add")
 async def dictionary_add(req: DictAddRequest):
-    dict_path = DATA / "dictionary" / "processed" / "dict_master_v2.json"
-    if not dict_path.exists():
-        raise HTTPException(status_code=503, detail="Dictionary not available")
-    entries = json.loads(dict_path.read_text())
-    entries.append(req.model_dump())
-    dict_path.write_text(json.dumps(entries, ensure_ascii=False, indent=2))
-    return {"status": "added", "word": req.zolai}
+    from ..data.repositories import get_repositories
+
+    repos = get_repositories()
+    entry_id = repos["dictionary"].create(
+        {
+            "zolai": req.zolai.strip(),
+            "english": req.english.strip(),
+            "pos": req.pos,
+            "source": req.source,
+        },
+        user="community",
+    )
+    return {"status": "added", "word": req.zolai, "id": entry_id}
 
 
 @router.post("/corpus/add")

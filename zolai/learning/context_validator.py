@@ -4,7 +4,6 @@ Context Validator — checks if sentences make sense together.
 CRITICAL: Grammar correctness ≠ Context correctness.
 The AI must learn from real context (Bible), not isolated sentences.
 """
-import json
 from pathlib import Path
 from typing import Optional
 
@@ -20,29 +19,19 @@ class ContextValidator:
         self._load_bible_contexts()
 
     def _load_bible_contexts(self):
-        """Load Bible verses as context."""
-        bible_path = DATA_DIR / "bible" / "parallel_corpus_v1.jsonl"
-        if not bible_path.exists():
-            return
+        """Load Bible verses as context (DB-backed)."""
+        from ..data.repositories import get_repositories
 
-        try:
-            with open(bible_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    try:
-                        entry = json.loads(line)
-                        zo = (entry.get('zo_tdb77') or '').strip()
-                        en = (entry.get('en_kJV') or '').strip()
-                        ref = entry.get('ref', '')
-                        if zo and ref:
-                            self.bible_verses.append({
-                                'ref': ref,
-                                'zolai': zo,
-                                'english': en,
-                            })
-                    except json.JSONDecodeError:
-                        continue
-        except Exception:
-            pass
+        repos = get_repositories()
+        for r in repos["bible"].all_records(["ref", "zo_tdb77", "zo_tedim2010", "en_kJV"]):
+            zo = (r.get("zo_tdb77") or r.get("zo_tedim2010") or "").strip()
+            if not zo:
+                continue
+            self.bible_verses.append({
+                'ref': r.get('ref', ''),
+                'zolai': zo,
+                'english': r.get('en_kJV', ''),
+            })
 
     def add_to_conversation(self, role: str, text: str):
         """Add a turn to conversation history."""

@@ -578,6 +578,31 @@ class BaseRepository:
             ).fetchall()
         return [row[0] for row in rows]
 
+    def random_row(self) -> dict[str, Any] | None:
+        """Return an arbitrary row (SELECT ... ORDER BY RANDOM() LIMIT 1)."""
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    f"SELECT * FROM {self._table_name} ORDER BY RANDOM() LIMIT 1"
+                )
+            ).first()
+        return dict(row._mapping) if row else None
+
+    def all_records(self, columns: list[str] | None = None) -> list[dict[str, Any]]:
+        """Return all rows in the table as dicts (optionally limited columns).
+
+        Used by corpus/validator modules that previously iterated a JSONL file.
+        """
+        if columns:
+            query = self.table.select().with_only_columns(
+                *[self.table.c[c] for c in columns]
+            )
+        else:
+            query = self.table.select()
+        with self._engine.connect() as conn:
+            rows = conn.execute(query).fetchall()
+        return [self._row_to_dict(r) for r in rows]
+
     def table_info(self) -> dict[str, Any]:
         """Get table schema information."""
         inspector = sa_inspect(self._engine)

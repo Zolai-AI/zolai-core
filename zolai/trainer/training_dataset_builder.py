@@ -1,7 +1,8 @@
 """
-Training Dataset Builder — creates EN↔ZO training pairs from Bible + .
+Training Dataset Builder — creates EN↔ZO training pairs from Bible + parallel.
 
-Exports to HuggingFace/Kaggle/Alpaca format.
+Exports to HuggingFace/Kaggle/Alpaca format. Source pairs come from the
+canonical DB tables (bible_verses + translations), not raw JSONL.
 """
 import json
 import logging
@@ -22,43 +23,33 @@ class TrainingDatasetBuilder:
         self._load_data()
 
     def _load_data(self):
-        """Load Bible and parallel corpus."""
-        # Load Bible
-        bible_path = DATA_DIR / "bible" / "parallel_corpus_v1.jsonl"
-        if bible_path.exists():
-            with open(bible_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    try:
-                        entry = json.loads(line)
-                        zo = entry.get('zo_tdb77') or ''
-                        en = entry.get('en_kJV') or ''
-                        if zo.strip() and en.strip():
-                            self.bible_pairs.append({
-                                'zolai': zo.strip(),
-                                'english': en.strip(),
-                                'source': 'bible',
-                                'reference': entry.get('ref', ''),
-                            })
-                    except json.JSONDecodeError:
-                        continue
+        """Load Bible and parallel corpus from the canonical DB."""
+        from ..data.repositories import get_repositories
 
-        # Load parallel corpus
-        parallel_path = DATA_DIR / "parallel" / "zo_en_pairs_combined_v1.jsonl"
-        if parallel_path.exists():
-            with open(parallel_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    try:
-                        entry = json.loads(line)
-                        zo = entry.get('zolai', '')
-                        en = entry.get('english', '')
-                        if zo.strip() and en.strip():
-                            self.parallel_pairs.append({
-                                'zolai': zo.strip(),
-                                'english': en.strip(),
-                                'source': entry.get('source', 'parallel'),
-                            })
-                    except json.JSONDecodeError:
-                        continue
+        repos = get_repositories()
+
+        # Bible: bible_verses (zo_tdb77 / en_kJV / ref)
+        for r in repos["bible"].all_records(["zo_tdb77", "en_kJV", "ref"]):
+            zo = r.get("zo_tdb77") or ""
+            en = r.get("en_kJV") or ""
+            if zo.strip() and en.strip():
+                self.bible_pairs.append({
+                    'zolai': zo.strip(),
+                    'english': en.strip(),
+                    'source': 'bible',
+                    'reference': r.get('ref', ''),
+                })
+
+        # Parallel corpus: translations rows where the target holds Zolai.
+        for r in repos["translation"].all_records(["source", "target", "direction", "reference"]):
+            zo = r.get("target") or ""
+            en = r.get("source") or ""
+            if zo.strip() and en.strip():
+                self.parallel_pairs.append({
+                    'zolai': zo.strip(),
+                    'english': en.strip(),
+                    'source': r.get("direction") or "parallel",
+                })
 
         log.info(
             "Loaded %d bible + %d parallel pairs",

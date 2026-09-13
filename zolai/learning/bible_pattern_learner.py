@@ -3,14 +3,10 @@ Bible Pattern Learner — extracts real Zolai sentence patterns from Bible.
 
 This is the GROUND TRUTH. The AI must NEVER guess — only use attested patterns.
 """
-import json
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
-
-BIBLE_PATH = Path(__file__).parent.parent.parent.parent / "data" / "bible" / "parallel_corpus_v1.jsonl"
 
 
 @dataclass
@@ -35,20 +31,19 @@ class BiblePatternLearner:
         self._load_bible()
 
     def _load_bible(self):
-        """Load Bible parallel corpus."""
-        if not BIBLE_PATH.exists():
-            print(f"Bible not found at {BIBLE_PATH}")
-            return
-        with open(BIBLE_PATH, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    entry = json.loads(line)
-                    # Skip verses with None Zolai text
-                    zo = entry.get('zo_tdb77') or ''
-                    if zo.strip():
-                        self.verses.append(entry)
-        print(f"Loaded {len(self.verses)} Bible verses (filtered None)")
+        """Load Bible parallel corpus (DB-backed)."""
+        from ..data.repositories import get_repositories
+
+        repos = get_repositories()
+        for r in repos["bible"].all_records(["ref", "zo_tdb77", "en_kJV"]):
+            zo = r.get("zo_tdb77") or ""
+            if zo.strip():
+                self.verses.append({
+                    "ref": r.get("ref", ""),
+                    "zo_tdb77": zo,
+                    "en_kJV": r.get("en_kJV", ""),
+                })
+        print(f"Loaded {len(self.verses)} Bible verses from DB")
 
     def extract_patterns(self):
         """Extract all pattern types from Bible."""
@@ -149,7 +144,7 @@ class BiblePatternLearner:
 
     def build_context_for_word(self, word: str, limit: int = 3, max_tokens: int = 200) -> str:
         """Build context showing real Bible sentences containing a word.
-        
+
         Args:
             word: Word to search for
             limit: Max sentences to return (default 3 to save tokens)
@@ -186,7 +181,7 @@ class BiblePatternLearner:
 
     def build_pattern_context(self, pattern_type: str = 'sov', limit: int = 3, max_tokens: int = 200) -> str:
         """Build context showing real pattern examples.
-        
+
         Args:
             pattern_type: Pattern type to show
             limit: Max examples (default 3 to save tokens)
