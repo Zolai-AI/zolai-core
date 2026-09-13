@@ -29,6 +29,9 @@ from .integration import SyllableAwarePOS, SyllableEmbeddings, ZolaiTokenizer
 # Tokenizer Training (SylBreak4All M8)
 from .tokenizer_training import SyllableTokenizerTrainer
 
+# Human Annotation (SylBreak4All M9)
+from .annotation import SyllableAnnotator
+
 __all__ = [
     "Boundary",
     "ZolaiSyllabifier",
@@ -39,6 +42,7 @@ __all__ = [
     "SyllableAwarePOS",
     "SyllableEmbeddings",
     "SyllableTokenizerTrainer",
+    "SyllableAnnotator",
 ]
 
 
