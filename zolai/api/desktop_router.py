@@ -267,21 +267,45 @@ async def table_schema(table: str = Query(...)):
 # DICTIONARY TOOLS
 # ═══════════════════════════════════════════
 
-@ router.get("/dict/browse")
-async def dict_browse(limit: int = 50):
-    """Browse top dictionary entries."""
+@router.get("/dict/browse")
+async def dict_browse(limit: int = 50, offset: int = 0, q: str = None):
+    """Browse dictionary entries with pagination and optional letter filter."""
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute(
-            "SELECT zolai, english_clean, myanmar, pos, source FROM dictionary ORDER BY zolai LIMIT ?",
-            (limit,),
-        )
+        
+        if q:
+            # Letter filter - search for entries starting with the letter
+            cur.execute(
+                "SELECT zolai, english_clean, myanmar, pos, source FROM dictionary "
+                "WHERE zolai LIKE ? ORDER BY zolai LIMIT ? OFFSET ?",
+                (f"{q}%", limit, offset),
+            )
+        else:
+            cur.execute(
+                "SELECT zolai, english_clean, myanmar, pos, source FROM dictionary "
+                "ORDER BY zolai LIMIT ? OFFSET ?",
+                (limit, offset),
+            )
+        
         rows = cur.fetchall()
         cols = [d[0] for d in cur.description]
+        
+        # Get total count for pagination
+        if q:
+            cur.execute("SELECT COUNT(*) FROM dictionary WHERE zolai LIKE ?", (f"{q}%",))
+        else:
+            cur.execute("SELECT COUNT(*) FROM dictionary")
+        total = cur.fetchone()[0]
+        
         cur.close()
         conn.close()
-        return {"results": [dict(zip(cols, r)) for r in rows]}
+        return {
+            "results": [dict(zip(cols, r)) for r in rows],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
     except Exception as e:
         return {"error": str(e)}
 
