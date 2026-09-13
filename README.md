@@ -104,9 +104,9 @@ usage = db.get_word_usage("khem")
 
 | Table | Rows | Purpose |
 |-------|------|---------|
-| dictionary | 103,150 | Zolai→English |
-| dictionary_en_zo | 113,739 | English→Zolai |
-| bible_verses | 31,649 | Parallel EN/ZO/MY |
+| dictionary | 103,303 | Zolai→English |
+| dictionary_en_zo | 113,750 | English→Zolai |
+| bible_verses | 62,751 | Parallel EN/ZO/MY |
 | grammar_patterns | 5,547 | Sentence patterns |
 | vocab | 94,458 | Vocabulary index |
 | syllable_data | 189,554 | Syllable segmentation |
