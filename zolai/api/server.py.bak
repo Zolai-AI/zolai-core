@@ -272,36 +272,82 @@ def create_app() -> FastAPI:
         yield
         logger.info("Zolai API shutting down")
 
-    app = FastAPI(
-        title="Zolai Toolkit API",
-        description="REST API for Zolai language data pipeline",
-        version="1.0.0",
-        lifespan=lifespan,
+    # API Key Configuration
+API_KEY_NAME = "X-API-Key"
+API_KEY_QUERY = "api_key"
+API_KEYS = {"dev-key-123": "development", "admin-key-456": "admin"}  # In production, use env var or secure store
+
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+api_key_query = APIKeyQuery(name=API_KEY_QUERY, auto_error=False)
+
+from fastapi import Request, Depends
+from fastapi.security import APIKeyHeader, APIKeyQuery
+from fastapi.responses import JSONResponse
+
+async def get_api_key(
+    api_key_header_val: str = Depends(api_key_header),
+    api_key_query_val: str = Depends(api_key_query),
+):
+    """Validate API key from header or query parameter."""
+    api_key = api_key_header_val or api_key_query_val
+    if api_key and api_key in API_KEYS:
+        return API_KEYS[api_key]  # Return role
+    raise HTTPException(status_code=403, detail="Invalid or missing API key")
+
+# Optional: public endpoints that don't require auth
+PUBLIC_ENDPOINTS = {
+    "/health", "/docs", "/openapi.json", "/redoc",
+    "/chat/models", "/chat/chat", "/chat/chat/stream", "/chat",
+    "/chat/zolai",  # Zolai chat is public but rate-limited
+    "/desktop/stats", "/desktop/tables", "/desktop/query",  # Dashboard read endpoints
+    "/dictionary/search/all", "/dictionary/search/my", "/dictionary/stats",
+    "/bible/search", "/monitor/health", "/monitor/coverage", "/monitor/audit",
+}
+
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class APIKeyMiddleware(BaseHTTPMiddleware):
+    """Middleware to enforce API key on protected endpoints."""
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path in PUBLIC_ENDPOINTS:
+            return await call_next(request)
+        
+        # Skip for OPTIONS (CORS preflight)
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        
+        api_key = request.headers.get(API_KEY_NAME) or request.query_params.get(API_KEY_QUERY)
+        if not api_key or api_key not in API_KEYS:
+            return JSONResponse(status_code=403, content={"detail": "Invalid or missing API key"})
+        
+        request.state.api_key_role = API_KEYS[api_key]
+        return await call_next(request)
+
+app = FastAPI(
+    title="Zolai Toolkit API",
+    description="REST API for Zolai language data pipeline",
+    version="1.0.0",
+    lifespan=lifespan,
     )
 
-    # app.include_router(desktop_router)
-    for route in desktop_router.routes:
-        app.router.routes.append(route)
-    # app.include_router(jsonl_router)
-    for route in jsonl_router.routes:
-        app.router.routes.append(route)
-
-    # --- Static File Serving for Desktop App ---
-    from fastapi.responses import FileResponse
+app.include_router(desktop_router)
+app.include_router(jsonl_router)
+# --- Static File Serving for Desktop App ---
+from fastapi.responses import FileResponse
     _FRONTEND_DIR = config.paths.frontend
 
     @app.get("/")
-    async def serve_frontend():
+        async def serve_frontend():
         """Serve the desktop app HTML."""
-        html_path = _FRONTEND_DIR / "index.html"
-        if html_path.exists():
-            return FileResponse(str(html_path))
-        return {"status": "ok", "version": "0.3.0", "api": "running"}
+            html_path = _FRONTEND_DIR / "index.html"
+            if html_path.exists():
+                return FileResponse(str(html_path))
+                return {"status": "ok", "version": "0.3.0", "api": "running"}
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+            allow_origins=["*"],
+            allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -313,7 +359,7 @@ def create_app() -> FastAPI:
         return HealthResponse(
             status="ok",
             data_root=str(config.paths.data),
-        )
+    )
 
     # --- Crawler ---
 
@@ -455,7 +501,7 @@ def create_app() -> FastAPI:
 
     @app.get("/bible/search")
     async def bible_search(q: str = "", version: str = "tdb77", limit: int = 10):
-        """Search Bible verses by Zolai or English text (LIKE match)."""
+        """Search bible parallel corpora for matching verses."""
         from ..data.database import get_manager
 
         if not q:
@@ -514,6 +560,7 @@ def create_app() -> FastAPI:
     ):
         """Add a new dictionary entry."""
         from ..data.database import get_manager
+
         db = get_manager()
         r = db.enrich_word(
             word,
@@ -521,13 +568,14 @@ def create_app() -> FastAPI:
             myanmar=myanmar,
             pos=pos,
             source="api_add",
-        )
+    )
         return {"success": r, "word": word}
 
     @app.put("/dictionary/update")
     async def dictionary_update(word: str, field: str, value: str):
         """Update a dictionary entry field."""
         from ..data.database import get_manager
+
         db = get_manager()
         r = db.enrich_word(word, **{field: value})
         return {"success": r, "word": word, "field": field}
@@ -568,8 +616,7 @@ def create_app() -> FastAPI:
         
         for table, pk_col in tables_to_delete:
             # First, check if record exists and get its data for audit
-            pk_name = "zolai" if "dictionary" in table and "en_zo" not in table else "english"
-            cur.execute(f'SELECT * FROM "{table}" WHERE "{pk_name}" = ?', (word,))
+            cur.execute(f'SELECT * FROM "{table}" WHERE "{tables_to_delete[0][1] if table == tables_to_delete[0][0] else (table == "dictionary_en_zo" and "english" or table == "dictionary_import" and "zolai" or "english")}" = ?', (word,))
             existing = cur.fetchone()
             
             if existing:
@@ -592,8 +639,9 @@ def create_app() -> FastAPI:
                 )
                 
                 # Soft delete
+                pk_val = "zolai" if "dictionary" in table and "en_zo" not in table else "english"
                 cur.execute(
-                    f'UPDATE "{table}" SET is_deleted = 1, deleted_at = ? WHERE "{pk_col}" = ?',
+                    f'UPDATE "{table}" SET is_deleted = 1, deleted_at = ? WHERE "{pk_val}" = ?',
                     (now, word)
                 )
                 rows_affected = cur.rowcount
@@ -722,7 +770,7 @@ def create_app() -> FastAPI:
             req.query,
             top_k=req.top_k,
             threshold=req.threshold,
-        )
+    )
         # Apply metadata filtering
         if req.source_type:
             hits = [h for h in hits if h.get("metadata", {}).get("source_type") == req.source_type]
@@ -731,7 +779,7 @@ def create_app() -> FastAPI:
             query=req.query,
             results=hits,
             context=ctx,
-        )
+    )
 
     @app.get("/knowledge/status")
     async def knowledge_status():
@@ -783,7 +831,7 @@ def create_app() -> FastAPI:
             f"{ZOLAI_BILINGUAL_PROMPT}\n\n"
             f"{history_text}"
             f"CONTEXT FROM DICTIONARY AND BIBLE:\n{rag_context}\n"
-        )
+    )
 
         # Call Ollama
         messages = [ChatMessage(role="user", content=req.message)]
@@ -814,7 +862,7 @@ def create_app() -> FastAPI:
             zvs_result['corrected_text']
             if not zvs_result['is_compliant']
             else raw_response
-        )
+    )
 
         # Extract English gloss (look for "English:" line)
         english_gloss = ""
@@ -839,7 +887,7 @@ def create_app() -> FastAPI:
             context_source=rag_context[:200] if rag_context else "No context",
             zvs_compliant=zvs_result['is_compliant'],
             vocabulary=vocabulary,
-        )
+    )
 
     # --- WebSocket ---
 
@@ -898,7 +946,7 @@ def create_app() -> FastAPI:
             message=ChatMessage(role="assistant", content=data.get("response", "").strip()),
             done=data.get("done", True),
             total_duration=data.get("total_duration", 0),
-        )
+    )
 
     @app.post("/chat/chat/stream")
     async def chat_stream(req: ChatStreamRequest):

@@ -20,19 +20,22 @@ CLI:
 from __future__ import annotations
 
 import json
-import re
 import logging
 import os
+import re
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import MetaData, Table, create_engine, func, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import QueuePool
 
 from ..config import config
-from .models import MODEL_REGISTRY, Base
+from .models import Base, DataAuditLog
 
 logger = logging.getLogger(__name__)
 
@@ -57,34 +60,7 @@ class DatabaseManager:
         self._db_url = db_url or "sqlite:///zolai.db"
         self._engine: Engine | None = None
         self._metadata: MetaData | None = None
-
-    @property
-    def engine(self) -> Engine:
-        if self._engine is None:
-            connect_args: dict[str, Any] = {}
-            pool_kwargs: dict[str, Any] = {}
-            if self._db_url.startswith("sqlite"):
-                connect_args = {"check_same_thread": False}
-            else:
-                # PostgreSQL connection pooling
-                pool_kwargs = {
-                    "pool_size": 5,
-                    "max_overflow": 10,
-                    "pool_pre_ping": True,
-                }
-            self._engine = create_engine(
-                self._db_url,
-                echo=False,
-                connect_args=connect_args,
-                **pool_kwargs,
-            )
-            if self._db_url.startswith("sqlite"):
-                with self._engine.connect() as conn:
-                    conn.execute(text("PRAGMA journal_mode=WAL"))
-                    conn.execute(text("PRAGMA busy_timeout=5000"))
-                    conn.execute(text("PRAGMA synchronous=NORMAL"))
-                    conn.commit()
-        return self._engine
+        self._pool_config: dict[str, Any] = {}
 
     @property
     def metadata(self) -> MetaData:
@@ -138,6 +114,399 @@ class DatabaseManager:
     def table_names(self) -> list[str]:
         """Return sorted list of table names."""
         return sorted(Base.metadata.tables.keys())
+
+    # ------------------------------------------------------------------
+    # Transaction & Session Management
+    # ------------------------------------------------------------------
+    @contextmanager
+    def transaction(self):
+        """Context manager for database transactions.
+
+        Usage:
+            with mgr.transaction() as conn:
+                conn.execute(...)
+                conn.execute(...)  # both in same transaction
+        """
+        with self.engine.begin() as conn:
+            yield conn
+
+    def execute_in_transaction(self, fn):
+        """Execute a function within a transaction.
+
+        Args:
+            fn: Function that receives a connection and returns a value.
+
+        Returns:
+            The return value of fn.
+        """
+        with self.engine.begin() as conn:
+            return fn(conn)
+
+    @contextmanager
+    def session(self) -> Session:
+        """Context-managed SQLAlchemy session with automatic commit/rollback."""
+        session = Session(self.engine)
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def get_session(self) -> Session:
+        """Get a new SQLAlchemy session (caller must manage commit/close)."""
+        return Session(self.engine)
+
+    # ------------------------------------------------------------------
+    # Optimistic Locking Helpers
+    # ------------------------------------------------------------------
+    def get_with_version(
+        self, table_name: str, entity_id: int
+    ) -> tuple[dict[str, Any], int] | tuple[None, None]:
+        """Get a record with its version for optimistic locking.
+
+        Returns:
+            Tuple of (record_dict, version) or (None, None) if not found.
+        """
+        table = Table(table_name, self.metadata, autoload_with=self.engine)
+        version_col = "version" if "version" in table.columns else None
+
+        with self.engine.connect() as conn:
+            if version_col:
+                row = conn.execute(
+                    table.select().where(table.c.id == entity_id)
+                ).first()
+                if row:
+                    return self._row_to_dict(row, table), getattr(row, version_col, 1)
+            else:
+                row = conn.execute(
+                    table.select().where(table.c.id == entity_id)
+                ).first()
+                if row:
+                    return self._row_to_dict(row, table), 1
+        return None, None
+
+    def update_with_version(
+        self,
+        table_name: str,
+        entity_id: int,
+        data: dict[str, Any],
+        expected_version: int,
+        user: str = "system",
+    ) -> bool:
+        """Update a record with optimistic locking.
+
+        Args:
+            table_name: Target table
+            entity_id: Primary key
+            data: New column values
+            expected_version: Expected version number
+            user: User for audit log
+
+        Returns:
+            True if updated, False if not found or version mismatch.
+
+        Raises:
+            ValueError: If version mismatch (concurrent modification).
+        """
+        table = Table(table_name, self.metadata, autoload_with=self.engine)
+        version_col = "version" if "version" in table.columns else None
+
+        with self.engine.begin() as conn:
+            # Get current record and version
+            current = conn.execute(
+                table.select().where(table.c.id == entity_id)
+            ).first()
+
+            if not current:
+                return False
+
+            current_version = getattr(current, version_col, 1) if version_col else 1
+
+            if current_version != expected_version:
+                raise ValueError(
+                    f"Optimistic lock failed: expected version {expected_version}, "
+                    f"found {current_version}. Record was modified concurrently."
+                )
+
+            old_data = self._row_to_dict(current, table)
+
+            # Prepare update data with incremented version
+            update_data = {**data}
+            if version_col:
+                update_data[version_col] = current_version + 1
+
+            conn.execute(
+                table.update()
+                .where(table.c.id == entity_id)
+                .values(update_data)
+            )
+
+            # Log to audit
+            audit_table = Table("data_audit_log", self.metadata, autoload_with=self.engine)
+            conn.execute(
+                audit_table.insert(),
+                {
+                    "table_name": table_name,
+                    "row_id": entity_id,
+                    "field": "update",
+                    "old_value": json.dumps(old_data, ensure_ascii=False),
+                    "new_value": json.dumps(update_data, ensure_ascii=False),
+                    "changed_at": datetime.now(timezone.utc).isoformat(),
+                    "reason": f"optimistic_update:{user}",
+                },
+            )
+
+        return True
+
+    # ------------------------------------------------------------------
+    # Enhanced Bulk Operations
+    # ------------------------------------------------------------------
+    def bulk_upsert(
+        self,
+        table_name: str,
+        records: list[dict[str, Any]],
+        conflict_columns: list[str],
+        user: str = "system",
+    ) -> dict[str, int]:
+        """Bulk upsert (insert or update on conflict) records.
+
+        Args:
+            table_name: Target table
+            records: List of record dicts
+            conflict_columns: Columns that define uniqueness for conflict resolution
+            user: User for audit log
+
+        Returns:
+            Dict with 'inserted', 'updated', 'errors' counts.
+        """
+        table = Table(table_name, self.metadata, autoload_with=self.engine)
+        json_cols = _JSON_COLS.get(table_name, set())
+
+        inserted = 0
+        updated = 0
+        errors = 0
+
+        with self.engine.begin() as conn:
+            for record in records:
+                try:
+                    # Clean JSON columns
+                    cleaned = {}
+                    for k, v in record.items():
+                        if k in json_cols and isinstance(v, (list, dict)):
+                            cleaned[k] = json.dumps(v, ensure_ascii=False)
+                        elif k in json_cols and isinstance(v, str):
+                            cleaned[k] = v
+                        else:
+                            cleaned[k] = v
+
+                    # Check for existing record
+                    where_clause = []
+                    for col in conflict_columns:
+                        if col in cleaned:
+                            where_clause.append(table.c[col] == cleaned[col])
+
+                    if where_clause:
+                        from sqlalchemy import and_
+                        existing = conn.execute(
+                            table.select().where(and_(*where_clause))
+                        ).first()
+
+                        if existing:
+                            # Update existing
+                            old_data = self._row_to_dict(existing, table)
+                            update_data = {k: v for k, v in cleaned.items() if k not in conflict_columns}
+                            if "version" in table.columns:
+                                update_data["version"] = getattr(existing, "version", 1) + 1
+
+                            conn.execute(
+                                table.update()
+                                .where(and_(*where_clause))
+                                .values(update_data)
+                            )
+
+                            conn.execute(
+                                Table("data_audit_log", self.metadata, autoload_with=self.engine).insert(),
+                                {
+                                    "table_name": table_name,
+                                    "row_id": getattr(existing, "id", 0),
+                                    "field": "bulk_upsert_update",
+                                    "old_value": json.dumps(old_data, ensure_ascii=False),
+                                    "new_value": json.dumps(update_data, ensure_ascii=False),
+                                    "changed_at": datetime.now(timezone.utc).isoformat(),
+                                    "reason": f"bulk_upsert:{user}",
+                                },
+                            )
+                            updated += 1
+                            continue
+
+                    # Insert new
+                    if "version" in table.columns:
+                        cleaned["version"] = 1
+                    result = conn.execute(table.insert(), cleaned)
+                    entity_id = result.inserted_primary_key[0]
+
+                    conn.execute(
+                        Table("data_audit_log", self.metadata, autoload_with=self.engine).insert(),
+                        {
+                            "table_name": table_name,
+                            "row_id": entity_id,
+                            "field": "bulk_upsert_insert",
+                            "old_value": None,
+                            "new_value": json.dumps(cleaned, ensure_ascii=False),
+                            "changed_at": datetime.now(timezone.utc).isoformat(),
+                            "reason": f"bulk_upsert:{user}",
+                        },
+                    )
+                    inserted += 1
+
+                except Exception as exc:
+                    logger.error("Bulk upsert error for record %s: %s", record, exc)
+                    errors += 1
+
+        return {"inserted": inserted, "updated": updated, "errors": errors}
+
+    def bulk_delete(
+        self,
+        table_name: str,
+        entity_ids: list[int],
+        user: str = "system",
+        soft: bool = True,
+    ) -> int:
+        """Bulk delete (soft or hard) records by IDs.
+
+        Args:
+            table_name: Target table
+            entity_ids: List of primary key IDs to delete
+            user: User for audit log
+            soft: If True, soft delete (set is_deleted=1); else hard delete
+
+        Returns:
+            Number of records deleted.
+        """
+        table = Table(table_name, self.metadata, autoload_with=self.engine)
+        has_soft_delete = "is_deleted" in table.columns
+
+        if not entity_ids:
+            return 0
+
+        deleted = 0
+        with self.engine.begin() as conn:
+            for entity_id in entity_ids:
+                current = conn.execute(
+                    table.select().where(table.c.id == entity_id)
+                ).first()
+
+                if not current:
+                    continue
+
+                old_data = self._row_to_dict(current, table)
+
+                if soft and has_soft_delete:
+                    conn.execute(
+                        table.update()
+                        .where(table.c.id == entity_id)
+                        .values(
+                            {
+                                "is_deleted": 1,
+                                "deleted_at": datetime.now(timezone.utc).isoformat(),
+                                "deleted_by": user,
+                            }
+                        )
+                    )
+                    operation = "soft_delete"
+                else:
+                    conn.execute(table.delete().where(table.c.id == entity_id))
+                    operation = "delete"
+
+                conn.execute(
+                    Table("data_audit_log", self.metadata, autoload_with=self.engine).insert(),
+                    {
+                        "table_name": table_name,
+                        "row_id": entity_id,
+                        "field": operation,
+                        "old_value": json.dumps(old_data, ensure_ascii=False),
+                        "new_value": json.dumps({"deleted_by": user}, ensure_ascii=False),
+                        "changed_at": datetime.now(timezone.utc).isoformat(),
+                        "reason": f"bulk_{operation}:{user}",
+                    },
+                )
+                deleted += 1
+
+        return deleted
+
+    # ------------------------------------------------------------------
+    # PostgreSQL Connection Pooling Enhancements
+    # ------------------------------------------------------------------
+    def configure_pool(
+        self,
+        pool_size: int = 10,
+        max_overflow: int = 20,
+        pool_timeout: int = 30,
+        pool_recycle: int = 3600,
+    ) -> None:
+        """Configure connection pool for PostgreSQL (must be called before first use).
+
+        Args:
+            pool_size: Number of connections to maintain
+            max_overflow: Additional connections allowed
+            pool_timeout: Seconds to wait for connection
+            pool_recycle: Seconds before recycling connections
+        """
+        if self._engine is not None:
+            logger.warning("Pool configuration ignored: engine already created")
+            return
+
+        if not self._db_url.startswith("postgresql"):
+            logger.warning("Pool configuration only applies to PostgreSQL")
+            return
+
+        self._pool_config = {
+            "pool_size": pool_size,
+            "max_overflow": max_overflow,
+            "pool_timeout": pool_timeout,
+            "pool_recycle": pool_recycle,
+            "pool_pre_ping": True,
+            "poolclass": QueuePool,
+        }
+
+    def _create_engine_with_pool(self) -> Engine:
+        """Create engine with configured pool settings."""
+        if self._db_url.startswith("sqlite"):
+            connect_args = {"check_same_thread": False}
+            pool_kwargs = {}
+        else:
+            connect_args = {}
+            pool_kwargs = getattr(self, "_pool_config", {
+                "pool_size": 5,
+                "max_overflow": 10,
+                "pool_pre_ping": True,
+                "poolclass": QueuePool,
+            })
+
+        engine = create_engine(
+            self._db_url,
+            echo=False,
+            connect_args=connect_args,
+            **pool_kwargs,
+        )
+
+        if self._db_url.startswith("sqlite"):
+            with engine.connect() as conn:
+                conn.execute(text("PRAGMA journal_mode=WAL"))
+                conn.execute(text("PRAGMA busy_timeout=30000"))
+                conn.execute(text("PRAGMA synchronous=NORMAL"))
+                conn.commit()
+
+        return engine
+
+    @property
+    def engine(self) -> Engine:
+        if self._engine is None:
+            self._engine = self._create_engine_with_pool()
+        return self._engine
 
     # ------------------------------------------------------------------
     # Lookup methods
@@ -451,7 +820,6 @@ class DatabaseManager:
     # ------------------------------------------------------------------
     def count(self, table_name: str) -> int:
         """Return row count for a table."""
-        table = Table(table_name, self.metadata, autoload_with=self.engine)
         with self.engine.connect() as conn:
             result = conn.execute(
                 text(f"SELECT COUNT(*) FROM {table_name}")
@@ -841,7 +1209,7 @@ class DatabaseManager:
 
         Returns True if the entry was found and updated, False otherwise.
         """
-        from .models import DataAuditLog, DictionaryEntry
+        from .models import DictionaryEntry
 
         with self._session() as session:
             row = session.query(DictionaryEntry).filter(
@@ -887,7 +1255,7 @@ class DatabaseManager:
 
         Returns True if added, False if the word already exists.
         """
-        from .models import DataAuditLog, DictionaryEntry
+        from .models import DictionaryEntry
 
         with self._session() as session:
             existing = session.query(DictionaryEntry).filter(
@@ -924,7 +1292,7 @@ class DatabaseManager:
 
         Returns True if deleted, False if not found.
         """
-        from .models import DataAuditLog, DictionaryEntry
+        from .models import DictionaryEntry
 
         with self._session() as session:
             row = session.query(DictionaryEntry).filter(
@@ -1573,7 +1941,7 @@ def main() -> None:
         print(f"Size: {info['db_size_human']}")
         print(f"FTS5: {'available' if info['fts5_available'] else 'not available'}")
         print(f"Query latency: {info['query_latency_ms']}ms")
-        print(f"\nTable counts:")
+        print("\nTable counts:")
         for name, count in info["table_counts"].items():
             print(f"  {name}: {count:,}")
         print(f"\nTotal rows: {info['total_rows']:,}")
