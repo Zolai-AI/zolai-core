@@ -5,27 +5,31 @@ transactions, version tracking, and audit logging.
 """
 
 from .alignment import AlignmentRepository
-from .audit import AuditRepository
 from .base import BaseRepository
-from .bible import BibleRepository
-from .dictionary import DictionaryRepository
+from .bible import BibleContextRepository, BibleRepository
+from .dictionary import DictionaryEnZoRepository, DictionaryRepository
 from .exercise import ExerciseRepository
-from .grammar import GrammarRepository
+from .grammar import GrammarRepository, WordCollocationRepository
 from .phrase import PhraseRepository
-from .provenance import ProvenanceRepository
-from .translation import TranslationRepository
-from .vocabulary import VocabularyRepository
+from .provenance import AuditRepository, ProvenanceRepository
+from .translation import TranslationRepository, WordAlignmentRepository
+from .vocabulary import VocabularyRepository, WordUsageRepository
 
 __all__ = [
+    "AlignmentRepository",
+    "AuditRepository",
     "BaseRepository",
-    "DictionaryRepository",
+    "BibleContextRepository",
     "BibleRepository",
+    "DictionaryEnZoRepository",
+    "DictionaryRepository",
+    "ExerciseRepository",
+    "GrammarRepository",
+    "PhraseRepository",
+    "ProvenanceRepository",
     "TranslationRepository",
     "VocabularyRepository",
-    "PhraseRepository",
-    "GrammarRepository",
-    "AlignmentRepository",
-    "ExerciseRepository",
-    "ProvenanceRepository",
-    "AuditRepository",
+    "WordAlignmentRepository",
+    "WordCollocationRepository",
+    "WordUsageRepository",
 ]
