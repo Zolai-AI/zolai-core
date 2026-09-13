@@ -369,9 +369,24 @@ async def bible_context_topics():
 # BIBLE NAVIGATION ENDPOINTS
 # ═══════════════════════════════════════════
 
+# Canonical Bible book order (66 books, GEN → REV)
+BIBLE_BOOK_ORDER = [
+    'GEN', 'EXO', 'LEV', 'NUM', 'DEU', 'JOS', 'JDG', 'RUT',
+    '1SA', '2SA', '1KI', '2KI', '1CH', '2CH', 'EZR', 'NEH',
+    'EST', 'JOB', 'PSA', 'PRO', 'ECC', 'SNG', 'ISA', 'JER',
+    'LAM', 'EZK', 'DAN', 'HOS', 'JOL', 'AMO', 'OBA', 'JON',
+    'MIC', 'NAM', 'HAB', 'ZEP', 'HAG', 'ZEC', 'MAL',
+    'MAT', 'MRK', 'LUK', 'JHN', 'ACT', 'ROM', '1CO', '2CO',
+    'GAL', 'EPH', 'PHP', 'COL', '1TH', '2TH', '1TI', '2TI',
+    'TIT', 'PHM', 'HEB', 'JAS', '1PE', '2PE', '1JN', '2JN',
+    '3JN', 'JUD', 'REV',
+]
+_BIBLE_ORDER_MAP = {abbr: i for i, abbr in enumerate(BIBLE_BOOK_ORDER)}
+
+
 @router.get("/bible/books")
 async def bible_books():
-    """List all Bible books with verse counts."""
+    """List all Bible books with verse counts in canonical order."""
     try:
         conn = get_db()
         cur = conn.cursor()
@@ -382,7 +397,6 @@ async def bible_books():
                    MAX(chapter) as max_chapter
             FROM bible_verses
             GROUP BY book
-            ORDER BY MIN(chapter), MIN(verse)
         """)
         rows = cur.fetchall()
         cur.close()
@@ -396,6 +410,7 @@ async def bible_books():
                 "min_chapter": r[3],
                 "max_chapter": r[4],
             })
+        books.sort(key=lambda b: _BIBLE_ORDER_MAP.get(b["abbr"], 999))
         return {"books": books, "total": len(books)}
     except Exception as e:
         return {"error": str(e)}
