@@ -841,6 +841,59 @@ def create_app() -> FastAPI:
             vocabulary=vocabulary,
         )
 
+    @app.post("/chat/gemini", response_model=ZolaiChatResponse)
+    async def gemini_chat(req: ZolaiChatRequest):
+        """Gemini chat via local gemini-webapi (Chrome cookies)."""
+        import sys
+        from pathlib import Path as _Path
+
+        # Add zolai-ai-local to path
+        local_pkg = _Path(__file__).parent.parent.parent.parent / "zolai-ai-local"
+        if str(local_pkg) not in sys.path:
+            sys.path.insert(0, str(local_pkg))
+
+        try:
+            from gemini.client_openai import get_default_client
+            from shared.zvs_context import get_system_prompt
+
+            client = await get_default_client()
+
+            messages = [
+                {"role": "system", "content": get_system_prompt()},
+                {"role": "user", "content": req.message},
+            ]
+
+            result = await client.chat_completion(
+                messages=messages,
+                model=req.model,
+                temperature=0.7,
+            )
+
+            text = result["choices"][0]["message"]["content"]
+
+            # Check ZVS compliance
+            from .zvs_checker import check_zvs_compliance
+            zvs_result = check_zvs_compliance(text)
+            final_response = (
+                zvs_result['corrected_text']
+                if not zvs_result['is_compliant']
+                else text
+            )
+
+            return ZolaiChatResponse(
+                zolai_response=final_response,
+                zvs_compliant=zvs_result['is_compliant'],
+                context_source=f"gemini:{req.model}",
+                vocabulary=[],
+            )
+        except Exception as e:
+            return ZolaiChatResponse(
+                zolai_response=f"Gemini error: {str(e)}",
+                zvs_compliant=True,
+                context_source="error",
+                vocabulary=[],
+            )
+
     # --- WebSocket ---
 
     @app.websocket("/ws")

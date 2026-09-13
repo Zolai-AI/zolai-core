@@ -940,7 +940,6 @@ class DatabaseManager:
         report: dict[str, dict[str, Any]] = {}
         inspector = sa_inspect(self.engine)
         for table_name in inspector.get_table_names():
-            table = Table(table_name, self.metadata, autoload_with=self.engine)
             with self.engine.connect() as conn:
                 row_count = conn.execute(
                     text(f"SELECT COUNT(*) FROM {table_name}")
@@ -1566,9 +1565,6 @@ class DatabaseManager:
         results: list[dict[str, Any]] = []
         if self._fts5_available():
             # FTS5 dictionary search
-            dict_table = Table(
-                "dictionary", self.metadata, autoload_with=self.engine
-            )
             try:
                 with self.engine.connect() as conn:
                     rows = conn.execute(

@@ -5,6 +5,8 @@ Run this after init_db to add proper constraints and indexes.
 
 from __future__ import annotations
 
+from typing import Any
+
 from sqlalchemy import text
 
 from .database import DatabaseManager
@@ -163,9 +165,16 @@ PERFORMANCE_INDEXES = [
     ("dictionary", "CREATE INDEX IF NOT EXISTS ix_dict_pos ON dictionary(pos)"),
     ("dictionary", "CREATE INDEX IF NOT EXISTS ix_dict_source ON dictionary(source)"),
     # Dictionary EN-ZO indexes
-    ("dictionary_en_zo", "CREATE INDEX IF NOT EXISTS ix_en_zo_translations_clean ON dictionary_en_zo(translations_clean)"),
+    (
+        "dictionary_en_zo",
+        "CREATE INDEX IF NOT EXISTS ix_en_zo_translations_clean "
+        "ON dictionary_en_zo(translations_clean)",
+    ),
     ("dictionary_en_zo", "CREATE INDEX IF NOT EXISTS ix_en_zo_pos ON dictionary_en_zo(pos)"),
-    ("dictionary_en_zo", "CREATE INDEX IF NOT EXISTS ix_en_zo_myanmar ON dictionary_en_zo(myanmar)"),
+    (
+        "dictionary_en_zo",
+        "CREATE INDEX IF NOT EXISTS ix_en_zo_myanmar ON dictionary_en_zo(myanmar)",
+    ),
     # Bible verses indexes
     ("bible_verses", "CREATE INDEX IF NOT EXISTS ix_bible_zo_tdb77 ON bible_verses(zo_tdb77)"),
     ("bible_verses", "CREATE INDEX IF NOT EXISTS ix_bible_zo_tedim2010 ON bible_verses(zo_tedim2010)"),
@@ -202,7 +211,11 @@ PERFORMANCE_INDEXES = [
     ("word_collocations", "CREATE INDEX IF NOT EXISTS ix_colloc_frequency ON word_collocations(frequency)"),
     ("word_collocations", "CREATE INDEX IF NOT EXISTS ix_colloc_pmi ON word_collocations(pmiproxy)"),
     # Training exercises indexes
-    ("training_exercises", "CREATE INDEX IF NOT EXISTS ix_exercise_type_diff ON training_exercises(exercise_type, difficulty)"),
+    (
+        "training_exercises",
+        "CREATE INDEX IF NOT EXISTS ix_exercise_type_diff "
+        "ON training_exercises(exercise_type, difficulty)",
+    ),
     ("training_exercises", "CREATE INDEX IF NOT EXISTS ix_exercise_source ON training_exercises(source)"),
     # Provenance indexes
     ("provenance", "CREATE INDEX IF NOT EXISTS ix_prov_status ON provenance(status)"),
@@ -258,10 +271,13 @@ def apply_constraints(mgr: DatabaseManager) -> dict[str, Any]:
                     if constraint_sql.startswith("UNIQUE"):
                         cols = constraint_sql.replace("UNIQUE(", "").replace(")", "")
                         alter_sql = f"CREATE UNIQUE INDEX IF NOT EXISTS {constraint_name} ON {table_name}({cols})"
-                    elif constraint_sql.startswith("CHECK"):
+                    if constraint_sql.startswith("CHECK"):
                         # SQLite doesn't support ALTER TABLE ADD CHECK easily
                         # Would need to recreate table - skip for now
-                        skipped.append(f"{table_name}.{constraint_name} (CHECK not supported on existing SQLite tables)")
+                        skipped.append(
+                            f"{table_name}.{constraint_name} "
+                            "(CHECK not supported on existing SQLite tables)"
+                        )
                         continue
                     else:
                         alter_sql = f"ALTER TABLE {table_name} ADD CONSTRAINT {constraint_name} {constraint_sql}"
