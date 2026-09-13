@@ -24,13 +24,12 @@ __author__ = "Zolai-AI Community"
 __license__ = "MIT"
 
 # NLP Pipeline Integration (SylBreak4All M7)
+# Human Annotation (SylBreak4All M9)
+from .annotation import SyllableAnnotator
 from .integration import SyllableAwarePOS, SyllableEmbeddings, ZolaiTokenizer
 
 # Tokenizer Training (SylBreak4All M8)
 from .tokenizer_training import SyllableTokenizerTrainer
-
-# Human Annotation (SylBreak4All M9)
-from .annotation import SyllableAnnotator
 
 __all__ = [
     "Boundary",
