@@ -498,3 +498,30 @@ async def audit_recent(limit: int = Query(50)):
         return {"results": [dict(zip(cols, r)) for r in rows]}
     except Exception as e:
         return {"error": str(e)}
+
+# ═══════════════════════════════════════════
+# AI MODELS ENDPOINT
+# ═══════════════════════════════════════════
+
+@router.get("/ai/models")
+async def get_ai_models():
+    """Get available AI models from zolai-core."""
+    # Local models available in zolai-core
+    local_models = [
+        {"name": "gemini-3-flash", "provider": "gemini", "type": "cloud"},
+        {"name": "gemini-3-pro-plus", "provider": "gemini", "type": "cloud"},
+        {"name": "gemini-3-pro", "provider": "gemini", "type": "cloud"},
+        {"name": "gemini-3-flash-thinking", "provider": "gemini", "type": "cloud"},
+        {"name": "gemini-3-flash-plus", "provider": "gemini", "type": "cloud"},
+        {"name": "gemini-3-flash-thinking-plus", "provider": "gemini", "type": "cloud"},
+        {"name": "gemini-3-pro-advanced", "provider": "gemini", "type": "cloud"},
+        {"name": "gemini-3-flash-advanced", "provider": "gemini", "type": "cloud"},
+        {"name": "gemini-3-flash-thinking-advanced", "provider": "gemini", "type": "cloud"},
+        {"name": "mimo-v2.5-free", "provider": "openrouter", "type": "cloud"},
+        {"name": "nemotron-3-ultra-free", "provider": "openrouter", "type": "cloud"},
+        {"name": "hy3-free", "provider": "openrouter", "type": "cloud"},
+        {"name": "muse-spark-1.2-contributor-free", "provider": "openrouter", "type": "cloud"},
+        {"name": "zolai-local", "provider": "zolai", "type": "local", "endpoint": "/chat/zolai"},
+    ]
+    return {"models": local_models, "default": "zolai-local"}
+
