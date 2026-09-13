@@ -1,0 +1,453 @@
+{
+  "metadata": {
+    "date": "2026-09-13",
+    "status": "READ-ONLY audit",
+    "current_tables": 79,
+    "current_total_rows": 3162909,
+    "target_tables": 23,
+    "target_total_rows": 1574000,
+    "tables_dropped": 56
+  },
+  "target_tables": {
+    "canonical": [
+      {
+        "name": "dictionary",
+        "domain": "dictionary",
+        "rows": 103303,
+        "source_tables": ["dictionary", "dictionary_import"],
+        "business_key": ["zolai", "english_clean"],
+        "key_type": "COMPOSITE",
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "zolai", "type": "TEXT", "notnull": true},
+          {"name": "english", "type": "TEXT", "notnull": false},
+          {"name": "english_clean", "type": "TEXT", "notnull": false},
+          {"name": "pos", "type": "TEXT", "notnull": false},
+          {"name": "myanmar", "type": "TEXT", "notnull": false},
+          {"name": "source", "type": "TEXT", "notnull": false},
+          {"name": "zvs_compliance", "type": "TEXT", "notnull": false},
+          {"name": "entry_version", "type": "INTEGER", "notnull": false, "default": 1},
+          {"name": "is_deleted", "type": "INTEGER", "notnull": false, "default": 0},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false},
+          {"name": "updated_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      },
+      {
+        "name": "dictionary_en_zo",
+        "domain": "dictionary",
+        "rows": 113750,
+        "source_tables": ["dictionary_en_zo", "dictionary_en_zo_import"],
+        "business_key": null,
+        "key_type": "NONE",
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "headword", "type": "TEXT", "notnull": true},
+          {"name": "translations", "type": "TEXT", "notnull": false},
+          {"name": "pos", "type": "TEXT", "notnull": false},
+          {"name": "source", "type": "TEXT", "notnull": false},
+          {"name": "myanmar", "type": "TEXT", "notnull": false},
+          {"name": "zvs_compliance", "type": "TEXT", "notnull": false},
+          {"name": "is_deleted", "type": "INTEGER", "notnull": false, "default": 0},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false},
+          {"name": "updated_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      },
+      {
+        "name": "bible_verses",
+        "domain": "bible",
+        "rows": 62751,
+        "source_tables": ["bible_verses"],
+        "business_key": ["ref"],
+        "key_type": "UNIQUE",
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "ref", "type": "TEXT", "notnull": true, "unique": true},
+          {"name": "book", "type": "TEXT", "notnull": false},
+          {"name": "book_name", "type": "TEXT", "notnull": false},
+          {"name": "chapter", "type": "INTEGER", "notnull": false},
+          {"name": "verse", "type": "INTEGER", "notnull": false},
+          {"name": "zo_tdb77", "type": "TEXT", "notnull": false},
+          {"name": "zo_tedim2010", "type": "TEXT", "notnull": false},
+          {"name": "en_kjv", "type": "TEXT", "notnull": false},
+          {"name": "myanmar", "type": "TEXT", "notnull": false},
+          {"name": "zo_hcl06", "type": "TEXT", "notnull": false},
+          {"name": "zo_fcl", "type": "TEXT", "notnull": false},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      },
+      {
+        "name": "grammar_patterns",
+        "domain": "grammar",
+        "rows": 5547,
+        "source_tables": ["grammar_patterns", "zolai_grammar_patterns"],
+        "business_key": ["pattern_id"],
+        "key_type": "UNIQUE",
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "pattern_id", "type": "TEXT", "notnull": true, "unique": true},
+          {"name": "pattern_text", "type": "TEXT", "notnull": false},
+          {"name": "description", "type": "TEXT", "notnull": false},
+          {"name": "function", "type": "TEXT", "notnull": false},
+          {"name": "examples", "type": "TEXT", "notnull": false},
+          {"name": "frequency", "type": "INTEGER", "notnull": false},
+          {"name": "myanmar", "type": "TEXT", "notnull": false},
+          {"name": "tense", "type": "TEXT", "notnull": false},
+          {"name": "aspect", "type": "TEXT", "notnull": false},
+          {"name": "negation_type", "type": "TEXT", "notnull": false},
+          {"name": "question_type", "type": "TEXT", "notnull": false},
+          {"name": "source_category", "type": "TEXT", "notnull": false},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      },
+      {
+        "name": "translations",
+        "domain": "dictionary",
+        "rows": 212754,
+        "source_tables": ["translations"],
+        "business_key": null,
+        "key_type": "NONE",
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "source", "type": "TEXT", "notnull": true},
+          {"name": "target", "type": "TEXT", "notnull": true},
+          {"name": "direction", "type": "TEXT", "notnull": false},
+          {"name": "reference", "type": "TEXT", "notnull": false},
+          {"name": "confidence", "type": "REAL", "notnull": false},
+          {"name": "myanmar", "type": "TEXT", "notnull": false},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      },
+      {
+        "name": "word_alignments",
+        "domain": "bible",
+        "rows": 385120,
+        "source_tables": ["word_alignments"],
+        "business_key": null,
+        "key_type": "NONE",
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "ref", "type": "TEXT", "notnull": true},
+          {"name": "zolai_word", "type": "TEXT", "notnull": true},
+          {"name": "english_word", "type": "TEXT", "notnull": true},
+          {"name": "position", "type": "INTEGER", "notnull": false},
+          {"name": "myanmar", "type": "TEXT", "notnull": false},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      },
+      {
+        "name": "vocab",
+        "domain": "dictionary",
+        "rows": 107979,
+        "source_tables": ["vocab", "zolai_vocabulary"],
+        "business_key": ["headword"],
+        "key_type": "UNIQUE",
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "headword", "type": "TEXT", "notnull": true, "unique": true},
+          {"name": "english", "type": "TEXT", "notnull": false},
+          {"name": "frequency", "type": "INTEGER", "notnull": false},
+          {"name": "books", "type": "TEXT", "notnull": false},
+          {"name": "examples", "type": "TEXT", "notnull": false},
+          {"name": "myanmar", "type": "TEXT", "notnull": false},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false},
+          {"name": "updated_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      },
+      {
+        "name": "proverbs",
+        "domain": "grammar",
+        "rows": 7715,
+        "source_tables": ["proverbs", "zolai_proverbs_idioms"],
+        "business_key": null,
+        "key_type": "NONE",
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "zolai", "type": "TEXT", "notnull": true},
+          {"name": "english", "type": "TEXT", "notnull": false},
+          {"name": "literal_translation", "type": "TEXT", "notnull": false},
+          {"name": "morpheme_breakdown", "type": "TEXT", "notnull": false},
+          {"name": "category", "type": "TEXT", "notnull": false},
+          {"name": "theme", "type": "TEXT", "notnull": false},
+          {"name": "cultural_context", "type": "TEXT", "notnull": false},
+          {"name": "source_category", "type": "TEXT", "notnull": false},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      },
+      {
+        "name": "phrases",
+        "domain": "dictionary",
+        "rows": 5000,
+        "source_tables": ["phrases"],
+        "business_key": ["zo"],
+        "key_type": "UNIQUE",
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "zo", "type": "TEXT", "notnull": true},
+          {"name": "english", "type": "TEXT", "notnull": false},
+          {"name": "frequency", "type": "INTEGER", "notnull": false},
+          {"name": "examples", "type": "TEXT", "notnull": false},
+          {"name": "is_idiomatic", "type": "INTEGER", "notnull": false},
+          {"name": "source", "type": "TEXT", "notnull": false},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      },
+      {
+        "name": "word_usage",
+        "domain": "bible",
+        "rows": 60365,
+        "source_tables": ["word_usage"],
+        "business_key": ["word", "book"],
+        "key_type": "COMPOSITE UNIQUE",
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "word", "type": "TEXT", "notnull": true},
+          {"name": "book", "type": "TEXT", "notnull": true},
+          {"name": "total_freq", "type": "INTEGER", "notnull": false},
+          {"name": "meaning_shifts", "type": "TEXT", "notnull": false},
+          {"name": "co_occurring_words", "type": "TEXT", "notnull": false},
+          {"name": "myanmar", "type": "TEXT", "notnull": false},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      },
+      {
+        "name": "syllable_data",
+        "domain": "dictionary",
+        "rows": 189554,
+        "source_tables": ["syllable_data"],
+        "business_key": ["word", "engine"],
+        "key_type": "COMPOSITE UNIQUE",
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "word", "type": "TEXT", "notnull": true},
+          {"name": "syllables", "type": "TEXT", "notnull": false},
+          {"name": "syllable_count", "type": "INTEGER", "notnull": false},
+          {"name": "engine", "type": "TEXT", "notnull": false},
+          {"name": "confidence", "type": "REAL", "notnull": false},
+          {"name": "source_table", "type": "TEXT", "notnull": false},
+          {"name": "source_id", "type": "INTEGER", "notnull": false},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false},
+          {"name": "updated_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      },
+      {
+        "name": "word_collocations",
+        "domain": "dictionary",
+        "rows": 5000,
+        "source_tables": ["word_collocations"],
+        "business_key": ["word1", "word2"],
+        "key_type": "UNIQUE",
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "word1", "type": "TEXT", "notnull": true},
+          {"name": "word2", "type": "TEXT", "notnull": true},
+          {"name": "frequency", "type": "INTEGER", "notnull": false},
+          {"name": "myanmar", "type": "TEXT", "notnull": false},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      }
+    ],
+    "derived": [
+      {
+        "name": "bible_analysis",
+        "domain": "bible",
+        "rows": 30758,
+        "source_tables": ["zolai_bible_analysis"],
+        "business_key": ["book", "chapter", "verse"],
+        "key_type": "COMPOSITE UNIQUE",
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "book", "type": "TEXT", "notnull": false},
+          {"name": "chapter", "type": "INTEGER", "notnull": false},
+          {"name": "verse", "type": "INTEGER", "notnull": false},
+          {"name": "zolai", "type": "TEXT", "notnull": false},
+          {"name": "english", "type": "TEXT", "notnull": false},
+          {"name": "morpheme_analysis", "type": "TEXT", "notnull": false},
+          {"name": "grammar_tags", "type": "TEXT", "notnull": false},
+          {"name": "tone_analysis", "type": "TEXT", "notnull": false},
+          {"name": "compounds_found", "type": "TEXT", "notnull": false},
+          {"name": "rare_words", "type": "TEXT", "notnull": false},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      },
+      {
+        "name": "articles",
+        "domain": "reference",
+        "rows": 6371,
+        "source_tables": ["articles"],
+        "business_key": null,
+        "key_type": "NONE",
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "title", "type": "TEXT", "notnull": false},
+          {"name": "content", "type": "TEXT", "notnull": false},
+          {"name": "excerpt", "type": "TEXT", "notnull": false},
+          {"name": "categories", "type": "TEXT", "notnull": false},
+          {"name": "date", "type": "TEXT", "notnull": false},
+          {"name": "link", "type": "TEXT", "notnull": false},
+          {"name": "language", "type": "TEXT", "notnull": false},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      },
+      {
+        "name": "songs",
+        "domain": "reference",
+        "rows": 1032,
+        "source_tables": ["zolai_songs"],
+        "business_key": ["collection", "song_number"],
+        "key_type": "COMPOSITE UNIQUE",
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "collection", "type": "TEXT", "notnull": false},
+          {"name": "song_number", "type": "INTEGER", "notnull": false},
+          {"name": "title", "type": "TEXT", "notnull": false},
+          {"name": "text", "type": "TEXT", "notnull": false},
+          {"name": "source", "type": "TEXT", "notnull": false},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      },
+      {
+        "name": "wiki_content",
+        "domain": "reference",
+        "rows": 1688,
+        "source_tables": ["wiki_content"],
+        "business_key": null,
+        "key_type": "NONE",
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "wiki_category", "type": "TEXT", "notnull": false},
+          {"name": "source_path", "type": "TEXT", "notnull": false},
+          {"name": "title", "type": "TEXT", "notnull": false},
+          {"name": "content", "type": "TEXT", "notnull": false},
+          {"name": "word_count", "type": "INTEGER", "notnull": false},
+          {"name": "section_count", "type": "INTEGER", "notnull": false},
+          {"name": "content_hash", "type": "TEXT", "notnull": false},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      }
+    ],
+    "staging": [
+      {
+        "name": "import_log",
+        "domain": "audit",
+        "rows": 92,
+        "source_tables": ["jsonl_import_log"],
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "batch_id", "type": "TEXT", "notnull": false},
+          {"name": "source_file", "type": "TEXT", "notnull": false},
+          {"name": "table_name", "type": "TEXT", "notnull": false},
+          {"name": "rows_imported", "type": "INTEGER", "notnull": false},
+          {"name": "sha256", "type": "TEXT", "notnull": false},
+          {"name": "imported_at", "type": "TIMESTAMP", "notnull": false},
+          {"name": "version", "type": "INTEGER", "notnull": false},
+          {"name": "status", "type": "TEXT", "notnull": false},
+          {"name": "error_message", "type": "TEXT", "notnull": false}
+        ]
+      }
+    ],
+    "audit": [
+      {
+        "name": "data_audit_log",
+        "domain": "audit",
+        "rows": 24762,
+        "source_tables": ["data_audit_log"],
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "table_name", "type": "TEXT", "notnull": false},
+          {"name": "row_id", "type": "INTEGER", "notnull": false},
+          {"name": "field", "type": "TEXT", "notnull": false},
+          {"name": "old_value", "type": "TEXT", "notnull": false},
+          {"name": "new_value", "type": "TEXT", "notnull": false},
+          {"name": "changed_at", "type": "TIMESTAMP", "notnull": false},
+          {"name": "reason", "type": "TEXT", "notnull": false}
+        ]
+      },
+      {
+        "name": "audit_findings",
+        "domain": "audit",
+        "rows": 713,
+        "source_tables": ["audit_findings"],
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "finding_type", "type": "TEXT", "notnull": false},
+          {"name": "word", "type": "TEXT", "notnull": false},
+          {"name": "old_value", "type": "TEXT", "notnull": false},
+          {"name": "new_value", "type": "TEXT", "notnull": false},
+          {"name": "source", "type": "TEXT", "notnull": false},
+          {"name": "confidence", "type": "REAL", "notnull": false},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false},
+          {"name": "verified_by", "type": "TEXT", "notnull": false}
+        ]
+      },
+      {
+        "name": "provenance",
+        "domain": "audit",
+        "rows": 255,
+        "source_tables": ["provenance"],
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "filename", "type": "TEXT", "notnull": false},
+          {"name": "size_bytes", "type": "INTEGER", "notnull": false},
+          {"name": "sha256", "type": "TEXT", "notnull": false},
+          {"name": "row_count", "type": "INTEGER", "notnull": false},
+          {"name": "source", "type": "TEXT", "notnull": false},
+          {"name": "generator_script", "type": "TEXT", "notnull": false},
+          {"name": "version", "type": "INTEGER", "notnull": false},
+          {"name": "status", "type": "TEXT", "notnull": false},
+          {"name": "updated_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      }
+    ],
+    "reference": [
+      {
+        "name": "tone_sandhi",
+        "domain": "reference",
+        "rows": 19,
+        "source_tables": ["zolai_tone_sandhi"],
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "rule_number", "type": "INTEGER", "notnull": false, "unique": true},
+          {"name": "rule_name", "type": "TEXT", "notnull": false},
+          {"name": "underlying_pattern", "type": "TEXT", "notnull": false},
+          {"name": "surface_pattern", "type": "TEXT", "notnull": false},
+          {"name": "condition", "type": "TEXT", "notnull": false},
+          {"name": "examples", "type": "TEXT", "notnull": false},
+          {"name": "domain", "type": "TEXT", "notnull": false}
+        ]
+      },
+      {
+        "name": "tone_patterns",
+        "domain": "reference",
+        "rows": 118,
+        "source_tables": ["tone_patterns"],
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "word", "type": "TEXT", "notnull": false},
+          {"name": "tone_category", "type": "TEXT", "notnull": false},
+          {"name": "meaning_t1", "type": "TEXT", "notnull": false},
+          {"name": "meaning_t3", "type": "TEXT", "notnull": false},
+          {"name": "meaning_t4", "type": "TEXT", "notnull": false},
+          {"name": "sandhi_rules", "type": "TEXT", "notnull": false},
+          {"name": "source_category", "type": "TEXT", "notnull": false}
+        ]
+      }
+    ],
+    "experimental": [
+      {
+        "name": "training_runs",
+        "domain": "experimental",
+        "rows": 2,
+        "source_tables": ["training_runs"],
+        "columns": [
+          {"name": "id", "type": "INTEGER", "pk": true},
+          {"name": "model_name", "type": "TEXT", "notnull": false},
+          {"name": "dataset_name", "type": "TEXT", "notnull": false},
+          {"name": "entry_count", "type": "INTEGER", "notnull": false},
+          {"name": "metrics_json", "type": "TEXT", "notnull": false},
+          {"name": "status", "type": "TEXT", "notnull": false},
+          {"name": "created_at", "type": "TIMESTAMP", "notnull": false}
+        ]
+      }
+    ]
+  }
+}

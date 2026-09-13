@@ -1,0 +1,7630 @@
+{
+  "tables": [
+    "articles",
+    "audit_findings",
+    "bible_book_analysis_import",
+    "bible_chapter_analysis_import",
+    "bible_context",
+    "bible_verses",
+    "bible_verses_enhanced",
+    "bible_verses_import",
+    "corrections",
+    "data_audit_log",
+    "dictionary",
+    "dictionary_en_my_import",
+    "dictionary_en_zo",
+    "dictionary_en_zo_import",
+    "dictionary_enhanced",
+    "dictionary_import",
+    "dictionary_my_import",
+    "dictionary_trilingual_import",
+    "gemini_model_results",
+    "grammar_instructions",
+    "grammar_patterns",
+    "grammar_patterns_enhanced",
+    "grammar_patterns_import",
+    "jsonl_import_log",
+    "knowledge_vectors",
+    "morph_verified",
+    "ngram",
+    "particle_database",
+    "phrase_context_import",
+    "phrases",
+    "phrases_from_bible_import",
+    "phrases_import",
+    "pos_gold",
+    "pos_verified",
+    "provenance",
+    "proverbs",
+    "proverbs_idioms",
+    "proverbs_import",
+    "sentence_patterns_import",
+    "simbu",
+    "syllable_data",
+    "tone_patterns",
+    "topic_clusters_import",
+    "training_corpus_qwen3_import",
+    "training_exercises",
+    "training_exercises_import",
+    "training_runs",
+    "training_seed_data_import",
+    "training_valid_sentences_import",
+    "training_validation",
+    "translations",
+    "translations_import",
+    "verb_database",
+    "vocab",
+    "vocab_import",
+    "vocabulary_enhanced",
+    "wiki_content",
+    "wiki_content_fts",
+    "wiki_content_fts_config",
+    "wiki_content_fts_data",
+    "wiki_content_fts_docsize",
+    "wiki_content_fts_idx",
+    "wiki_lessons",
+    "word_alignments",
+    "word_alignments_import",
+    "word_collocations",
+    "word_collocations_import",
+    "word_similarity",
+    "word_usage",
+    "word_usage_profiles_import",
+    "zolai_bible_analysis",
+    "zolai_grammar_patterns",
+    "zolai_proverbs_idioms",
+    "zolai_songs",
+    "zolai_tone_sandhi",
+    "zolai_vocabulary",
+    "zolai_vocabulary_import",
+    "zolai_word_usage",
+    "zvs_corrections_import"
+  ],
+  "table_counts": {
+    "articles": 6371,
+    "audit_findings": 713,
+    "bible_book_analysis_import": 65,
+    "bible_chapter_analysis_import": 1153,
+    "bible_context": 1228,
+    "bible_verses": 62751,
+    "bible_verses_enhanced": 0,
+    "bible_verses_import": 62204,
+    "corrections": 0,
+    "data_audit_log": 24762,
+    "dictionary": 103303,
+    "dictionary_en_my_import": 0,
+    "dictionary_en_zo": 113750,
+    "dictionary_en_zo_import": 135276,
+    "dictionary_enhanced": 0,
+    "dictionary_import": 156808,
+    "dictionary_my_import": 7840,
+    "dictionary_trilingual_import": 0,
+    "gemini_model_results": 0,
+    "grammar_instructions": 16,
+    "grammar_patterns": 5547,
+    "grammar_patterns_enhanced": 5597,
+    "grammar_patterns_import": 6983,
+    "jsonl_import_log": 92,
+    "knowledge_vectors": 0,
+    "morph_verified": 0,
+    "ngram": 0,
+    "particle_database": 0,
+    "phrase_context_import": 45597,
+    "phrases": 5000,
+    "phrases_from_bible_import": 14000,
+    "phrases_import": 15000,
+    "pos_gold": 0,
+    "pos_verified": 0,
+    "provenance": 255,
+    "proverbs": 7736,
+    "proverbs_idioms": 0,
+    "proverbs_import": 7736,
+    "sentence_patterns_import": 65,
+    "simbu": 4163,
+    "syllable_data": 189554,
+    "tone_patterns": 118,
+    "topic_clusters_import": 12,
+    "training_corpus_qwen3_import": 9386,
+    "training_exercises": 81805,
+    "training_exercises_import": 81805,
+    "training_runs": 2,
+    "training_seed_data_import": 500,
+    "training_valid_sentences_import": 4693,
+    "training_validation": 0,
+    "translations": 212754,
+    "translations_import": 135511,
+    "verb_database": 0,
+    "vocab": 107979,
+    "vocab_import": 180458,
+    "vocabulary_enhanced": 0,
+    "wiki_content": 1688,
+    "wiki_content_fts": 1688,
+    "wiki_content_fts_config": 1,
+    "wiki_content_fts_data": 4141,
+    "wiki_content_fts_docsize": 1688,
+    "wiki_content_fts_idx": 3186,
+    "wiki_lessons": 1688,
+    "word_alignments": 385120,
+    "word_alignments_import": 627000,
+    "word_collocations": 5000,
+    "word_collocations_import": 5000,
+    "word_similarity": 0,
+    "word_usage": 60365,
+    "word_usage_profiles_import": 7384,
+    "zolai_bible_analysis": 30758,
+    "zolai_grammar_patterns": 13519,
+    "zolai_proverbs_idioms": 4984,
+    "zolai_songs": 1032,
+    "zolai_tone_sandhi": 19,
+    "zolai_vocabulary": 112279,
+    "zolai_vocabulary_import": 12692,
+    "zolai_word_usage": 85045,
+    "zvs_corrections_import": 44
+  },
+  "schemas": {
+    "articles": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "title",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "content",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "excerpt",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "categories",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "date",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "link",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "language",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "'zolai'",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "audit_findings": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "finding_type",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "word",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "old_value",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "new_value",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "confidence",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "verified_by",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "'system'",
+        "pk": false
+      },
+      {
+        "name": "entry_id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "bible_book_analysis_import": [
+      {
+        "name": "book",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "book_name",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "genre",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "verse_count",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "unique_words",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "total_tokens",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "avg_sentence_length",
+        "type": "REAL",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "top_words",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "book_specific_words",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "bible_chapter_analysis_import": [
+      {
+        "name": "book",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "chapter",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "verse_count",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "unique_words",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "avg_length",
+        "type": "REAL",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "top_words",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "theme_words",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "bible_context": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "book",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "chapter",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "analysis_type",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "data",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "bible_verses": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "ref",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "book",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "chapter",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "verse",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zo_tdb77",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zo_tedim2010",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "en_kJV",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zo_tedim1932",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zo_hcl06",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zo_fcl",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar_judson",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "book_name",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "bible_verses_enhanced": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "book",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "chapter",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "verse",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zolai_text",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english_text",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar_text",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "tone_analysis",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "grammar_analysis",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "vocabulary_notes",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_version",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "bible_verses_import": [
+      {
+        "name": "book",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "book_name",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "chapter",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "verse",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "ref",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zo_tdb77",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zo_tedim2010",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "en_kJV",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "corrections": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "table_name",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "row_id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "field",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "current_value",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "proposed_value",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "'pending'",
+        "pk": false
+      },
+      {
+        "name": "proposed_by",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "proposed_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "reviewed_by",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "reviewed_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "notes",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "data_audit_log": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "table_name",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "row_id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "field",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "old_value",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "new_value",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "changed_at",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "reason",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "dictionary": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "zolai",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english_clean",
+        "type": "VARCHAR",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pos",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "entry_version",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "'v1.0'",
+        "pk": false
+      },
+      {
+        "name": "update_remarks",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "''",
+        "pk": false
+      },
+      {
+        "name": "update_description",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "''",
+        "pk": false
+      },
+      {
+        "name": "zvs_compliance_status",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "'pending'",
+        "pk": false
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "is_deleted",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "deleted_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "dictionary_en_my_import": [
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "dictionary_en_zo": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "headword",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "translations",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "translations_clean",
+        "type": "VARCHAR",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pos",
+        "type": "VARCHAR",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "entry_version",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "'v1.0'",
+        "pk": false
+      },
+      {
+        "name": "update_remarks",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "''",
+        "pk": false
+      },
+      {
+        "name": "update_description",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "''",
+        "pk": false
+      },
+      {
+        "name": "zvs_compliance_status",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "'pending'",
+        "pk": false
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "NULL",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "is_deleted",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "deleted_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "dictionary_en_zo_import": [
+      {
+        "name": "headword",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "translations",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pos",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "explanations",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "sources",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "translations_clean",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "accuracy",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "book_count",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "all_books",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "dialect",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "first_book",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zvs_correction",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "variants",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "examples",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zvs_correct",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "same_meaning",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "antonyms",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "reverse",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "related",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "usage_notes",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "synonyms",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "example_en",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "example_zo",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "note",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "original_english",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "cefr",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "example_zo_2",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "example_en_2",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "is_deleted",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "deleted_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "dictionary_enhanced": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english_clean",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pos",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "tone_notes",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "confidence",
+        "type": "REAL",
+        "notnull": false,
+        "default": "1.0",
+        "pk": false
+      },
+      {
+        "name": "word_count",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "is_compound",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "compound_parts",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "updated_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "dictionary_import": [
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pos",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "entry_version",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "update_remarks",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "update_description",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zvs_compliance_status",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "raw_json",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "existing_match",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "example",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "sense",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar_word",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "headword",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zolai_word",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zolai_normalized",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "translation",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "first_book",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "all_books",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "accuracy",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "translations",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "dialect",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "book_count",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "is_deleted",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "deleted_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "dictionary_my_import": [
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "dictionary_trilingual_import": [
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "gemini_model_results": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "task",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "model",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "input_text",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "output_json",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "confidence",
+        "type": "REAL",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "ensemble_agreement",
+        "type": "REAL",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "grammar_instructions": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "instruction",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "input",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "output",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "grammar_patterns": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "pattern_id",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pattern",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "description",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "function",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "examples",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "grammar_patterns_enhanced": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "pattern_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pattern_text",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zolai_example",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english_translation",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pattern_type",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "tone_category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "page_section",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "confidence",
+        "type": "REAL",
+        "notnull": false,
+        "default": "1.0",
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "grammar_patterns_import": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pattern",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "description",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "structure",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "function",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "confidence",
+        "type": "REAL",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "examples",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "book",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "data",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zo",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "en",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "ref",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "jsonl_import_log": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "batch_id",
+        "type": "VARCHAR(36)",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "VARCHAR(500)",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "table_name",
+        "type": "VARCHAR(100)",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "rows_imported",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "sha256",
+        "type": "VARCHAR(64)",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "DATETIME",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR(20)",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "error_message",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "knowledge_vectors": [
+      {
+        "name": "id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "text",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "metadata",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "embedding",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_type",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "morph_verified": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "word",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "morphemes",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "root",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "POS",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "analysis_json",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "'gemini'",
+        "pk": false
+      },
+      {
+        "name": "verified_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "ngram": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "ngram_type",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "word",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "a",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "b",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "count",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "particle_database": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "particle",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "function",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "function_type",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "meaning",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "examples",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "notes",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "phrase_context_import": [
+      {
+        "name": "phrase",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "type",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "locations",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "context_words",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "is_idiomatic",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "phrases": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "zo",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "examples",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "phrases_from_bible_import": [
+      {
+        "name": "phrase",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "type",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "examples",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "phrases_import": [
+      {
+        "name": "zo",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "examples",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "confidence",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "phrase",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "verified",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "translation",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "pos_gold": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "sentence",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "tokens",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "tags",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_verse",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "'gemini'",
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "pos_verified": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "word",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pos_tag",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "confidence",
+        "type": "REAL",
+        "notnull": false,
+        "default": "1.0",
+        "pk": false
+      },
+      {
+        "name": "reason",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "'gemini'",
+        "pk": false
+      },
+      {
+        "name": "verified_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "provenance": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "filename",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "size_bytes",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "sha256",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "row_count",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "generator_script",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "status",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "updated_at",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "change_log",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "proverbs": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "category",
+        "type": "VARCHAR",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "proverbs_idioms": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "zolai_text",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english_translation",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "literal_translation",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "cultural_notes",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "proverbs_import": [
+      {
+        "name": "zo",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "en",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "book",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "chapter",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "verse",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "ref",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "type",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "is_proverbial_book",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "has_idiom_pattern",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "sentence_patterns_import": [
+      {
+        "name": "book",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "book_name",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "genre",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "verse_count",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "sov_rate",
+        "type": "REAL",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "negation_rate",
+        "type": "REAL",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "question_rate",
+        "type": "REAL",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "tense_distribution",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "avg_complexity",
+        "type": "REAL",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "simbu": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "text",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "type",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "syllable_data": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "word",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "syllables",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "syllable_count",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "engine",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "confidence",
+        "type": "REAL",
+        "notnull": false,
+        "default": "1.0",
+        "pk": false
+      },
+      {
+        "name": "source_table",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "tone_patterns": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "word",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "tone_category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "meaning_t1",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "meaning_t3",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "meaning_t4",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "sandhi_rules",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "topic_clusters_import": [
+      {
+        "name": "topic",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "keyword_match_count",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "characteristic_words",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "chapters",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "chapter_count",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "usage_examples",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "training_corpus_qwen3_import": [
+      {
+        "name": "messages",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "task",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pattern",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "training_exercises": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "exercise_type",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "difficulty",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "training_exercises_import": [
+      {
+        "name": "instruction",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "input",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "output",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "negation_type",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "reference",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "confidence",
+        "type": "REAL",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "question_type",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "word_order",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "grammar_point",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "error_type",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "training_runs": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "model_name",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "dataset_name",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "entry_count",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "entry_version",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "'v1.0'",
+        "pk": false
+      },
+      {
+        "name": "update_remarks",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "''",
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "metrics_json",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "status",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "\"pending\"",
+        "pk": false
+      },
+      {
+        "name": "completed_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "test_type",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "test_date",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "total_tests",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "passed_tests",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "score",
+        "type": "REAL",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "details",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "training_seed_data_import": [
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "type",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "quality",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "context",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "training_valid_sentences_import": [
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pattern",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "deep_score",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "checks",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "context_score",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "corrections",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "corrected",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "training_validation": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "exercise_id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "level",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "prompt",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "expected",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "predicted",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "is_valid",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "error_codes",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "checked_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "translations": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "target",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "direction",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "reference",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "confidence",
+        "type": "FLOAT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "translations_import": [
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "dialect",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "reference",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "verb_database": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "verb",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "stem",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "verb_class",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "tense",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "meaning",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "examples",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "transitivity",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "vocab": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "headword",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "books",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "examples",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "vocab_import": [
+      {
+        "name": "headword",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "books",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "book_count",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "examples",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pos",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "notes",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "verified",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "vocabulary_enhanced": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english_meaning",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pos",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "tone_category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "etymology",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "compound_breakdown",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "register",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "bible_frequency",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "corpus_frequency",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "source_category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "example_sentences",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "wiki_content": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "wiki_category",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_path",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "title",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "content",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "word_count",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "section_count",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "content_hash",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "entry_version",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "'v1.0'",
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "wiki_content_fts": [
+      {
+        "name": "title",
+        "type": "",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "content",
+        "type": "",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "wiki_content_fts_config": [
+      {
+        "name": "k",
+        "type": "",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "v",
+        "type": "",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "wiki_content_fts_data": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "block",
+        "type": "BLOB",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "wiki_content_fts_docsize": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "sz",
+        "type": "BLOB",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "wiki_content_fts_idx": [
+      {
+        "name": "segid",
+        "type": "",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "term",
+        "type": "",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "pgno",
+        "type": "",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "wiki_lessons": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "lesson_type",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "title",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "content_summary",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "word_count",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "grammar_patterns",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "vocabulary_list",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "entry_version",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "'v1.0'",
+        "pk": false
+      },
+      {
+        "name": "update_remarks",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "''",
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "updated_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "word_alignments": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "ref",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zolai_word",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english_word",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "position",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "word_alignments_import": [
+      {
+        "name": "zo_word",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "en_word",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "en_position",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "confidence",
+        "type": "REAL",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "ref",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "book",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "word_collocations": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "word1",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "word2",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pmiproxy",
+        "type": "FLOAT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "word_collocations_import": [
+      {
+        "name": "collocation",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "examples",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "word_similarity": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "word1",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "word2",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english1",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english2",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "similarity",
+        "type": "REAL",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "reason",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "'gemini'",
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "word_usage": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "word",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "book",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "total_freq",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "meaning_shifts",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "co_occurring_words",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "word_usage_profiles_import": [
+      {
+        "name": "word",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "total_freq",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "books_found",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "per_book_distribution",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "meaning_shifts",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "all_translations",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "zolai_bible_analysis": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "book_code",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "book_name",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "chapter",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "verse",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar_text",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "verse_hash",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "morpheme_analysis",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "grammar_tags",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "tone_analysis",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "compounds_found",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "rare_words",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_version",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "zolai_grammar_patterns": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "pattern_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pattern_name",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pattern_text",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "structure",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "zolai_example",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english_translation",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "morpheme_breakdown",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "tone_pattern",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pattern_type",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "tense",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "aspect",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "negation_type",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "question_type",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "agreement",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "ergative",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "source_category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_line",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "confidence",
+        "type": "REAL",
+        "notnull": false,
+        "default": "1.0",
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "zolai_proverbs_idioms": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english_translation",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "literal_translation",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "morpheme_breakdown",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "theme",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "cultural_context",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "zolai_songs": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "collection",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "song_number",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "title",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "text",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "zolai_tone_sandhi": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "rule_number",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "rule_name",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "underlying_pattern",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "surface_pattern",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "condition",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "examples",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "domain",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "zolai_vocabulary": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pos",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "tone_category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "meaning_t1",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "meaning_t3",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "meaning_t4",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "is_compound",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "compound_parts",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "root_word",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "derivation",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "register",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency_bible",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "frequency_corpus",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "frequency_songs",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "bible_books",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "example_zo",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "example_en",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_priority",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "999",
+        "pk": false
+      },
+      {
+        "name": "source_category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "confidence",
+        "type": "REAL",
+        "notnull": false,
+        "default": "1.0",
+        "pk": false
+      },
+      {
+        "name": "zvs_compliant",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "notes",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "updated_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "zolai_vocabulary_import": [
+      {
+        "name": "word",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "definition",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "examples",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "verified",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "zolai_word_usage": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "word",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "book_code",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "meanings",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "co_occurring",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "contexts",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "zvs_corrections_import": [
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "old_english_clean",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "new_english_clean",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "reason",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "bible_examples",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "sample_ref",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ]
+  },
+  "vocab_reconciliation": {
+    "vocab_columns": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "headword",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "VARCHAR",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency",
+        "type": "INTEGER",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "books",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "examples",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "zolai_vocabulary_columns": [
+      {
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": null,
+        "pk": true
+      },
+      {
+        "name": "zolai",
+        "type": "TEXT",
+        "notnull": true,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "english",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "myanmar",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "pos",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "tone_category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "meaning_t1",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "meaning_t3",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "meaning_t4",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "is_compound",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "compound_parts",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "root_word",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "derivation",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "register",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "frequency_bible",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "frequency_corpus",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "frequency_songs",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "0",
+        "pk": false
+      },
+      {
+        "name": "bible_books",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "example_zo",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "example_en",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_priority",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "999",
+        "pk": false
+      },
+      {
+        "name": "source_category",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "source_file",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "confidence",
+        "type": "REAL",
+        "notnull": false,
+        "default": "1.0",
+        "pk": false
+      },
+      {
+        "name": "zvs_compliant",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "notes",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "created_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "updated_at",
+        "type": "TIMESTAMP",
+        "notnull": false,
+        "default": "CURRENT_TIMESTAMP",
+        "pk": false
+      },
+      {
+        "name": "import_batch_id",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      },
+      {
+        "name": "version",
+        "type": "INTEGER",
+        "notnull": false,
+        "default": "1",
+        "pk": false
+      },
+      {
+        "name": "imported_at",
+        "type": "TEXT",
+        "notnull": false,
+        "default": null,
+        "pk": false
+      }
+    ],
+    "matched": 107979,
+    "vocab_only": 0,
+    "zolai_vocab_only": 4300,
+    "vocab_total": 107979,
+    "zolai_vocabulary_total": 112279,
+    "import_total": 180458,
+    "duplicate_count": 0,
+    "zolai_duplicate_count": 0,
+    "join_columns": "vocab.headword = zolai_vocabulary.zolai"
+  },
+  "grammar_reconciliation": {
+    "matched_by_pattern_id": 0,
+    "grammar_total": 5547,
+    "zolai_grammar_total": 13519,
+    "enhanced_total": 5597,
+    "duplicate_pattern_ids_sample": [],
+    "duplicate_pattern_id_count": 0,
+    "import_total": 6983
+  },
+  "proverbs_reconciliation": {
+    "matched": 5072,
+    "proverbs_only": 2750,
+    "idioms_only": 0,
+    "duplicate_zolai_sample": [
+      [
+        "Ama itna kip leh mihing tate tungah a lamdang ama nasepnate hangin amaute in Topa\u2019 tungah lungdamna ko ta uh hen!",
+        4
+      ],
+      [
+        "Jerusalem nungakte aw, ko\u2019 kingaihna nong suknawi loh nadingun, sakhi leh sanang tawh kei tungah hong kiciam un.",
+        2
+      ],
+      [
+        "Kiman\u2019na nei lo, a haihuaipi hi a, a kidaantah ni ciangin a kisia ding uh hi.",
+        2
+      ],
+      [
+        "Kua in khuapi muanhuai-ah kei hong paipih ding hiam? Kua in Edom gamah kei hong paipih ding hiam?",
+        2
+      ],
+      [
+        "Mipilte in a lauhuai thu mu thei-in pelh uh a, mi mawkmawkte in phu suakin thuak uh hi.",
+        2
+      ]
+    ],
+    "duplicate_zolai_count": 21
+  },
+  "dictionary_reconciliation": {
+    "canonical": 103303,
+    "import_total": 156808,
+    "matched_by_zolai": 135543,
+    "canonical_only": 0,
+    "import_only": 44287,
+    "en_zo_canonical": 113750,
+    "en_zo_import": 135276,
+    "duplicate_pairs_sample": [
+      [
+        "aakbu",
+        "cage for fowls",
+        2
+      ],
+      [
+        "aakbuuk",
+        "chicken barn or roost",
+        2
+      ],
+      [
+        "aakgia",
+        "plume,esp tail of feather of cocks",
+        2
+      ],
+      [
+        "aakgil",
+        "chicken roost barn hen- house coop",
+        2
+      ],
+      [
+        "aakkhuang",
+        "(cock)crows",
+        2
+      ]
+    ],
+    "duplicate_pair_count": 1876
+  },
+  "word_alignments_reconciliation": {
+    "canonical": 385120,
+    "import_total": 627000,
+    "matched_by_ref_zo_en": 628722,
+    "canonical_only": 160120,
+    "join_columns": "word_alignments.(ref,zolai_word,english_word) = word_alignments_import.(ref,zo_word,en_word)"
+  },
+  "translations_reconciliation": {
+    "canonical": 212754,
+    "import_total": 135511
+  },
+  "bible_reconciliation": {
+    "canonical": 62751,
+    "import_total": 62204,
+    "enhanced_total": 0,
+    "analysis_total": 30758,
+    "context_total": 1228
+  },
+  "training_reconciliation": {
+    "canonical": 81805,
+    "import_total": 81805,
+    "seed_total": 500,
+    "valid_total": 4693,
+    "qwen3_total": 9386
+  },
+  "phrases_reconciliation": {
+    "canonical": 5000,
+    "import_total": 15000,
+    "bible_import": 14000
+  },
+  "word_usage_reconciliation": {
+    "canonical": 60365,
+    "zolai_total": 85045,
+    "import_total": 7384
+  },
+  "syllable_data": {
+    "canonical": 189554
+  },
+  "wiki": {
+    "content_total": 1688,
+    "lessons_total": 1688
+  }
+}
