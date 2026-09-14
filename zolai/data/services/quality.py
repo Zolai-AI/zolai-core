@@ -180,7 +180,7 @@ class QualityService:
             "bible": self.check_bible_quality(),
             "translations": self.check_translation_quality(),
             "dictionary_en_zo": self.check_null_counts("dictionary_en_zo"),
-            "vocab": self.check_null_counts("vocab"),
+            "zolai_vocabulary": self.check_null_counts("zolai_vocabulary"),
             "phrases": self.check_null_counts("phrases"),
             "grammar_patterns": self.check_null_counts("grammar_patterns"),
             "word_usage": self.check_null_counts("word_usage"),

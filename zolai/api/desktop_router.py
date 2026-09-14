@@ -711,7 +711,7 @@ async def export_data(data_type: str, limit: int = Query(20)):
     table_map = {
         "dictionary": "dictionary",
         "bible": "bible_verses",
-        "vocabulary": "vocab",
+        "vocabulary": "vocabulary",
         "grammar": "grammar_patterns",
         "phrases": "phrases",
         "exercises": "training_exercises",

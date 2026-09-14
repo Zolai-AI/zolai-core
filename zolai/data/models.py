@@ -140,13 +140,13 @@ class PhraseEntry(Base):
         return f"<PhraseEntry(zo={self.zo!r})>"
 
 
-class VocabEntry(Base):
+class VocabularyEntry(Base):
     """Vocabulary index entries from Bible.
 
     Source: vocab_index_full.jsonl
     """
 
-    __tablename__ = "vocab"
+    __tablename__ = "vocabulary"
 
     id: int = Column(Integer, primary_key=True, autoincrement=True)
     headword: str = Column(String, nullable=False, index=True)
@@ -157,7 +157,7 @@ class VocabEntry(Base):
     examples: str = Column(Text, nullable=False, default="[]")
 
     def __repr__(self) -> str:
-        return f"<VocabEntry(headword={self.headword!r})>"
+        return f"<VocabularyEntry(headword={self.headword!r})>"
 
 
 class TranslationPair(Base):
@@ -270,10 +270,10 @@ class TrainingExercise(Base):
     )
 
 
-class BibleContextAnalysis(Base):
+class BibleAnalysis(Base):
     """Per-book and per-chapter Bible context analysis."""
 
-    __tablename__ = "bible_context"
+    __tablename__ = "bible_analysis"
 
     id: int = Column(Integer, primary_key=True, autoincrement=True)
     book: str = Column(String, nullable=False, index=True)
@@ -282,7 +282,7 @@ class BibleContextAnalysis(Base):
     data: str = Column(Text, nullable=False)
 
     __table_args__ = (
-        Index("idx_bible_context_book", "book"),
+        Index("idx_bible_analysis_book", "book"),
     )
 
 
@@ -336,13 +336,13 @@ MODEL_REGISTRY: dict[str, type[Base]] = {
     "bible_verses": BibleVerse,
     "grammar_patterns": GrammarPattern,
     "phrases": PhraseEntry,
-    "vocab": VocabEntry,
+    "vocabulary": VocabularyEntry,
     "translations": TranslationPair,
     "word_usage": WordUsageProfile,
     "provenance": ProvenanceFile,
     "data_audit_log": DataAuditLog,
     "training_exercises": TrainingExercise,
-    "bible_context": BibleContextAnalysis,
+    "bible_analysis": BibleAnalysis,
     "word_alignments": WordAlignment,
     "word_collocations": WordCollocation,
     "proverbs": Proverb,

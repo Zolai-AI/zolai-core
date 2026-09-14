@@ -30,7 +30,7 @@ CANONICAL_JSONL_FILES = {
     "bible/word_alignments_v1.jsonl": "word_alignments",
     "bible/grammar_patterns_v2.jsonl": "grammar_patterns",
     "bible/phrases_v1.jsonl": "phrases",
-    "bible/vocab_index_full.jsonl": "vocab",
+    "bible/vocab_index_full.jsonl": "zolai_vocabulary",
     "bible/vocab_from_bible.jsonl": "zolai_vocabulary",
     "bible/phrases_from_bible.jsonl": "phrases_from_bible",
     "bible/translation_pairs_v1.jsonl": "translations",
@@ -51,7 +51,7 @@ CANONICAL_JSONL_FILES = {
     "dictionary/processed/dict_corrections.jsonl": "zvs_corrections",
     "dictionary/processed/phrases_verified.jsonl": "phrases",
     "dictionary/processed/sentence_patterns_verified.jsonl": "grammar_patterns",
-    "dictionary/processed/vocab_verified.jsonl": "vocab",
+    "dictionary/processed/vocab_verified.jsonl": "zolai_vocabulary",
     
     # Training
     "training/pipeline_output/training_corpus_qwen3.jsonl": "training_corpus_qwen3",
@@ -91,7 +91,7 @@ class ImportVersionMixin:
 
 class JSONLImportLog(Base):
     """Log of JSONL import operations."""
-    __tablename__ = "jsonl_import_log"
+    __tablename__ = "import_log"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     batch_id = Column(String(36), nullable=False, index=True)
@@ -308,7 +308,7 @@ class JSONLPipeline:
         session = self._get_session()
         
         try:
-            query = "SELECT DISTINCT table_name FROM jsonl_import_log"
+            query = "SELECT DISTINCT table_name FROM import_log"
             if batch_id:
                 query += " WHERE batch_id = :batch_id"
                 result = session.execute(text(query), {"batch_id": batch_id})
@@ -335,7 +335,7 @@ class JSONLPipeline:
             query = """
                 SELECT batch_id, source_file, table_name, rows_imported, sha256, 
                        imported_at, version, status, error_message
-                FROM jsonl_import_log
+                FROM import_log
                 ORDER BY imported_at DESC
                 LIMIT :limit
             """

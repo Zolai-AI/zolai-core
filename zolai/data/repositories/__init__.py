@@ -6,7 +6,7 @@ transactions, version tracking, and audit logging.
 
 from .alignment import AlignmentRepository
 from .base import BaseRepository
-from .bible import BibleContextRepository, BibleRepository
+from .bible import BibleAnalysisRepository, BibleRepository
 from .dictionary import DictionaryEnZoRepository, DictionaryRepository
 from .exercise import ExerciseRepository
 from .extended import (
@@ -29,7 +29,7 @@ __all__ = [
     "AlignmentRepository",
     "AuditRepository",
     "BaseRepository",
-    "BibleContextRepository",
+    "BibleAnalysisRepository",
     "BibleRepository",
     "CorrectionRepository",
     "DictionaryEnZoRepository",
@@ -79,7 +79,7 @@ def get_repositories(db_path=None) -> dict[str, BaseRepository]:
         "vocabulary": VocabularyRepository(engine),
         "grammar": GrammarRepository(engine),
         "bible": BibleRepository(engine),
-        "bible_context": BibleContextRepository(engine),
+        "bible_analysis": BibleAnalysisRepository(engine),
         "translation": TranslationRepository(engine),
         "word_usage": WordUsageRepository(engine),
         "word_collocation": WordCollocationRepository(engine),

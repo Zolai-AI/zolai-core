@@ -23,7 +23,7 @@ _EXPORT_FILES: dict[str, str] = {
     "bible_verses": "parallel_corpus_v1.jsonl",
     "grammar_patterns": "grammar_patterns_v2.jsonl",
     "phrases": "phrases_v1.jsonl",
-    "vocab": "vocab_index_full.jsonl",
+    "vocabulary": "vocab_index_full.jsonl",
     "translations": "translation_pairs_v1.jsonl",
     "word_usage": "word_usage_profiles.jsonl",
     "provenance": "provenance.jsonl",
