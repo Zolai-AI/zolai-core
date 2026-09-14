@@ -35,3 +35,4 @@ report/zvs-scan*
 # Prisma generated files
 prisma/migrations/
 prisma/node_modules/
+=*

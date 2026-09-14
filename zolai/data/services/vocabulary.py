@@ -65,12 +65,12 @@ class VocabularyService:
     def get_stats(self) -> dict[str, Any]:
         """Get vocabulary statistics."""
         with self.engine.connect() as conn:
-            total = conn.execute(text("SELECT COUNT(*) FROM vocab")).scalar()
+            total = conn.execute(text("SELECT COUNT(*) FROM zolai_vocabulary")).scalar()
             total_freq = conn.execute(
-                text("SELECT SUM(frequency) FROM vocab")
+                text("SELECT SUM(frequency) FROM zolai_vocabulary")
             ).scalar()
             with_pos = conn.execute(
-                text("SELECT COUNT(*) FROM vocab WHERE pos != '' AND pos IS NOT NULL")
+                text("SELECT COUNT(*) FROM zolai_vocabulary WHERE pos != '' AND pos IS NOT NULL")
             ).scalar()
 
         return {

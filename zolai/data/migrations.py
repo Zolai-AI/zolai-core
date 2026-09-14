@@ -83,17 +83,17 @@ CONSTRAINT_MIGRATIONS = [
         "ck_phrases_frequency_nonneg",
         "Frequency cannot be negative",
     ),
-    # Vocab constraints
+    # Vocabulary constraints
     (
-        "vocab",
+        "vocabulary",
         "UNIQUE(headword)",
-        "ix_vocab_headword_unique",
+        "ix_vocabulary_headword_unique",
         "Unique constraint on headword",
     ),
     (
-        "vocab",
+        "vocabulary",
         "CHECK(frequency >= 0)",
-        "ck_vocab_frequency_nonneg",
+        "ck_vocabulary_frequency_nonneg",
         "Frequency cannot be negative",
     ),
     # Translations constraints
@@ -188,11 +188,11 @@ PERFORMANCE_INDEXES = [
     ("phrases", "CREATE INDEX IF NOT EXISTS ix_phrases_english ON phrases(english)"),
     ("phrases", "CREATE INDEX IF NOT EXISTS ix_phrases_myanmar ON phrases(myanmar)"),
     ("phrases", "CREATE INDEX IF NOT EXISTS ix_phrases_frequency ON phrases(frequency)"),
-    # Vocab indexes
-    ("vocab", "CREATE INDEX IF NOT EXISTS ix_vocab_english ON vocab(english)"),
-    ("vocab", "CREATE INDEX IF NOT EXISTS ix_vocab_frequency ON vocab(frequency)"),
-    ("vocab", "CREATE INDEX IF NOT EXISTS ix_vocab_pos ON vocab(pos)"),
-    ("vocab", "CREATE INDEX IF NOT EXISTS ix_vocab_book_count ON vocab(book_count)"),
+    # Vocabulary indexes
+    ("vocabulary", "CREATE INDEX IF NOT EXISTS ix_vocabulary_english ON vocabulary(english)"),
+    ("vocabulary", "CREATE INDEX IF NOT EXISTS ix_vocabulary_frequency ON vocabulary(frequency)"),
+    ("vocabulary", "CREATE INDEX IF NOT EXISTS ix_vocabulary_pos ON vocabulary(pos)"),
+    ("vocabulary", "CREATE INDEX IF NOT EXISTS ix_vocabulary_book_count ON vocabulary(book_count)"),
     # Translations indexes
     ("translations", "CREATE INDEX IF NOT EXISTS ix_trans_source ON translations(source)"),
     ("translations", "CREATE INDEX IF NOT EXISTS ix_trans_target ON translations(target)"),
@@ -224,9 +224,9 @@ PERFORMANCE_INDEXES = [
     # Audit log indexes
     ("data_audit_log", "CREATE INDEX IF NOT EXISTS idx_audit_changed_at ON data_audit_log(changed_at)"),
     ("data_audit_log", "CREATE INDEX IF NOT EXISTS idx_audit_reason ON data_audit_log(reason)"),
-    # Bible context indexes
-    ("bible_context", "CREATE INDEX IF NOT EXISTS ix_bible_ctx_chapter ON bible_context(chapter)"),
-    ("bible_context", "CREATE INDEX IF NOT EXISTS ix_bible_ctx_type ON bible_context(analysis_type)"),
+    # Bible analysis indexes
+    ("bible_analysis", "CREATE INDEX IF NOT EXISTS ix_bible_analysis_chapter ON bible_analysis(chapter)"),
+    ("bible_analysis", "CREATE INDEX IF NOT EXISTS ix_bible_analysis_type ON bible_analysis(analysis_type)"),
 ]
 
 

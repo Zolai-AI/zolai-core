@@ -1,6 +1,7 @@
 """Zolai Toolkit — Unified CLI (Typer)."""
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import typer
@@ -595,6 +596,174 @@ def evaluate_cmd(
     if json_out:
         argv += ["--json"]
     raise typer.Exit(eval_main(argv))
+
+
+# ============================================================
+# FOUNDATION
+# ============================================================
+
+
+@asynccontextmanager
+async def _foundation_analyzer(syllable_mode: str = "rule", tokenizer_model: str = None):
+    """Context manager for FoundationAnalyzer."""
+    from zolai.foundation import get_foundation_analyzer
+    analyzer = get_foundation_analyzer(syllable_mode=syllable_mode, tokenizer_model=tokenizer_model)
+    yield analyzer
+
+
+@app.command()
+def foundation(
+    analyze: str = typer.Option(None, "--analyze", "-a", help="Analyze: word|sentence|paragraph"),
+    text: str = typer.Option(None, "--text", "-t", help="Text to analyze"),
+    syllable_mode: str = typer.Option("rule", "--syllable-mode", help="Syllable mode: rule|crf"),
+    tokenizer_model: str = typer.Option(None, "--tokenizer-model", help="Path to tokenizer model"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """🔬 Foundation analysis: word, sentence, or paragraph."""
+    _setup_logging(verbose)
+
+    if not analyze or not text:
+        rprint("[yellow]Usage: zolai foundation --analyze word|sentence|paragraph --text \"...\"[/yellow]")
+        raise typer.Exit(1)
+
+    from zolai.foundation import get_foundation_analyzer
+
+    analyzer = get_foundation_analyzer(syllable_mode=syllable_mode, tokenizer_model=tokenizer_model)
+
+    if analyze == "word":
+        result = analyzer.analyze_word(text)
+        _print_word_analysis(result)
+    elif analyze == "sentence":
+        result = analyzer.analyze_sentence(text)
+        _print_sentence_analysis(result)
+    elif analyze == "paragraph":
+        result = analyzer.analyze_paragraph(text)
+        _print_paragraph_analysis(result)
+    else:
+        rprint(f"[red]Unknown analysis type: {analyze}. Use word|sentence|paragraph[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def foundation_gold_eval(
+    syllable_mode: str = typer.Option("rule", "--syllable-mode", help="Syllable mode: rule|crf"),
+    tokenizer_model: str = typer.Option(None, "--tokenizer-model", help="Path to tokenizer model"),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+    output: str = typer.Option(None, "--output", "-o", help="Output file path"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """📊 Run gold evaluation against ground-truth fixtures."""
+    _setup_logging(verbose)
+    from eval.gold_metrics import run_gold_evaluation
+
+    report = run_gold_evaluation(
+        syllable_mode=syllable_mode,
+        tokenizer_model=tokenizer_model,
+    )
+
+    if json_out:
+        import json
+        out = json.dumps(report.to_dict(), indent=2)
+        if output:
+            Path(output).write_text(out, encoding="utf-8")
+        else:
+            rprint(out)
+    else:
+        report.print_summary()
+
+    # Exit with non-zero if overall accuracy < 0.8
+    if report.overall_accuracy < 0.8:
+        raise typer.Exit(1)
+
+
+def _print_word_analysis(result) -> None:
+    """Pretty-print word analysis."""
+    table = Table(title=f"Word Analysis: {result.word}", show_header=True)
+    table.add_column("Field", style="cyan")
+    table.add_column("Value", style="green")
+
+    tok = result.primary_token
+    table.add_row("Syllables", " · ".join(s.syllable for s in tok.syllables))
+    table.add_row("Syllable Count", str(tok.syllable_count))
+    table.add_row("POS", f"{tok.pos.tag} (conf: {tok.pos.confidence:.2f})")
+    table.add_row("Root", tok.morphology.root)
+    table.add_row("Morphemes", " + ".join(tok.morphology.morphemes))
+    table.add_row("Meaning", tok.morphology.meaning)
+    table.add_row("Known Word", "✓" if result.is_known_word else "✗")
+    table.add_row("ZVS Compliant", "✓" if result.zvs_compliant else "✗")
+    if result.zvs_notes:
+        table.add_row("ZVS Notes", "; ".join(result.zvs_notes))
+    if result.dictionary_senses:
+        table.add_row("Dict Senses", "; ".join(result.dictionary_senses))
+    if result.bible_attestations:
+        table.add_row("Bible Attestations", "; ".join(result.bible_attestations))
+
+    console.print(table)
+
+
+def _print_sentence_analysis(result) -> None:
+    """Pretty-print sentence analysis."""
+    table = Table(title=f"Sentence Analysis", show_header=True)
+    table.add_column("Field", style="cyan")
+    table.add_column("Value", style="green")
+
+    table.add_row("Text", result.sentence)
+    table.add_row("Tokens", " | ".join(t.form for t in result.tokens))
+    table.add_row("POS Tags", " | ".join(p.tag for p in result.pos_tags))
+    table.add_row("SOV Valid", "✓" if result.sov_valid else "✗")
+    table.add_row("Ergative Present", "✓" if result.ergative_present else "✗")
+    table.add_row("Negation", result.negation_type or "—")
+    table.add_row("Question Type", result.question_type or "—")
+    table.add_row("Tense", result.tense or "—")
+    table.add_row("ZVS Compliant", "✓" if result.zvs_compliant else "✗")
+    if result.zvs_violations:
+        table.add_row("ZVS Violations", "; ".join(result.zvs_violations))
+    if result.grammar_patterns_matched:
+        table.add_row("Grammar Patterns", ", ".join(result.grammar_patterns_matched))
+    if result.bible_reference:
+        table.add_row("Bible Ref", result.bible_reference)
+    if result.english_translation:
+        table.add_row("Translation", result.english_translation)
+
+    console.print(table)
+
+
+def _print_paragraph_analysis(result) -> None:
+    """Pretty-print paragraph analysis."""
+    table = Table(title="Paragraph Analysis", show_header=True)
+    table.add_column("Field", style="cyan")
+    table.add_column("Value", style="green")
+
+    table.add_row("Text", result.paragraph[:100] + ("..." if len(result.paragraph) > 100 else ""))
+    table.add_row("Sentence Count", str(result.sentence_count))
+    table.add_row("Total Tokens", str(result.total_tokens))
+    table.add_row("Register", result.register)
+    table.add_row("Dominant Tense", result.dominant_tense or "—")
+    table.add_row("Cohesion Score", f"{result.cohesion_score:.2f}")
+    table.add_row("Style Profile", ", ".join(f"{k}: {v:.0%}" for k, v in result.style_profile.items()))
+
+    console.print(table)
+
+    # Print sentence breakdown
+    if result.sentences:
+        sent_table = Table(title="Sentences", show_header=True)
+        sent_table.add_column("#", style="dim")
+        sent_table.add_column("Text", style="white")
+        sent_table.add_column("Tense", style="cyan")
+        sent_table.add_column("Negation", style="yellow")
+        sent_table.add_column("Question", style="magenta")
+        sent_table.add_column("ZVS", style="green")
+
+        for i, s in enumerate(result.sentences, 1):
+            sent_table.add_row(
+                str(i),
+                s.sentence[:80] + ("..." if len(s.sentence) > 80 else ""),
+                s.tense or "—",
+                s.negation_type or "—",
+                s.question_type or "—",
+                "✓" if s.zvs_compliant else "✗",
+            )
+        console.print(sent_table)
 
 
 # ============================================================

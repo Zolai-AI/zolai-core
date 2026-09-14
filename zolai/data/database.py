@@ -46,7 +46,7 @@ _JSON_COLS: dict[str, set[str]] = {
     "bible_verses": set(),
     "grammar_patterns": {"examples"},
     "phrases": {"examples"},
-    "vocab": {"books", "examples"},
+    "vocabulary": {"books", "examples"},
     "translations": set(),
     "word_usage": {"meaning_shifts", "co_occurring_words"},
     "provenance": set(),
@@ -633,7 +633,7 @@ class DatabaseManager:
 
     def get_vocab(self, word: str) -> list[dict[str, Any]]:
         """Look up vocabulary entries by headword."""
-        table = Table("vocab", self.metadata, autoload_with=self.engine)
+        table = Table("vocabulary", self.metadata, autoload_with=self.engine)
         with self.engine.connect() as conn:
             rows = conn.execute(
                 table.select().where(

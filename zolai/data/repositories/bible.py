@@ -160,10 +160,10 @@ class BibleRepository(BaseRepository):
 
 
 class BibleContextRepository(BaseRepository):
-    """Repository for Bible context analysis (bible_context table)."""
+    """Repository for Bible context analysis (bible_analysis table)."""
 
     def __init__(self, engine: Engine) -> None:
-        super().__init__(engine, "bible_context")
+        super().__init__(engine, "bible_analysis")
 
     def get_book_analysis(self, book: str) -> list[dict[str, Any]]:
         """Get all context analyses for a book."""
@@ -204,7 +204,52 @@ class BibleContextRepository(BaseRepository):
         with self._engine.connect() as conn:
             rows = conn.execute(
                 text(
-                    "SELECT DISTINCT analysis_type FROM bible_context "
+                    "SELECT DISTINCT analysis_type FROM bible_analysis "
+                    "WHERE analysis_type IS NOT NULL ORDER BY analysis_type"
+                )
+            ).fetchall()
+        return [row[0] for row in rows]
+
+    def get_book_analysis(self, book: str) -> list[dict[str, Any]]:
+        """Get all context analyses for a book."""
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                self.table.select()
+                .where((self.table.c.book == book) & (self.table.c.chapter.is_(None)))
+                .order_by(self.table.c.analysis_type)
+            ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
+    def get_chapter_analysis(
+        self, book: str, chapter: int
+    ) -> list[dict[str, Any]]:
+        """Get context analyses for a specific chapter."""
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                self.table.select()
+                .where(
+                    (self.table.c.book == book)
+                    & (self.table.c.chapter == chapter)
+                )
+                .order_by(self.table.c.analysis_type)
+            ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
+    def get_by_type(self, analysis_type: str) -> list[dict[str, Any]]:
+        """Get all analyses of a specific type."""
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                self.table.select()
+                .where(self.table.c.analysis_type == analysis_type)
+            ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
+    def get_analysis_types(self) -> list[str]:
+        """Get all unique analysis types."""
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT DISTINCT analysis_type FROM bible_analysis "
                     "WHERE analysis_type IS NOT NULL ORDER BY analysis_type"
                 )
             ).fetchall()

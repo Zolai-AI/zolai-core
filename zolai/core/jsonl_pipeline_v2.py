@@ -83,7 +83,7 @@ class Base(DeclarativeBase):
 
 class JSONLImportLog(Base):
     """Log of JSONL import operations."""
-    __tablename__ = "jsonl_import_log"
+    __tablename__ = "import_log"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     batch_id = Column(String(36), nullable=False, index=True)
@@ -358,7 +358,7 @@ class JSONLPipeline:
         session = self._get_session()
         
         try:
-            query = "SELECT DISTINCT table_name FROM jsonl_import_log"
+            query = "SELECT DISTINCT table_name FROM import_log"
             if batch_id:
                 result = session.execute(text(query + " WHERE batch_id = :batch_id"), {"batch_id": batch_id})
             else:
@@ -384,7 +384,7 @@ class JSONLPipeline:
             query = """
                 SELECT batch_id, source_file, table_name, rows_imported, sha256, 
                        imported_at, version, status, error_message
-                FROM jsonl_import_log
+                FROM import_log
                 ORDER BY imported_at DESC
                 LIMIT :limit
             """

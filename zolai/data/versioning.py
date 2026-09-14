@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # System / internal tables that must NOT receive import metadata.
 _SKIP_PREFIXES = ("sqlite_",)
-_SKIP_NAMES = {"jsonl_import_log", "provenance", "data_audit_log"}
+_SKIP_NAMES = {"import_log", "provenance", "data_audit_log"}
 
 # FTS shadow tables cannot be altered.
 _FTS_SUFFIXES = ("_fts", "_fts_data", "_fts_idx", "_fts_docsize", "_fts_config")

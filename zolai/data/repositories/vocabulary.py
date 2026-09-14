@@ -1,4 +1,4 @@
-"""Vocabulary repository for vocab entries and word usage profiles."""
+"""Vocabulary repository for vocabulary entries and word usage profiles."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ from .base import BaseRepository
 
 
 class VocabularyRepository(BaseRepository):
-    """Repository for vocabulary index (vocab table)."""
+    """Repository for vocabulary index (vocabulary table)."""
 
     def __init__(self, engine: Engine) -> None:
-        super().__init__(engine, "vocab", id_column="id")
+        super().__init__(engine, "vocabulary", id_column="id")
 
     def get_by_headword(self, headword: str) -> list[dict[str, Any]]:
         """Get vocabulary entries by headword (case-insensitive)."""
