@@ -435,7 +435,7 @@ class TestFoundationModelCRUD:
         assert records[0]["metric"] == "accuracy"
         assert records[0]["value"] == 0.95
         assert records[0]["baseline"] == 0.90
-        assert records[0]["delta"] == 0.05
+        assert abs(records[0]["delta"] - 0.05) < 0.001
 
         records = repo.get_by_metric("accuracy")
         assert len(records) >= 1
