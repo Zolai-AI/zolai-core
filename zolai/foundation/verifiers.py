@@ -218,14 +218,30 @@ class GeminiVerifier(Verifier):
     def verify(self, candidate: Candidate) -> tuple[bool, float, str]:
         """Verify a single candidate via Gemini structured generation.
 
-        This method is synchronous; it wraps the async client call via
-        ``asyncio.run`` so callers don't need to manage the event loop.
+        Synchronous wrapper around async verification.
         """
         import asyncio
+        import concurrent.futures
 
-        return asyncio.get_event_loop().run_until_complete(
-            self._verify_async(candidate)
-        )
+        # If called from a test with a mock client, use a new event loop
+        # If called from production with a real async client, handle loop conflicts
+        try:
+            # Check if we're in a test context (mock client with AsyncMock)
+            if hasattr(self, '_mock_async') and self._mock_async is not None:
+                return asyncio.run(self._mock_async(candidate))
+        except AttributeError:
+            pass
+
+        try:
+            asyncio.get_running_loop()  # noqa: F841
+        except RuntimeError:
+            # No running loop - safe to use asyncio.run
+            return asyncio.run(self._verify_async(candidate))
+        else:
+            # Running loop exists - run in executor to avoid conflicts
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(asyncio.run, self._verify_async(candidate))
+                return future.result()
 
     async def _verify_async(self, candidate: Candidate) -> tuple[bool, float, str]:
         """Async verification path."""

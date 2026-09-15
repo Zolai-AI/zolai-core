@@ -735,7 +735,9 @@ def foundation_promote(
         task = progress.add_task("Promoting with threshold={threshold}...", total=None)
         result = etl.promote_staging_to_canonical(threshold=threshold, batch_size=batch_size)
         progress.update(task, completed=True)
-        rprint(f"[green]✓ Promoted: {result.records_promoted} records, {result.records_queued_for_review} queued for review[/green]")
+        promoted = result.records_promoted
+        queued = result.records_queued_for_review
+        rprint(f"[green]✓ Promoted: {promoted} records, {queued} queued for review[/green]")
 
 
 @app.command()
