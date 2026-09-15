@@ -703,7 +703,7 @@ def _print_word_analysis(result) -> None:
 
 def _print_sentence_analysis(result) -> None:
     """Pretty-print sentence analysis."""
-    table = Table(title=f"Sentence Analysis", show_header=True)
+    table = Table(title="Sentence Analysis", show_header=True)
     table.add_column("Field", style="cyan")
     table.add_column("Value", style="green")
 
@@ -830,8 +830,8 @@ def serve(
 @app.command()
 def desktop():
     """🖥️ Launch the Zolai desktop app."""
-    import subprocess
     import os
+    import subprocess
 
     workspace = Path(__file__).parent.parent.parent.parent
     tauri_dir = workspace / "zolai-tauri"

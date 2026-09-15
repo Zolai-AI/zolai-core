@@ -1,23 +1,19 @@
 """Tests for Foundation Evidence and Consensus modules."""
 from __future__ import annotations
 
-import pytest
-
 from zolai.foundation import (
     Candidate,
-    Evidence,
     Confidence,
-    EvidenceTier,
-    Verifier,
-    NullVerifier,
+    Evidence,
     EvidenceThresholdVerifier,
-    ConsensusResult,
-    majority_vote,
-    weighted_evidence_consensus,
-    threshold_gate_consensus,
+    EvidenceTier,
+    NullVerifier,
     adaptive_consensus,
-    run_consensus,
     build_candidates_from_evidence,
+    majority_vote,
+    run_consensus,
+    threshold_gate_consensus,
+    weighted_evidence_consensus,
 )
 
 

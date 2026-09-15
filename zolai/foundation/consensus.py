@@ -7,9 +7,9 @@ from __future__ import annotations
 import logging
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
-from .evidence import Candidate, Confidence, EvidenceTier
+from .evidence import Candidate, EvidenceTier
 
 log = logging.getLogger(__name__)
 
@@ -41,9 +41,8 @@ def majority_vote(
     """
     if not candidates:
         raise ValueError("No candidates provided")
-
-    fact_type = candidates[0].fact_type
     fact_key = candidates[0].fact_key
+    fact_type = candidates[0].fact_type
 
     # Normalize values for comparison
     def normalize_value(c: Candidate) -> tuple:
@@ -98,9 +97,8 @@ def weighted_evidence_consensus(
     """
     if not candidates:
         raise ValueError("No candidates provided")
-
-    fact_type = candidates[0].fact_type
     fact_key = candidates[0].fact_key
+    fact_type = candidates[0].fact_type
 
     # Score each candidate by evidence weight
     scored: list[tuple[float, Candidate]] = []
@@ -159,9 +157,8 @@ def threshold_gate_consensus(
     """
     if not candidates:
         raise ValueError("No candidates provided")
-
-    fact_type = candidates[0].fact_type
     fact_key = candidates[0].fact_key
+    fact_type = candidates[0].fact_type
 
     require_tiers = require_tiers or [
         EvidenceTier.BIBLE_PARALLEL,
@@ -247,7 +244,6 @@ def adaptive_consensus(
     if not candidates:
         raise ValueError("No candidates provided")
 
-    fact_key = candidates[0].fact_key
 
     if fact_type == "word":
         # Words need strong evidence: Bible or Dictionary tier preferred
@@ -343,6 +339,5 @@ def run_consensus(
     """Run adaptive consensus on candidates."""
     if not candidates:
         raise ValueError("No candidates provided")
-
     ftype = fact_type or candidates[0].fact_type
     return adaptive_consensus(candidates, ftype)

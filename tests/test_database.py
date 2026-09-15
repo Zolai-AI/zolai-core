@@ -23,7 +23,7 @@ from zolai.data.database import DatabaseManager, get_manager, init_db
 from zolai.data.models import (
     MODEL_REGISTRY,
     Base,
-    BibleContextAnalysis,
+    BibleAnalysis,
     BibleVerse,
     DataAuditLog,
     DictionaryEnZoEntry,
@@ -34,7 +34,7 @@ from zolai.data.models import (
     Proverb,
     TrainingExercise,
     TranslationPair,
-    VocabEntry,
+    VocabularyEntry,
     WordAlignment,
     WordCollocation,
     WordUsageProfile,
@@ -485,14 +485,14 @@ class TestModelImports:
     def test_all_models_importable(self):
         """25. All 15 ORM models are importable and have correct table names."""
         from zolai.data.models import (
-            BibleContextAnalysis, DataAuditLog, Proverb, TrainingExercise,
+            BibleAnalysis, DataAuditLog, Proverb, TrainingExercise,
             WordAlignment, WordCollocation,
         )
 
         models = [
             DictionaryEntry, DictionaryEnZoEntry, BibleVerse, GrammarPattern,
-            PhraseEntry, VocabEntry, TranslationPair, WordUsageProfile,
-            ProvenanceFile, DataAuditLog, TrainingExercise, BibleContextAnalysis,
+            PhraseEntry, VocabularyEntry, TranslationPair, WordUsageProfile,
+            ProvenanceFile, DataAuditLog, TrainingExercise, BibleAnalysis,
             WordAlignment, WordCollocation, Proverb,
         ]
         table_names = {
