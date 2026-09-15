@@ -50,6 +50,23 @@ _JSON_COLS: dict[str, set[str]] = {
     "translations": set(),
     "word_usage": {"meaning_shifts", "co_occurring_words"},
     "provenance": set(),
+    # Foundation Raw Layer
+    "foundation_raw_corpus": {"payload"},
+    "foundation_raw_llm": {"response_json"},
+    # Foundation Staging Layer
+    "foundation_staging_words": {"syllables", "morphology", "meanings", "tone_profile"},
+    "foundation_staging_sentences": {"tokens", "pos_tags", "structure", "translation", "grammar"},
+    "foundation_staging_paragraphs": {"sentences", "style_profile"},
+    "foundation_staging_evidence": {"candidate_value", "evidence"},
+    # Foundation Canonical Layer
+    "canonical_words": {"syllables", "morphology", "meanings", "tone_profile", "evidence_ids"},
+    "canonical_sentences": {"tokens", "pos_tags", "dependencies", "translation", "grammar", "evidence_ids"},
+    "canonical_paragraphs": {"sentences", "style_profile", "paraphrases", "evidence_ids"},
+    # Foundation Evidence/Consensus/Verification
+    "foundation_evidence": {"payload"},
+    "foundation_consensus": {"candidates", "decision", "notes"},
+    # Foundation Meta
+    "foundation_batches": {"stats"},
 }
 
 

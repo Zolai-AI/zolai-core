@@ -856,3 +856,35 @@ async def get_ai_models():
     except Exception as e:
         return {"models": [{"name": "zolai-local", "provider": "zolai", "type": "local", "endpoint": "/chat/zolai"}], "default": "zolai-local", "error": str(e)}
 
+
+# ═══════════════════════════════════════════
+# OLLAMA MODELS ENDPOINT (Dynamic)
+# ═══════════════════════════════════════════
+
+@router.get("/ollama/models")
+async def get_ollama_models():
+    """Get available Ollama models from local Ollama server."""
+    try:
+        import httpx
+        # Default Ollama URL from config
+        ollama_url = getattr(config, 'ollama_url', 'http://localhost:11434')
+        
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"{ollama_url}/api/tags")
+            if response.status_code == 200:
+                data = response.json()
+                models = []
+                for m in data.get("models", []):
+                    models.append({
+                        "name": m.get("name", ""),
+                        "provider": "ollama",
+                        "type": "local",
+                        "size": m.get("size", 0),
+                        "digest": m.get("digest", ""),
+                        "endpoint": "/chat/zolai"
+                    })
+                return {"models": models, "default": "zolai-local"}
+            else:
+                return {"models": [], "default": "zolai-local", "error": f"Ollama returned {response.status_code}"}
+    except Exception as e:
+        return {"models": [], "default": "zolai-local", "error": str(e)}

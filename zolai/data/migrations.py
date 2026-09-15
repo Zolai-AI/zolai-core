@@ -10,6 +10,335 @@ from typing import Any
 from sqlalchemy import text
 
 from .database import DatabaseManager
+from .models import Base
+
+
+def create_foundation_tables(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create all Foundation layer tables (Phase B).
+
+    This creates the 13 Foundation tables:
+    - Raw Layer: foundation_raw_corpus, foundation_raw_llm
+    - Staging Layer: foundation_staging_words, foundation_staging_sentences,
+      foundation_staging_paragraphs, foundation_staging_evidence
+    - Canonical Layer: canonical_words, canonical_sentences, canonical_paragraphs
+    - Evidence/Consensus: foundation_evidence, foundation_verifications, foundation_consensus
+    - Meta: foundation_batches, foundation_review_queue, foundation_metrics
+
+    Returns:
+        Dict with 'created', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+
+    foundation_tables = [
+        "foundation_raw_corpus",
+        "foundation_raw_llm",
+        "foundation_staging_words",
+        "foundation_staging_sentences",
+        "foundation_staging_paragraphs",
+        "foundation_staging_evidence",
+        "canonical_words",
+        "canonical_sentences",
+        "canonical_paragraphs",
+        "foundation_evidence",
+        "foundation_verifications",
+        "foundation_consensus",
+        "foundation_batches",
+        "foundation_review_queue",
+        "foundation_metrics",
+    ]
+
+    created = []
+    skipped = []
+    errors = []
+
+    # Create tables that don't exist yet
+    for table_name in foundation_tables:
+        if table_name in existing_tables:
+            skipped.append(f"{table_name} (already exists)")
+            continue
+
+    if not skipped or len(skipped) != len(foundation_tables):
+        # Some tables need to be created - use SQLAlchemy's create_all
+        try:
+            # Get the metadata for only foundation tables
+            foundation_metadata = Base.metadata
+            tables_to_create = [
+                foundation_metadata.tables[t]
+                for t in foundation_tables
+                if t in foundation_metadata.tables and t not in existing_tables
+            ]
+            if tables_to_create:
+                foundation_metadata.create_all(mgr.engine, tables=tables_to_create)
+                for t in tables_to_create:
+                    created.append(t.name)
+        except Exception as exc:
+            errors.append(f"create_all: {exc}")
+
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+# Constraint migrations for Foundation tables
+FOUNDATION_CONSTRAINT_MIGRATIONS = [
+    # foundation_raw_corpus
+    (
+        "foundation_raw_corpus",
+        "UNIQUE(content_hash)",
+        "ix_fraw_content_hash_unique",
+        "Unique constraint on content_hash",
+    ),
+    (
+        "foundation_raw_corpus",
+        "CHECK(source_type != '')",
+        "ck_fraw_source_type_not_empty",
+        "Source type cannot be empty",
+    ),
+    # foundation_raw_llm
+    (
+        "foundation_raw_llm",
+        "CHECK(model != '')",
+        "ck_frawllm_model_not_empty",
+        "Model cannot be empty",
+    ),
+    # foundation_staging_words
+    (
+        "foundation_staging_words",
+        "UNIQUE(form, source_hash)",
+        "ix_fstg_word_form_source_unique",
+        "Unique constraint on (form, source_hash)",
+    ),
+    (
+        "foundation_staging_words",
+        "CHECK(form != '')",
+        "ck_fstg_word_form_not_empty",
+        "Word form cannot be empty",
+    ),
+    (
+        "foundation_staging_words",
+        "CHECK(frequency >= 0)",
+        "ck_fstg_word_frequency_nonneg",
+        "Frequency cannot be negative",
+    ),
+    # foundation_staging_sentences
+    (
+        "foundation_staging_sentences",
+        "CHECK(text != '')",
+        "ck_fstg_sent_text_not_empty",
+        "Sentence text cannot be empty",
+    ),
+    # foundation_staging_paragraphs
+    (
+        "foundation_staging_paragraphs",
+        "CHECK(text != '')",
+        "ck_fstg_para_text_not_empty",
+        "Paragraph text cannot be empty",
+    ),
+    # foundation_staging_evidence
+    (
+        "foundation_staging_evidence",
+        "CHECK(fact_type IN ('word', 'sentence', 'paragraph', 'grammar'))",
+        "ck_fstg_ev_fact_type_valid",
+        "Fact type must be word/sentence/paragraph/grammar",
+    ),
+    (
+        "foundation_staging_evidence",
+        "CHECK(tier BETWEEN 1 AND 5)",
+        "ck_fstg_ev_tier_range",
+        "Evidence tier must be 1-5",
+    ),
+    (
+        "foundation_staging_evidence",
+        "CHECK(confidence >= 0.0 AND confidence <= 1.0)",
+        "ck_fstg_ev_confidence_range",
+        "Confidence must be 0.0-1.0",
+    ),
+    # canonical_words
+    (
+        "canonical_words",
+        "UNIQUE(form, version)",
+        "ix_cword_form_version_unique",
+        "Unique constraint on (form, version)",
+    ),
+    (
+        "canonical_words",
+        "CHECK(form != '')",
+        "ck_cword_form_not_empty",
+        "Word form cannot be empty",
+    ),
+    (
+        "canonical_words",
+        "CHECK(syllable_count >= 0)",
+        "ck_cword_syllable_count_nonneg",
+        "Syllable count cannot be negative",
+    ),
+    (
+        "canonical_words",
+        "CHECK(frequency >= 0)",
+        "ck_cword_frequency_nonneg",
+        "Frequency cannot be negative",
+    ),
+    (
+        "canonical_words",
+        "CHECK(version >= 1)",
+        "ck_cword_version_positive",
+        "Version must be >= 1",
+    ),
+    # canonical_sentences
+    (
+        "canonical_sentences",
+        "CHECK(text != '')",
+        "ck_csent_text_not_empty",
+        "Sentence text cannot be empty",
+    ),
+    (
+        "canonical_sentences",
+        "CHECK(version >= 1)",
+        "ck_csent_version_positive",
+        "Version must be >= 1",
+    ),
+    # canonical_paragraphs
+    (
+        "canonical_paragraphs",
+        "CHECK(text != '')",
+        "ck_cpara_text_not_empty",
+        "Paragraph text cannot be empty",
+    ),
+    (
+        "canonical_paragraphs",
+        "CHECK(version >= 1)",
+        "ck_cpara_version_positive",
+        "Version must be >= 1",
+    ),
+    # foundation_evidence
+    (
+        "foundation_evidence",
+        "CHECK(fact_type IN ('word', 'sentence', 'paragraph', 'grammar'))",
+        "ck_fev_fact_type_valid",
+        "Fact type must be word/sentence/paragraph/grammar",
+    ),
+    (
+        "foundation_evidence",
+        "CHECK(tier BETWEEN 1 AND 5)",
+        "ck_fev_tier_range",
+        "Evidence tier must be 1-5",
+    ),
+    (
+        "foundation_evidence",
+        "CHECK(confidence >= 0.0 AND confidence <= 1.0)",
+        "ck_fev_confidence_range",
+        "Confidence must be 0.0-1.0",
+    ),
+    # foundation_verifications
+    (
+        "foundation_verifications",
+        "CHECK(score >= 0.0 AND score <= 1.0)",
+        "ck_fver_score_range",
+        "Score must be 0.0-1.0",
+    ),
+    # foundation_consensus
+    (
+        "foundation_consensus",
+        "UNIQUE(fact_type, fact_key, method)",
+        "ix_fcon_fact_method_unique",
+        "Unique constraint on (fact_type, fact_key, method)",
+    ),
+    (
+        "foundation_consensus",
+        "CHECK(fact_type IN ('word', 'sentence', 'paragraph', 'grammar'))",
+        "ck_fcon_fact_type_valid",
+        "Fact type must be word/sentence/paragraph/grammar",
+    ),
+    (
+        "foundation_consensus",
+        "CHECK(confidence >= 0.0 AND confidence <= 1.0)",
+        "ck_fcon_confidence_range",
+        "Confidence must be 0.0-1.0",
+    ),
+    (
+        "foundation_consensus",
+        "CHECK(method IN ('majority_vote', 'weighted_evidence', 'threshold'))",
+        "ck_fcon_method_valid",
+        "Method must be majority_vote/weighted_evidence/threshold",
+    ),
+    # foundation_batches
+    (
+        "foundation_batches",
+        "CHECK(batch_type IN ('ingest', 'build_staging', 'promote', 'verify'))",
+        "ck_fbatch_type_valid",
+        "Batch type must be ingest/build_staging/promote/verify",
+    ),
+    (
+        "foundation_batches",
+        "CHECK(status IN ('pending', 'running', 'completed', 'failed'))",
+        "ck_fbatch_status_valid",
+        "Status must be pending/running/completed/failed",
+    ),
+    # foundation_review_queue
+    (
+        "foundation_review_queue",
+        "CHECK(fact_type IN ('word', 'sentence', 'paragraph', 'grammar'))",
+        "ck_frev_fact_type_valid",
+        "Fact type must be word/sentence/paragraph/grammar",
+    ),
+    (
+        "foundation_review_queue",
+        "CHECK(status IN ('pending', 'in_review', 'approved', 'rejected'))",
+        "ck_frev_status_valid",
+        "Status must be pending/in_review/approved/rejected",
+    ),
+    # foundation_metrics
+    (
+        "foundation_metrics",
+        "CHECK(run_id != '')",
+        "ck_fmetric_run_id_not_empty",
+        "Run ID cannot be empty",
+    ),
+    (
+        "foundation_metrics",
+        "CHECK(metric != '')",
+        "ck_fmetric_metric_not_empty",
+        "Metric name cannot be empty",
+    ),
+]
+
+
+# Additional indexes for Foundation tables
+FOUNDATION_PERFORMANCE_INDEXES = [
+    # Raw layer
+    ("foundation_raw_corpus", "CREATE INDEX IF NOT EXISTS ix_fraw_source_type ON foundation_raw_corpus(source_type)"),
+    ("foundation_raw_corpus", "CREATE INDEX IF NOT EXISTS ix_fraw_imported_at ON foundation_raw_corpus(imported_at)"),
+    ("foundation_raw_llm", "CREATE INDEX IF NOT EXISTS ix_frawllm_model ON foundation_raw_llm(model)"),
+    ("foundation_raw_llm", "CREATE INDEX IF NOT EXISTS ix_frawllm_created ON foundation_raw_llm(created_at)"),
+    # Staging layer
+    ("foundation_staging_words", "CREATE INDEX IF NOT EXISTS ix_fstg_word_pos ON foundation_staging_words(pos)"),
+    ("foundation_staging_words", "CREATE INDEX IF NOT EXISTS ix_fstg_word_zvs ON foundation_staging_words(zvs_compliant)"),
+    ("foundation_staging_words", "CREATE INDEX IF NOT EXISTS ix_fstg_word_created ON foundation_staging_words(created_at)"),
+    ("foundation_staging_sentences", "CREATE INDEX IF NOT EXISTS ix_fstg_sent_created ON foundation_staging_sentences(created_at)"),
+    ("foundation_staging_paragraphs", "CREATE INDEX IF NOT EXISTS ix_fstg_para_created ON foundation_staging_paragraphs(created_at)"),
+    ("foundation_staging_evidence", "CREATE INDEX IF NOT EXISTS ix_fstg_ev_confidence ON foundation_staging_evidence(confidence)"),
+    # Canonical layer
+    ("canonical_words", "CREATE INDEX IF NOT EXISTS ix_cword_pos ON canonical_words(pos)"),
+    ("canonical_words", "CREATE INDEX IF NOT EXISTS ix_cword_zvs ON canonical_words(zvs_compliant)"),
+    ("canonical_words", "CREATE INDEX IF NOT EXISTS ix_cword_verified_by ON canonical_words(verified_by)"),
+    ("canonical_sentences", "CREATE INDEX IF NOT EXISTS ix_csent_verified_by ON canonical_sentences(verified_by)"),
+    ("canonical_paragraphs", "CREATE INDEX IF NOT EXISTS ix_cpara_verified_by ON canonical_paragraphs(verified_by)"),
+    # Evidence/Consensus
+    ("foundation_evidence", "CREATE INDEX IF NOT EXISTS ix_fev_source ON foundation_evidence(source)"),
+    ("foundation_evidence", "CREATE INDEX IF NOT EXISTS ix_fev_created ON foundation_evidence(created_at)"),
+    ("foundation_verifications", "CREATE INDEX IF NOT EXISTS ix_fver_candidate ON foundation_verifications(candidate_id)"),
+    ("foundation_verifications", "CREATE INDEX IF NOT EXISTS ix_fver_created ON foundation_verifications(created_at)"),
+    ("foundation_consensus", "CREATE INDEX IF NOT EXISTS ix_fcon_confidence ON foundation_consensus(confidence)"),
+    ("foundation_consensus", "CREATE INDEX IF NOT EXISTS ix_fcon_created ON foundation_consensus(created_at)"),
+    # Meta
+    ("foundation_batches", "CREATE INDEX IF NOT EXISTS ix_fbatch_status ON foundation_batches(status)"),
+    ("foundation_batches", "CREATE INDEX IF NOT EXISTS ix_fbatch_completed ON foundation_batches(completed_at)"),
+    ("foundation_review_queue", "CREATE INDEX IF NOT EXISTS ix_frev_assignee ON foundation_review_queue(assignee)"),
+    ("foundation_review_queue", "CREATE INDEX IF NOT EXISTS ix_frev_resolved ON foundation_review_queue(resolved_at)"),
+    ("foundation_metrics", "CREATE INDEX IF NOT EXISTS ix_fmetric_value ON foundation_metrics(value)"),
+]
+
 
 CONSTRAINT_MIGRATIONS = [
     # Dictionary table constraints
@@ -335,18 +664,127 @@ def apply_indexes(mgr: DatabaseManager) -> dict[str, Any]:
     return {"applied": applied, "skipped": skipped, "errors": errors}
 
 
+def apply_foundation_constraints(mgr: DatabaseManager) -> dict[str, Any]:
+    """Apply Foundation table constraint migrations.
+
+    Returns:
+        Dict with 'applied', 'skipped', 'errors' lists.
+    """
+    applied = []
+    skipped = []
+    errors = []
+
+    for table_name, constraint_sql, constraint_name, description in FOUNDATION_CONSTRAINT_MIGRATIONS:
+        try:
+            with mgr.engine.connect() as conn:
+                # Check if constraint already exists
+                if mgr._db_url.startswith("sqlite"):
+                    check_sql = f"""
+                        SELECT 1 FROM sqlite_master
+                        WHERE type = 'index' AND name = '{constraint_name}'
+                        UNION
+                        SELECT 1 FROM sqlite_master
+                        WHERE type = 'table' AND sql LIKE '%{constraint_name}%'
+                    """
+                else:
+                    check_sql = f"""
+                        SELECT 1 FROM information_schema.table_constraints
+                        WHERE constraint_name = '{constraint_name}'
+                        AND table_name = '{table_name}'
+                    """
+
+                exists = conn.execute(text(check_sql)).first()
+
+                if exists:
+                    skipped.append(f"{table_name}.{constraint_name} (already exists)")
+                    continue
+
+                # Apply constraint
+                if mgr._db_url.startswith("sqlite"):
+                    # SQLite: constraints are added via ALTER TABLE or at creation
+                    if constraint_sql.startswith("UNIQUE"):
+                        cols = constraint_sql.replace("UNIQUE(", "").replace(")", "")
+                        alter_sql = f"CREATE UNIQUE INDEX IF NOT EXISTS {constraint_name} ON {table_name}({cols})"
+                    elif constraint_sql.startswith("CHECK"):
+                        # SQLite doesn't support ALTER TABLE ADD CHECK easily
+                        # Would need to recreate table - skip for now
+                        skipped.append(
+                            f"{table_name}.{constraint_name} "
+                            "(CHECK not supported on existing SQLite tables)"
+                        )
+                        continue
+                    else:
+                        alter_sql = f"ALTER TABLE {table_name} ADD CONSTRAINT {constraint_name} {constraint_sql}"
+                else:
+                    # PostgreSQL
+                    alter_sql = f"ALTER TABLE {table_name} ADD CONSTRAINT {constraint_name} {constraint_sql}"
+
+                conn.execute(text(alter_sql))
+                conn.commit()
+                applied.append(f"{table_name}.{constraint_name}: {description}")
+
+        except Exception as exc:
+            errors.append(f"{table_name}.{constraint_name}: {exc}")
+
+    return {"applied": applied, "skipped": skipped, "errors": errors}
+
+
+def apply_foundation_indexes(mgr: DatabaseManager) -> dict[str, Any]:
+    """Apply Foundation table performance indexes.
+
+    Returns:
+        Dict with 'applied', 'skipped', 'errors' lists.
+    """
+    applied = []
+    skipped = []
+    errors = []
+
+    for table_name, index_sql in FOUNDATION_PERFORMANCE_INDEXES:
+        try:
+            with mgr.engine.connect() as conn:
+                # Check if index exists
+                if mgr._db_url.startswith("sqlite"):
+                    idx_name = index_sql.split("INDEX IF NOT EXISTS ")[1].split(" ON")[0]
+                    check_sql = f"SELECT 1 FROM sqlite_master WHERE type='index' AND name='{idx_name}'"
+                else:
+                    idx_name = index_sql.split("INDEX IF NOT EXISTS ")[1].split(" ON")[0]
+                    check_sql = f"""
+                        SELECT 1 FROM pg_indexes
+                        WHERE indexname = '{idx_name}' AND tablename = '{table_name}'
+                    """
+
+                exists = conn.execute(text(check_sql)).first()
+
+                if exists:
+                    skipped.append(f"{table_name}.{idx_name} (already exists)")
+                    continue
+
+                conn.execute(text(index_sql))
+                conn.commit()
+                applied.append(f"{table_name}.{idx_name}")
+
+        except Exception as exc:
+            errors.append(f"{table_name}.{index_sql}: {exc}")
+
+    return {"applied": applied, "skipped": skipped, "errors": errors}
+
+
 def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
-    """Run all constraint and index migrations.
+    """Run all constraint and index migrations including Foundation tables.
 
     Returns:
         Combined results from constraints and indexes.
     """
     constraint_results = apply_constraints(mgr)
     index_results = apply_indexes(mgr)
+    foundation_constraint_results = apply_foundation_constraints(mgr)
+    foundation_index_results = apply_foundation_indexes(mgr)
 
     return {
         "constraints": constraint_results,
         "indexes": index_results,
+        "foundation_constraints": foundation_constraint_results,
+        "foundation_indexes": foundation_index_results,
     }
 
 

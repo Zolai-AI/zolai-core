@@ -19,6 +19,25 @@ from .extended import (
     TrainingValidationRepository,
     VerbRepository,
 )
+from .foundation import (
+    FOUNDATION_REPOSITORIES,
+    CanonicalParagraphsRepository,
+    CanonicalSentencesRepository,
+    CanonicalWordsRepository,
+    FoundationBatchesRepository,
+    FoundationConsensusRepository,
+    FoundationEvidenceRepository,
+    FoundationMetricsRepository,
+    FoundationRawCorpusRepository,
+    FoundationRawLLMRepository,
+    FoundationReviewQueueRepository,
+    FoundationStagingEvidenceRepository,
+    FoundationStagingParagraphsRepository,
+    FoundationStagingSentencesRepository,
+    FoundationStagingWordsRepository,
+    FoundationVerificationsRepository,
+    get_foundation_repositories,
+)
 from .grammar import GrammarRepository, WordCollocationRepository
 from .phrase import PhraseRepository
 from .provenance import AuditRepository, ProvenanceRepository
@@ -35,7 +54,24 @@ __all__ = [
     "DictionaryEnZoRepository",
     "DictionaryRepository",
     "ExerciseRepository",
+    "FOUNDATION_REPOSITORIES",
+    "CanonicalParagraphsRepository",
+    "CanonicalSentencesRepository",
+    "CanonicalWordsRepository",
+    "FoundationBatchesRepository",
+    "FoundationConsensusRepository",
+    "FoundationEvidenceRepository",
+    "FoundationMetricsRepository",
+    "FoundationRawCorpusRepository",
+    "FoundationRawLLMRepository",
+    "FoundationReviewQueueRepository",
+    "FoundationStagingEvidenceRepository",
+    "FoundationStagingParagraphsRepository",
+    "FoundationStagingSentencesRepository",
+    "FoundationStagingWordsRepository",
+    "FoundationVerificationsRepository",
     "get_engine",
+    "get_foundation_repositories",
     "get_repositories",
     "GrammarInstructionRepository",
     "GrammarRepository",
@@ -73,7 +109,7 @@ def get_repositories(db_path=None) -> dict[str, BaseRepository]:
     repository against a single engine.
     """
     engine = get_engine(db_path)
-    return {
+    repos = {
         "dictionary": DictionaryRepository(engine),
         "dictionary_en_zo": DictionaryEnZoRepository(engine),
         "vocabulary": VocabularyRepository(engine),
@@ -97,3 +133,6 @@ def get_repositories(db_path=None) -> dict[str, BaseRepository]:
         "grammar_instructions": GrammarInstructionRepository(engine),
         "corrections": CorrectionRepository(engine),
     }
+    # Add foundation repositories
+    repos.update(get_foundation_repositories(engine))
+    return repos
