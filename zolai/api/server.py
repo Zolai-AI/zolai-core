@@ -58,7 +58,7 @@ ZOLAI_SYSTEM_PROMPT = (
     "method: guide the learner's thinking, provide hints, and encourage "
     "participation before revealing answers.\n"
     "3. LINGUISTIC RIGOR:\n"
-    "   - Enforce OSV (Object-Subject-Verb) word order.\n"
+    "   - Enforce SOV (Subject-Object-Verb) word order.\n"
     "   - Use the Ergative marker \"in\" for transitive verb subjects.\n"
     "   - Distinguish between Stem I and Stem II verbs.\n"
     "   - Use \"Suahtakna\" for freedom/liberation.\n"
@@ -120,7 +120,7 @@ ZOLAI_BILINGUAL_PROMPT = (
     "5. FORBIDDEN (ZVS 2018 non-compliant) — NEVER use:\n"
     "   pathian → pasian, ram → gam, fapa → tapa,\n"
     "   bawipa → topa, siangpahrang → kumpipa,\n"
-    "   cu/cun → tua, suah → chuak,\n"
+    "   cu/cun → tua, suah → suahtakna,\n"
     "   zalenna → suahtakna, nunnak → nuntakna\n"
     "6. Use SOV word order.\n"
     "7. Use ergative 'in' for transitive subjects.\n"
@@ -843,7 +843,7 @@ def create_app() -> FastAPI:
 
     @app.post("/chat/gemini", response_model=ZolaiChatResponse)
     async def gemini_chat(req: ZolaiChatRequest):
-        """Gemini chat via local gemini-webapi (Chrome cookies)."""
+        """Gemini chat via local gemini-webapi with RAG, ensemble, and validation."""
         import sys
         from pathlib import Path as _Path
 
@@ -856,22 +856,60 @@ def create_app() -> FastAPI:
             from gemini.client_openai import get_default_client
             from shared.zvs_context import get_system_prompt
 
-            client = await get_default_client()
+            # Step 1: RAG context injection
+            from .rag_injector import RAGInjector
+            db_path = str(config.paths.zolai_db)
+            rag = RAGInjector(db_path)
+            rag_context = await rag.build_context(req.message, max_tokens=800)
 
-            messages = [
-                {"role": "system", "content": get_system_prompt()},
-                {"role": "user", "content": req.message},
+            # Step 2: Build enhanced prompt
+            system_prompt = get_system_prompt()
+            if rag_context:
+                system_prompt += f"\n\nCONTEXT FROM KNOWLEDGE BASE:\n{rag_context}\n"
+
+            # Step 3: Ensemble dispatch (3 models)
+            from .gemini_ensemble import GeminiEnsemble
+            ensemble_models = [
+                "gemini-3-flash",
+                "gemini-3-pro-plus",
+                "gemini-3-pro",
             ]
+            ensemble = GeminiEnsemble(ensemble_models)
 
-            result = await client.chat_completion(
-                messages=messages,
-                model=req.model,
-                temperature=0.7,
+            # Try ensemble first; fall back to single model
+            ensemble_result = await ensemble.dispatch(
+                message=req.message,
+                system_prompt=system_prompt,
+                n_models=3,
             )
 
-            text = result["choices"][0]["message"]["content"]
+            if ensemble_result["response"]:
+                text = ensemble_result["response"]
+                context_source = (
+                    f"ensemble:{','.join(ensemble_result['models_used'])}"
+                    f"(conf={ensemble_result['confidence']:.2f})"
+                )
+            else:
+                # Fallback: single model call
+                client = await get_default_client()
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": req.message},
+                ]
+                result = await client.chat_completion(
+                    messages=messages,
+                    model=req.model,
+                    temperature=0.7,
+                )
+                text = result["choices"][0]["message"]["content"]
+                context_source = f"gemini:{req.model}"
 
-            # Check ZVS compliance
+            # Step 4: Validate response
+            from .answer_validator import AnswerValidator
+            validator = AnswerValidator(db_path)
+            validation = await validator.validate(text)
+
+            # Apply ZVS corrections if needed
             from .zvs_checker import check_zvs_compliance
             zvs_result = check_zvs_compliance(text)
             final_response = (
@@ -880,10 +918,11 @@ def create_app() -> FastAPI:
                 else text
             )
 
+            # Step 5: Return with metadata
             return ZolaiChatResponse(
                 zolai_response=final_response,
                 zvs_compliant=zvs_result['is_compliant'],
-                context_source=f"gemini:{req.model}",
+                context_source=context_source,
                 vocabulary=[],
             )
         except Exception as e:
