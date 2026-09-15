@@ -604,8 +604,8 @@ class FoundationEvidence(Base):
     tier: int = Column(Integer, nullable=False)  # 1=T1(Bible), 2=T2(Dict), 3=T3(Corpus), 4=T4(Grammar), 5=T5(LLM)
     source: str = Column(String, nullable=False)  # 'bible_verses' | 'dictionary' | 'corpus' | 'grammar_patterns' | 'llm'
     confidence: float = Column(Float, nullable=False, default=0.0)
-    provenance_hash: str = Column(String, nullable=False)  # SHA256 of source record(s)
-    payload: str = Column(Text, nullable=False)  # JSON: source-specific evidence detail
+    provenance_hash: str = Column(String, nullable=False, default="")  # SHA256 of source record(s)
+    payload: str = Column(Text, nullable=False, default="{}")  # JSON: source-specific evidence detail
     created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
 
     __table_args__ = (
@@ -632,7 +632,7 @@ class FoundationVerification(Base):
     verifier: str = Column(String, nullable=False)  # 'EvidenceThresholdVerifier' | 'NullVerifier' | 'LLMVerifier'
     passed: bool = Column(Integer, nullable=False)  # SQLite bool
     score: float = Column(Float, nullable=False, default=0.0)
-    notes: str = Column(Text, nullable=True)
+    notes: str = Column(Text, nullable=True, default="")
     created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
 
     __table_args__ = (
@@ -661,7 +661,7 @@ class FoundationConsensus(Base):
     method: str = Column(String, nullable=False)  # 'majority_vote' | 'weighted_evidence' | 'threshold'
     threshold: float = Column(Float, nullable=False, default=0.7)
     agreeing_count: int = Column(Integer, nullable=False, default=0)
-    notes: str = Column(Text, nullable=True)  # JSON: array of notes
+    notes: str = Column(Text, nullable=True, default="")  # JSON: array of notes
     created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
 
     __table_args__ = (
