@@ -739,6 +739,98 @@ def foundation_promote(
 
 
 @app.command()
+def foundation_verify(
+    limit: int = typer.Option(0, "--limit", "-l", help="Max records to verify (0=all)"),
+    batch_size: int = typer.Option(100, "--batch-size", "-b", help="Batch size"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """✅ Run batch verification on canonical records."""
+    _setup_logging(verbose)
+    from zolai.pipeline.foundation import FoundationETL
+
+    etl = FoundationETL(db_path=f"sqlite:///{config.paths.db}")
+    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
+        task = progress.add_task("Running batch verification...", total=None)
+        result = etl.run_verification(limit=limit, batch_size=batch_size)
+        progress.update(task, completed=True)
+        rprint(
+            f"[green]✓ Verified: {result.records_processed} processed, "
+            f"{result.records_promoted} promoted, {result.errors} errors[/green]"
+        )
+
+
+@app.command()
+def foundation_review(
+    status: str = typer.Option("pending", "--status", "-s", help="Filter: pending|resolved"),
+    limit: int = typer.Option(20, "--limit", "-l", help="Max items to show"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """🔍 Show the human review queue."""
+    _setup_logging(verbose)
+    from zolai.config import config
+    from zolai.data.repositories import get_repositories
+
+    repos = get_repositories(config.paths.db)
+    review_queue = repos["foundation_review_queue"]
+
+    if status == "pending":
+        items = review_queue.get_pending(limit=limit)
+    else:
+        items = review_queue.get_pending(limit=limit)  # fallback
+
+    table = Table(title=f"Review Queue ({status})", show_header=True)
+    table.add_column("ID", style="dim", justify="right")
+    table.add_column("Fact Type", style="cyan")
+    table.add_column("Fact Key", style="green")
+    table.add_column("Priority", style="yellow", justify="right")
+    table.add_column("Assignee", style="magenta")
+    table.add_column("Created", style="dim")
+
+    for item in items:
+        table.add_row(
+            str(item.get("id", "")),
+            item.get("fact_type", ""),
+            item.get("fact_key", ""),
+            str(item.get("priority", "")),
+            item.get("assignee", "") or "—",
+            str(item.get("created_at", ""))[:19],
+        )
+
+    if not items:
+        rprint("[yellow]No items in review queue[/yellow]")
+    else:
+        console.print(table)
+
+
+@app.command()
+def foundation_regression(
+    category: str = typer.Option(
+        None, "--category", "-c",
+        help="Category: zvs|grammar|syllable|tone (default: all)",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """🧪 Run regression tests on linguistic engines."""
+    _setup_logging(verbose)
+    from zolai.foundation.regression import RegressionSuite
+
+    categories = [category] if category else None
+    suite = RegressionSuite(categories=categories)
+    report = suite.run()
+
+    if json_out:
+        import json as _json
+        rprint(_json.dumps(report.to_dict(), indent=2))
+    else:
+        report.print_summary()
+
+    # Exit with non-zero if overall precision < 0.8
+    if report.overall_precision < 0.8:
+        raise typer.Exit(1)
+
+
+@app.command()
 def foundation_status(
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
