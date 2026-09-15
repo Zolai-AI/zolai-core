@@ -268,34 +268,60 @@ async def table_schema(table: str = Query(...)):
 # ═══════════════════════════════════════════
 
 @router.get("/dict/browse")
-async def dict_browse(limit: int = 50, offset: int = 0, q: str = None):
-    """Browse dictionary entries with pagination and optional letter filter."""
+async def dict_browse(limit: int = 50, offset: int = 0, q: str = None, clean: bool = False):
+    """Browse dictionary entries with pagination, optional letter filter, and clean filter."""
     try:
         conn = get_db()
         cur = conn.cursor()
 
+        # Build WHERE clause for clean filter
+        clean_where = ""
+        clean_params = []
+        if clean:
+            clean_where = "WHERE zolai NOT LIKE '-%' AND zolai NOT LIKE '%-%' AND english NOT GLOB '*[0-9]*' AND myanmar IS NOT NULL AND myanmar != ''"
+
         if q:
             # Letter filter - search for entries starting with the letter
-            cur.execute(
-                "SELECT zolai, english, myanmar, pos, source FROM dictionary "
-                "WHERE zolai LIKE ? ORDER BY zolai LIMIT ? OFFSET ?",
-                (f"{q}%", limit, offset),
-            )
+            if clean:
+                cur.execute(
+                    f"SELECT zolai, english, myanmar, pos, source FROM dictionary "
+                    f"{clean_where} AND zolai LIKE ? ORDER BY zolai LIMIT ? OFFSET ?",
+                    (f"{q}%", limit, offset),
+                )
+            else:
+                cur.execute(
+                    "SELECT zolai, english, myanmar, pos, source FROM dictionary "
+                    "WHERE zolai LIKE ? ORDER BY zolai LIMIT ? OFFSET ?",
+                    (f"{q}%", limit, offset),
+                )
         else:
-            cur.execute(
-                "SELECT zolai, english, myanmar, pos, source FROM dictionary "
-                "ORDER BY zolai LIMIT ? OFFSET ?",
-                (limit, offset),
-            )
+            if clean:
+                cur.execute(
+                    f"SELECT zolai, english, myanmar, pos, source FROM dictionary "
+                    f"{clean_where} ORDER BY zolai LIMIT ? OFFSET ?",
+                    (limit, offset),
+                )
+            else:
+                cur.execute(
+                    "SELECT zolai, english, myanmar, pos, source FROM dictionary "
+                    "ORDER BY zolai LIMIT ? OFFSET ?",
+                    (limit, offset),
+                )
 
         rows = cur.fetchall()
         cols = [d[0] for d in cur.description]
 
         # Get total count for pagination
         if q:
-            cur.execute("SELECT COUNT(*) FROM dictionary WHERE zolai LIKE ?", (f"{q}%",))
+            if clean:
+                cur.execute(f"SELECT COUNT(*) FROM dictionary {clean_where} AND zolai LIKE ?", (f"{q}%",))
+            else:
+                cur.execute("SELECT COUNT(*) FROM dictionary WHERE zolai LIKE ?", (f"{q}%",))
         else:
-            cur.execute("SELECT COUNT(*) FROM dictionary")
+            if clean:
+                cur.execute(f"SELECT COUNT(*) FROM dictionary {clean_where}")
+            else:
+                cur.execute("SELECT COUNT(*) FROM dictionary")
         total = cur.fetchone()[0]
 
         cur.close()
