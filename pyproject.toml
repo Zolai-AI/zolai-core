@@ -74,6 +74,9 @@ dependencies = [
 gui = [
     "pygobject>=3.48",  # GTK3 bindings (may require system install: apt install python3-gi gir1.2-gtk-3.0)
 ]
+gemini = [
+    "google-genai>=1.0",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.3",
