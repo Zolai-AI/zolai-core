@@ -15,7 +15,7 @@ FORBIDDEN_FORMS = {
     'siangpahrang': 'kumpipa',
     'cu': 'tua',
     'cun': 'tua',
-    'suah': 'chuak',
+    'suah': 'suahtakna',
     'zalenna': 'suahtakna',
     'nunnak': 'nuntakna',
 }
