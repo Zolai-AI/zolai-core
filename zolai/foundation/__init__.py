@@ -11,37 +11,37 @@ from __future__ import annotations
 
 from .analysis import (
     FoundationAnalyzer,
-    WordAnalysis,
-    SentenceAnalysis,
-    ParagraphAnalysis,
-    TokenAnalysis,
-    SyllableInfo,
     MorphologyInfo,
+    ParagraphAnalysis,
     POSInfo,
+    SentenceAnalysis,
+    SyllableInfo,
+    TokenAnalysis,
+    WordAnalysis,
     get_foundation_analyzer,
-)
-from .evidence import (
-    Candidate,
-    Evidence,
-    Confidence,
-    EvidenceTier,
-    Verifier,
-    NullVerifier,
-    EvidenceThresholdVerifier,
-    create_word_candidate,
-    create_sentence_candidate,
-    create_paragraph_candidate,
-    DEFAULT_VERIFIER,
-    EVIDENCE_VERIFIER,
 )
 from .consensus import (
     ConsensusResult,
-    majority_vote,
-    weighted_evidence_consensus,
-    threshold_gate_consensus,
     adaptive_consensus,
-    run_consensus,
     build_candidates_from_evidence,
+    majority_vote,
+    run_consensus,
+    threshold_gate_consensus,
+    weighted_evidence_consensus,
+)
+from .evidence import (
+    DEFAULT_VERIFIER,
+    EVIDENCE_VERIFIER,
+    Candidate,
+    Confidence,
+    Evidence,
+    EvidenceThresholdVerifier,
+    EvidenceTier,
+    NullVerifier,
+    Verifier,
+    create_paragraph_candidate,
+    create_sentence_candidate,
+    create_word_candidate,
 )
 
 __all__ = [

@@ -5,9 +5,9 @@ import pytest
 
 from zolai.foundation import (
     FoundationAnalyzer,
-    WordAnalysis,
-    SentenceAnalysis,
     ParagraphAnalysis,
+    SentenceAnalysis,
+    WordAnalysis,
     get_foundation_analyzer,
 )
 
@@ -147,7 +147,7 @@ class TestFoundationDataclasses:
 
     def test_word_analysis_structure(self) -> None:
         """Verify WordAnalysis has all required fields."""
-        from zolai.foundation import TokenAnalysis, SyllableInfo, MorphologyInfo, POSInfo
+        from zolai.foundation import MorphologyInfo, POSInfo, SyllableInfo, TokenAnalysis
 
         # Just verify imports work and dataclasses are constructible
         syllable = SyllableInfo(syllable="pa", start=0, end=2)
@@ -168,7 +168,7 @@ class TestFoundationDataclasses:
 
     def test_sentence_analysis_structure(self) -> None:
         """Verify SentenceAnalysis has all required fields."""
-        from zolai.foundation import TokenAnalysis, SyllableInfo, MorphologyInfo, POSInfo
+        from zolai.foundation import MorphologyInfo, POSInfo, SyllableInfo, TokenAnalysis
 
         syllable = SyllableInfo(syllable="pasian", start=0, end=6)
         morph = MorphologyInfo(
@@ -190,7 +190,7 @@ class TestFoundationDataclasses:
 
     def test_paragraph_analysis_structure(self) -> None:
         """Verify ParagraphAnalysis has all required fields."""
-        from zolai.foundation import TokenAnalysis, SyllableInfo, MorphologyInfo, POSInfo
+        from zolai.foundation import MorphologyInfo, POSInfo, SyllableInfo, TokenAnalysis
 
         syllable = SyllableInfo(syllable="pasian", start=0, end=6)
         morph = MorphologyInfo(

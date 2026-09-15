@@ -9,15 +9,16 @@ Orchestrates existing Zolai engines:
 Produces structured analyses for Foundation pipeline.
 """
 from __future__ import annotations
-import re
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from zolai.morphology import ZolaiMorphology, get_morphology, _KNOWN_ROOTS as MORPH_KNOWN_ROOTS
+from zolai.morphology import _KNOWN_ROOTS as MORPH_KNOWN_ROOTS
+from zolai.morphology import ZolaiMorphology, get_morphology
 from zolai.pos_tagger import ZolaiPOSTagger, get_pos_tagger
-from zolai.syllable import ZolaiSyllabifier, segment, segment_with_boundaries, Boundary
+from zolai.syllable import Boundary, ZolaiSyllabifier, segment_with_boundaries
 from zolai.tokenizer.zolai_tokenizer import ZolaiTokenizer
 
 log = logging.getLogger(__name__)
