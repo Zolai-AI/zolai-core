@@ -12,7 +12,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from zolai.data.database import DatabaseManager
 from zolai.data.repositories import get_foundation_repositories
@@ -458,21 +458,98 @@ class FoundationETL:
     def run_verification(
         self,
         limit: int = 0,
+        batch_size: int = 100,
     ) -> PipelineStats:
-        """Run verifiers on promoted canonical records."""
+        """Run verifiers on canonical records without ``verified_at``.
+
+        Queries canonical tables for records where ``verified_at IS NULL``,
+        builds :class:`Candidate` objects from staging evidence, runs them
+        through the injected verifier, and records results in
+        ``foundation_verifications``.
+
+        Args:
+            limit: Maximum records to verify (0 = unlimited).
+            batch_size: Batch size for processing.
+
+        Returns:
+            Pipeline statistics.
+        """
         start = datetime.now()
         stats = PipelineStats()
 
         repos = self._get_repos()
         batch_repo = repos["foundation_batches"]
+        canonical_words = repos["canonical_words"]
+        staging_evidence = repos["foundation_staging_evidence"]
+        verifications_repo = repos["foundation_verifications"]
 
         batch_id = batch_repo.create_batch("verify", {})
         stats.batch_id = batch_id
 
         try:
-            # Get canonical records needing verification
-            # This would query for records without verification entries
-            # For now, just return empty stats
+            # Get unverified canonical words
+            unverified = canonical_words.get_unverified(limit=limit or batch_size)
+
+            for record in unverified:
+                try:
+                    form = record.get("form", "")
+                    if not form:
+                        stats.errors += 1
+                        continue
+
+                    fact_key = f"word:{form}"
+
+                    # Build candidate from canonical record
+                    ev_records = staging_evidence.get_by_fact("word", fact_key)
+                    evidence = []
+                    for ev in ev_records:
+                        try:
+                            tier_val = ev.get("tier", 5)
+                            evidence.append(
+                                Evidence(
+                                    tier=EvidenceTier(tier_val),
+                                    source=ev.get("source", "staging"),
+                                    confidence=ev.get("confidence", 0.5),
+                                    provenance_hash=ev.get("provenance_hash", ""),
+                                    payload=ev.get("evidence", {}),
+                                )
+                            )
+                        except (ValueError, KeyError):
+                            continue
+
+                    candidate = Candidate(
+                        fact_type="word",
+                        fact_key=fact_key,
+                        value={
+                            "form": form,
+                            "pos": record.get("pos", ""),
+                            "zvs_compliant": record.get("zvs_compliant", True),
+                        },
+                        evidence=tuple(evidence),
+                        source="canonical",
+                    )
+
+                    # Run verifier (default: NullVerifier)
+                    verifier = self._get_verifier()
+                    passed, confidence, notes = verifier.verify(candidate)
+
+                    # Record verification
+                    verifications_repo.create({
+                        "fact_type": "word",
+                        "fact_key": fact_key,
+                        "verifier": verifier.name(),
+                        "passed": 1 if passed else 0,
+                        "confidence": confidence,
+                        "notes": notes,
+                    })
+
+                    stats.records_processed += 1
+
+                except Exception as e:
+                    log.error("Verification error for record %s: %s", record.get("id"), e)
+                    stats.errors += 1
+                    continue
+
             stats.duration_seconds = (datetime.now() - start).total_seconds()
             self._complete_batch(stats, "completed")
             return stats
@@ -482,6 +559,189 @@ class FoundationETL:
             stats.errors += 1
             self._complete_batch(stats, "failed")
             raise
+
+    def _get_verifier(self) -> Any:
+        """Get the verification strategy (default: NullVerifier).
+
+        Override this method or set ``_verifier`` to inject a real
+        verifier (e.g. :class:`GeminiVerifier` or
+        :class:`EvidenceGatingVerifier`).
+        """
+        if not hasattr(self, "_verifier"):
+            from zolai.foundation.evidence import NullVerifier
+            self._verifier = NullVerifier()
+        return self._verifier
+
+    def set_verifier(self, verifier: Any) -> None:
+        """Inject a verifier for batch verification runs."""
+        self._verifier = verifier
+
+    # ── Stage 4b: ADAPTIVE VERIFICATION ────────────────────────────────────
+
+    def run_adaptive_verification(
+        self,
+        threshold: float = 0.9,
+        limit: int = 0,
+    ) -> PipelineStats:
+        """3-tier adaptive verification strategy.
+
+        Tiers:
+        - ``confidence ≥ 0.95`` → auto-promote (skip LLM)
+        - ``0.70 ≤ confidence < 0.95`` → batch verify via verifier
+        - ``confidence < 0.70`` → queue to ``foundation_review_queue``
+
+        Args:
+            threshold: Consensus threshold for promotion.
+            limit: Maximum records to process (0 = unlimited).
+
+        Returns:
+            Pipeline statistics.
+        """
+        start = datetime.now()
+        stats = PipelineStats()
+
+        repos = self._get_repos()
+        batch_repo = repos["foundation_batches"]
+        canonical_words = repos["canonical_words"]
+        staging_evidence = repos["foundation_staging_evidence"]
+        verifications_repo = repos["foundation_verifications"]
+        review_queue = repos["foundation_review_queue"]
+
+        batch_id = batch_repo.create_batch("adaptive_verify", {"threshold": threshold})
+        stats.batch_id = batch_id
+
+        try:
+            unverified = canonical_words.get_unverified(limit=limit or 1000)
+
+            for record in unverified:
+                try:
+                    form = record.get("form", "")
+                    if not form:
+                        stats.errors += 1
+                        continue
+
+                    fact_key = f"word:{form}"
+
+                    # Build candidate
+                    ev_records = staging_evidence.get_by_fact("word", fact_key)
+                    evidence = []
+                    for ev in ev_records:
+                        try:
+                            tier_val = ev.get("tier", 5)
+                            evidence.append(
+                                Evidence(
+                                    tier=EvidenceTier(tier_val),
+                                    source=ev.get("source", "staging"),
+                                    confidence=ev.get("confidence", 0.5),
+                                    provenance_hash=ev.get("provenance_hash", ""),
+                                    payload=ev.get("evidence", {}),
+                                )
+                            )
+                        except (ValueError, KeyError):
+                            continue
+
+                    candidate = Candidate(
+                        fact_type="word",
+                        fact_key=fact_key,
+                        value={
+                            "form": form,
+                            "pos": record.get("pos", ""),
+                            "zvs_compliant": record.get("zvs_compliant", True),
+                        },
+                        evidence=tuple(evidence),
+                        source="canonical",
+                    )
+
+                    agg_conf = candidate.aggregate_confidence()
+
+                    # Tier 1: auto-promote (confidence ≥ 0.95)
+                    if agg_conf >= 0.95:
+                        verifications_repo.create({
+                            "fact_type": "word",
+                            "fact_key": fact_key,
+                            "verifier": "auto_promote",
+                            "passed": 1,
+                            "confidence": agg_conf,
+                            "notes": "auto_promote: confidence >= 0.95",
+                        })
+                        stats.records_promoted += 1
+
+                    # Tier 2: batch verify (0.70 ≤ confidence < 0.95)
+                    elif agg_conf >= 0.70:
+                        verifier = self._get_verifier()
+                        passed, confidence, notes = verifier.verify(candidate)
+                        verifications_repo.create({
+                            "fact_type": "word",
+                            "fact_key": fact_key,
+                            "verifier": verifier.name(),
+                            "passed": 1 if passed else 0,
+                            "confidence": confidence,
+                            "notes": notes,
+                        })
+                        if passed:
+                            stats.records_promoted += 1
+                        else:
+                            stats.records_queued_for_review += 1
+
+                    # Tier 3: queue for human review (confidence < 0.70)
+                    else:
+                        review_queue.add_to_queue(
+                            fact_type="word",
+                            fact_key=fact_key,
+                            priority=1,
+                        )
+                        stats.records_queued_for_review += 1
+
+                    stats.records_processed += 1
+
+                except Exception as e:
+                    log.error("Adaptive verification error: %s", e)
+                    stats.errors += 1
+                    continue
+
+            stats.duration_seconds = (datetime.now() - start).total_seconds()
+            self._complete_batch(stats, "completed")
+            return stats
+
+        except Exception:
+            stats.duration_seconds = (datetime.now() - start).total_seconds()
+            stats.errors += 1
+            self._complete_batch(stats, "failed")
+            raise
+
+    # ── Stage 4c: EVIDENCE GATING ──────────────────────────────────────────
+
+    def enforce_evidence_gating(
+        self,
+        candidate: Candidate,
+    ) -> bool:
+        """Check that a candidate has ≥2 distinct EvidenceTier values.
+
+        Must pass before any canonical write.  Raises
+        :class:`EvidenceGateError` if the gate fails.
+
+        Args:
+            candidate: The candidate to gate.
+
+        Returns:
+            ``True`` if the gate passes.
+
+        Raises:
+            EvidenceGateError: If insufficient evidence tiers.
+        """
+        from zolai.foundation.verifiers import EvidenceGateError
+
+        distinct_tiers = {e.tier for e in candidate.evidence}
+        tier_count = len(distinct_tiers)
+
+        if tier_count < 2:
+            raise EvidenceGateError(
+                f"Insufficient evidence tiers for {candidate.fact_key}: "
+                f"{tier_count} < 2 distinct tiers required. "
+                f"Tiers present: {[t.name for t in distinct_tiers]}"
+            )
+
+        return True
 
     # ── Full Pipeline ───────────────────────────────────────────────────────
 

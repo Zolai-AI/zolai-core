@@ -1,11 +1,13 @@
-"""Zolai Foundation — Core analysis, evidence, and consensus layer.
+"""Zolai Foundation — Core analysis, evidence, consensus, verification, and regression.
 
 Public API:
 - FoundationAnalyzer: orchestrate tokenizer, syllable, POS, morphology
 - WordAnalysis, SentenceAnalysis, ParagraphAnalysis: structured results
 - Candidate, Evidence, Confidence: evidence gating dataclasses
 - Verifier, NullVerifier, EvidenceThresholdVerifier: verification interface
+- GeminiVerifier, EvidenceGatingVerifier: LLM-backed verification
 - ConsensusResult, run_consensus: consensus decision making
+- RegressionSuite, RegressionReport: regression testing
 """
 from __future__ import annotations
 
@@ -43,6 +45,21 @@ from .evidence import (
     create_sentence_candidate,
     create_word_candidate,
 )
+from .regression import (
+    GrammarRegressionTest,
+    RegressionCategoryReport,
+    RegressionReport,
+    RegressionSuite,
+    SyllableRegressionTest,
+    ToneRegressionTest,
+    ZVSRegressionTest,
+)
+from .verifiers import (
+    EvidenceGateError,
+    EvidenceGatingVerifier,
+    GeminiVerifier,
+    ModelRouter,
+)
 
 __all__ = [
     # Analysis
@@ -68,6 +85,11 @@ __all__ = [
     "create_paragraph_candidate",
     "DEFAULT_VERIFIER",
     "EVIDENCE_VERIFIER",
+    # Verifiers
+    "GeminiVerifier",
+    "EvidenceGatingVerifier",
+    "EvidenceGateError",
+    "ModelRouter",
     # Consensus
     "ConsensusResult",
     "majority_vote",
@@ -76,6 +98,14 @@ __all__ = [
     "adaptive_consensus",
     "run_consensus",
     "build_candidates_from_evidence",
+    # Regression
+    "RegressionSuite",
+    "RegressionReport",
+    "RegressionCategoryReport",
+    "ZVSRegressionTest",
+    "GrammarRegressionTest",
+    "SyllableRegressionTest",
+    "ToneRegressionTest",
 ]
 
 __version__ = "0.1.0"
