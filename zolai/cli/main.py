@@ -676,6 +676,123 @@ def foundation_gold_eval(
         raise typer.Exit(1)
 
 
+# ============================================================
+# FOUNDATION PIPELINE COMMANDS (Phase B)
+# ============================================================
+
+
+@app.command()
+def foundation_ingest(
+    source: str = typer.Option(..., "--source", "-s", help="Source type: web|pdf|bible|jsonl"),
+    path: str = typer.Option(..., "--path", "-p", help="Path to source file/directory"),
+    batch_size: int = typer.Option(1000, "--batch-size", "-b", help="Batch size for ingestion"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """📥 Ingest raw corpus into foundation_raw_corpus."""
+    _setup_logging(verbose)
+    from pathlib import Path
+
+    from zolai.pipeline.foundation import FoundationETL
+
+    etl = FoundationETL()
+    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
+        task = progress.add_task(f"Ingesting {source} from {path}...", total=None)
+        result = etl.ingest_from_jsonl(Path(path), source_type=source)
+        progress.update(task, completed=True)
+        rprint(f"[green]✓ Ingested {result.records_staged} records[/green]")
+
+
+@app.command()
+def foundation_build(
+    batch_size: int = typer.Option(1000, "--batch-size", "-b", help="Batch size for processing"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """🔨 Build staging layer from raw corpus using FoundationAnalyzer."""
+    _setup_logging(verbose)
+    from zolai.pipeline.foundation import FoundationETL
+
+    etl = FoundationETL()
+    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
+        task = progress.add_task("Building staging layer...", total=None)
+        result = etl.build_staging_from_raw()
+        progress.update(task, completed=True)
+        rprint(f"[green]✓ Built staging: {result.records_staged} staged, {result.errors} errors[/green]")
+
+
+@app.command()
+def foundation_promote(
+    fact_type: str = typer.Option("word", "--fact-type", "-f", help="Fact type: word|sentence|paragraph"),
+    threshold: float = typer.Option(0.9, "--threshold", "-t", help="Consensus threshold for promotion"),
+    batch_size: int = typer.Option(1000, "--batch-size", "-b", help="Batch size for processing"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """⬆️ Promote staging to canonical with evidence gating."""
+    _setup_logging(verbose)
+    from zolai.pipeline.foundation import FoundationETL
+
+    etl = FoundationETL()
+    with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
+        task = progress.add_task(f"Promoting {fact_type} with threshold={threshold}...", total=None)
+        result = etl.promote_to_canonical(fact_type=fact_type)
+        progress.update(task, completed=True)
+        rprint(f"[green]✓ Promoted: {result.records_promoted} records, {result.records_queued_for_review} queued for review[/green]")
+
+
+@app.command()
+def foundation_status(
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """📊 Show foundation table counts and pipeline status."""
+    _setup_logging(verbose)
+    from zolai.data.repositories import get_repositories
+
+    repos = get_repositories()
+    table = Table(title="Foundation Pipeline Status", show_header=True)
+    table.add_column("Layer", style="cyan")
+    table.add_column("Table", style="yellow")
+    table.add_column("Count", style="green", justify="right")
+
+    # Raw
+    raw_corpus = repos["foundation_raw_corpus"].count() if "foundation_raw_corpus" in repos else 0
+    raw_llm = repos["foundation_raw_llm"].count() if "foundation_raw_llm" in repos else 0
+    table.add_row("Raw", "foundation_raw_corpus", str(raw_corpus))
+    table.add_row("", "foundation_raw_llm", str(raw_llm))
+
+    # Staging
+    staging_w = repos["foundation_staging_words"].count() if "foundation_staging_words" in repos else 0
+    staging_s = repos["foundation_staging_sentences"].count() if "foundation_staging_sentences" in repos else 0
+    staging_p = repos["foundation_staging_paragraphs"].count() if "foundation_staging_paragraphs" in repos else 0
+    table.add_row("Staging", "foundation_staging_words", str(staging_w))
+    table.add_row("", "foundation_staging_sentences", str(staging_s))
+    table.add_row("", "foundation_staging_paragraphs", str(staging_p))
+
+    # Canonical
+    canon_w = repos["canonical_words"].count() if "canonical_words" in repos else 0
+    canon_s = repos["canonical_sentences"].count() if "canonical_sentences" in repos else 0
+    canon_p = repos["canonical_paragraphs"].count() if "canonical_paragraphs" in repos else 0
+    table.add_row("Canonical", "canonical_words", str(canon_w))
+    table.add_row("", "canonical_sentences", str(canon_s))
+    table.add_row("", "canonical_paragraphs", str(canon_p))
+
+    # Evidence/Consensus
+    ev = repos["foundation_evidence"].count() if "foundation_evidence" in repos else 0
+    ver = repos["foundation_verifications"].count() if "foundation_verifications" in repos else 0
+    con = repos["foundation_consensus"].count() if "foundation_consensus" in repos else 0
+    table.add_row("Evidence", "foundation_evidence", str(ev))
+    table.add_row("", "foundation_verifications", str(ver))
+    table.add_row("", "foundation_consensus", str(con))
+
+    # Meta
+    bat = repos["foundation_batches"].count() if "foundation_batches" in repos else 0
+    rev = repos["foundation_review_queue"].count() if "foundation_review_queue" in repos else 0
+    met = repos["foundation_metrics"].count() if "foundation_metrics" in repos else 0
+    table.add_row("Meta", "foundation_batches", str(bat))
+    table.add_row("", "foundation_review_queue", str(rev))
+    table.add_row("", "foundation_metrics", str(met))
+
+    console.print(table)
+
+
 def _print_word_analysis(result) -> None:
     """Pretty-print word analysis."""
     table = Table(title=f"Word Analysis: {result.word}", show_header=True)
