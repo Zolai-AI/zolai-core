@@ -53,6 +53,15 @@ class FoundationRawCorpusRepository(BaseRepository):
             ).fetchall()
         return {row[0]: row[1] for row in rows}
 
+    def get_unprocessed(self, limit: int = 0) -> list[dict[str, Any]]:
+        """Get raw corpus entries that haven't been processed to staging yet."""
+        with self._engine.connect() as conn:
+            query = self.table.select().order_by(self.table.c.id)
+            if limit > 0:
+                query = query.limit(limit)
+            rows = conn.execute(query).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
 
 class FoundationRawLLMRepository(BaseRepository):
     """Repository for raw LLM outputs (foundation_raw_llm)."""
@@ -138,6 +147,23 @@ class FoundationStagingWordsRepository(BaseRepository):
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
+    def get_by_hash(self, source_hash: str) -> list[dict[str, Any]]:
+        """Get staged words by source hash."""
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                self.table.select().where(self.table.c.source_hash == source_hash)
+            ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
+    def get_unpromoted(self, limit: int = 0) -> list[dict[str, Any]]:
+        """Get staged words that haven't been promoted to canonical yet."""
+        with self._engine.connect() as conn:
+            query = self.table.select().order_by(self.table.c.id)
+            if limit > 0:
+                query = query.limit(limit)
+            rows = conn.execute(query).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
 
 class FoundationStagingSentencesRepository(BaseRepository):
     """Repository for staged sentence analyses (foundation_staging_sentences)."""
@@ -173,6 +199,14 @@ class FoundationStagingSentencesRepository(BaseRepository):
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
+    def get_by_hash(self, source_hash: str) -> list[dict[str, Any]]:
+        """Get staged sentences by source hash."""
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                self.table.select().where(self.table.c.source_hash == source_hash)
+            ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
 
 class FoundationStagingParagraphsRepository(BaseRepository):
     """Repository for staged paragraph analyses (foundation_staging_paragraphs)."""
@@ -181,6 +215,14 @@ class FoundationStagingParagraphsRepository(BaseRepository):
         super().__init__(engine, "foundation_staging_paragraphs")
 
     def get_by_source_hash(self, source_hash: str) -> list[dict[str, Any]]:
+        """Get staged paragraphs by source hash."""
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                self.table.select().where(self.table.c.source_hash == source_hash)
+            ).fetchall()
+        return [self._row_to_dict(row) for row in rows]
+
+    def get_by_hash(self, source_hash: str) -> list[dict[str, Any]]:
         """Get staged paragraphs by source hash."""
         with self._engine.connect() as conn:
             rows = conn.execute(
@@ -556,7 +598,10 @@ class FoundationBatchesRepository(BaseRepository):
             user=user,
         )
 
-    def update_batch_status(self, batch_id: int, status: str, stats: dict[str, Any] | None = None, user: str = "system") -> bool:
+    def update_batch_status(
+        self, batch_id: int, status: str,
+        stats: dict[str, Any] | None = None, user: str = "system"
+    ) -> bool:
         """Update batch status and stats."""
         data = {"status": status}
         if stats:
@@ -606,7 +651,10 @@ class FoundationReviewQueueRepository(BaseRepository):
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
-    def add_to_queue(self, fact_type: str, fact_key: str, priority: int = 0, assignee: str | None = None, user: str = "system") -> int:
+    def add_to_queue(
+        self, fact_type: str, fact_key: str, priority: int = 0,
+        assignee: str | None = None, user: str = "system"
+    ) -> int:
         """Add item to review queue."""
         return self.create(
             {
@@ -654,7 +702,10 @@ class FoundationMetricsRepository(BaseRepository):
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
-    def record_metric(self, run_id: str, metric: str, value: float, baseline: float | None = None, user: str = "system") -> int:
+    def record_metric(
+        self, run_id: str, metric: str, value: float,
+        baseline: float | None = None, user: str = "system"
+    ) -> int:
         """Record a metric value."""
         data = {
             "run_id": run_id,

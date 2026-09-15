@@ -12,18 +12,17 @@ Usage:
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import (
     Column,
-    DateTime,
     Float,
     Index,
     Integer,
     String,
     Text,
-    create_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
-from datetime import datetime
 
 
 class Base(DeclarativeBase):

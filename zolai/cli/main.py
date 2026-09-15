@@ -694,12 +694,12 @@ def foundation_ingest(
 
     from zolai.pipeline.foundation import FoundationETL
 
-    etl = FoundationETL()
+    etl = FoundationETL(db_path=f"sqlite:///{config.paths.db}")
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
         task = progress.add_task(f"Ingesting {source} from {path}...", total=None)
         result = etl.ingest_from_jsonl(Path(path), source_type=source)
         progress.update(task, completed=True)
-        rprint(f"[green]✓ Ingested {result.records_staged} records[/green]")
+        rprint(f"[green]✓ Ingested {result.records_processed} records[/green]")
 
 
 @app.command()
@@ -711,12 +711,12 @@ def foundation_build(
     _setup_logging(verbose)
     from zolai.pipeline.foundation import FoundationETL
 
-    etl = FoundationETL()
+    etl = FoundationETL(db_path=f"sqlite:///{config.paths.db}")
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
         task = progress.add_task("Building staging layer...", total=None)
         result = etl.build_staging_from_raw()
         progress.update(task, completed=True)
-        rprint(f"[green]✓ Built staging: {result.records_staged} staged, {result.errors} errors[/green]")
+        rprint(f"[green]✓ Built staging: {result.records_processed} staged, {result.errors} errors[/green]")
 
 
 @app.command()
@@ -730,10 +730,10 @@ def foundation_promote(
     _setup_logging(verbose)
     from zolai.pipeline.foundation import FoundationETL
 
-    etl = FoundationETL()
+    etl = FoundationETL(db_path=f"sqlite:///{config.paths.db}")
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
-        task = progress.add_task(f"Promoting {fact_type} with threshold={threshold}...", total=None)
-        result = etl.promote_to_canonical(fact_type=fact_type)
+        task = progress.add_task("Promoting with threshold={threshold}...", total=None)
+        result = etl.promote_staging_to_canonical(threshold=threshold, batch_size=batch_size)
         progress.update(task, completed=True)
         rprint(f"[green]✓ Promoted: {result.records_promoted} records, {result.records_queued_for_review} queued for review[/green]")
 
@@ -744,9 +744,9 @@ def foundation_status(
 ):
     """📊 Show foundation table counts and pipeline status."""
     _setup_logging(verbose)
+    from zolai.config import config
     from zolai.data.repositories import get_repositories
-
-    repos = get_repositories()
+    repos = get_repositories(config.paths.db)
     table = Table(title="Foundation Pipeline Status", show_header=True)
     table.add_column("Layer", style="cyan")
     table.add_column("Table", style="yellow")
