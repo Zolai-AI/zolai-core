@@ -12,10 +12,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING
-
-from sqlalchemy import text as sql_text
-from sqlalchemy.engine import Engine
+from typing import TYPE_CHECKING, Optional
 
 from zolai.data.database import DatabaseManager
 from zolai.data.repositories import get_foundation_repositories
@@ -28,12 +25,7 @@ from zolai.foundation import (
 )
 
 if TYPE_CHECKING:
-    from zolai.data.repositories.foundation import (
-        FoundationStagingWordsRepository,
-        FoundationStagingSentencesRepository,
-        FoundationStagingParagraphsRepository,
-        FoundationStagingEvidenceRepository,
-    )
+    pass
 
 log = logging.getLogger(__name__)
 
@@ -94,7 +86,7 @@ class FoundationETL:
         """Log batch completion and update stats."""
         repos = self._get_repos()
         batch_repo = repos["foundation_batches"]
-        batch_repo.update_batch(
+        batch_repo.update_batch_status(
             stats.batch_id if hasattr(stats, "batch_id") else 0,
             status,
             {
@@ -148,7 +140,7 @@ class FoundationETL:
                         content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
 
                         # Check for duplicates
-                        existing = raw_corpus.get_by_hash(content_hash)
+                        existing = raw_corpus.get_by_content_hash(content_hash)
                         if existing:
                             stats.errors += 1
                             continue
@@ -174,7 +166,7 @@ class FoundationETL:
             self._complete_batch(stats, "completed")
             return stats
 
-        except Exception as e:
+        except Exception:
             stats.duration_seconds = (datetime.now() - start).total_seconds()
             stats.errors += 1
             self._complete_batch(stats, "failed")
@@ -253,7 +245,9 @@ class FoundationETL:
                                     "morphemes": list(tok.morphology.morphemes),
                                     "meaning": tok.morphology.meaning,
                                 }),
-                                "meanings": json.dumps([word_results.dictionary_senses[0]]) if word_results.dictionary_senses else json.dumps([]),
+                                "meanings": json.dumps(
+                                    [word_results.dictionary_senses[0]]
+                                ) if word_results.dictionary_senses else json.dumps([]),
                                 "tone_profile": json.dumps({}),
                                 "zvs_compliant": word_results.zvs_compliant,
                                 "frequency": 1,
@@ -319,7 +313,7 @@ class FoundationETL:
             self._complete_batch(stats, "completed")
             return stats
 
-        except Exception as e:
+        except Exception:
             stats.duration_seconds = (datetime.now() - start).total_seconds()
             stats.errors += 1
             self._complete_batch(stats, "failed")
@@ -338,12 +332,8 @@ class FoundationETL:
 
         repos = self._get_repos()
         staging_words = repos["foundation_staging_words"]
-        staging_sentences = repos["foundation_staging_sentences"]
-        staging_paragraphs = repos["foundation_staging_paragraphs"]
         staging_evidence = repos["foundation_staging_evidence"]
         canonical_words = repos["canonical_words"]
-        canonical_sentences = repos["canonical_sentences"]
-        canonical_paragraphs = repos["canonical_paragraphs"]
         evidence_repo = repos["foundation_evidence"]
         consensus_repo = repos["foundation_consensus"]
         batch_repo = repos["foundation_batches"]
@@ -457,7 +447,7 @@ class FoundationETL:
             self._complete_batch(stats, "completed")
             return stats
 
-        except Exception as e:
+        except Exception:
             stats.duration_seconds = (datetime.now() - start).total_seconds()
             stats.errors += 1
             self._complete_batch(stats, "failed")
@@ -474,8 +464,6 @@ class FoundationETL:
         stats = PipelineStats()
 
         repos = self._get_repos()
-        verifications = repos["foundation_verifications"]
-        canonical_words = repos["canonical_words"]
         batch_repo = repos["foundation_batches"]
 
         batch_id = batch_repo.create_batch("verify", {})
@@ -489,7 +477,7 @@ class FoundationETL:
             self._complete_batch(stats, "completed")
             return stats
 
-        except Exception as e:
+        except Exception:
             stats.duration_seconds = (datetime.now() - start).total_seconds()
             stats.errors += 1
             self._complete_batch(stats, "failed")
