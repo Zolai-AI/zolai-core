@@ -59,15 +59,22 @@ class FoundationETL:
     4. VERIFY: Run verifiers → foundation_verifications
     """
 
-    def __init__(self, db_path: Optional[str] = None) -> None:
-        """Initialize ETL with database connection."""
+    def __init__(self, db_path: Optional[str] = None, mgr: Optional[DatabaseManager] = None) -> None:
+        """Initialize ETL with database connection.
+
+        Args:
+            db_path: Path to SQLite database file (or URL)
+            mgr: Optional pre-initialized DatabaseManager
+        """
         self.db_path = db_path
-        self._mgr: Optional[DatabaseManager] = None
+        self._mgr = mgr
         self._analyzer: Optional[FoundationAnalyzer] = None
         self._repos: Optional[dict] = None
 
     def _get_manager(self) -> DatabaseManager:
         if self._mgr is None:
+            if self.db_path is None:
+                raise ValueError("Either db_path or mgr must be provided")
             self._mgr = DatabaseManager(self.db_path)
             self._mgr.init_db()
         return self._mgr
