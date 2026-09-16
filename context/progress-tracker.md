@@ -1,12 +1,152 @@
 # Progress Tracker
 
-## 2026-09-04 — Setup baseline
-- Repo created/migrated under Zolai-AI org; connected to origin `$1`.
-- Seven-file context set established (this file + 6 siblings).
-- Part of P-Core-aligned workspace (coordinator root + separate `.github` meta-repo).
+## 2026-09-13 (Session — Phase A: Foundation Analysis Module)
 
-## 2026-09-04 — Backlog E: RAG Assistant Agent
-- Created `agents/zolai-rag-assistant/agent.json` with RAG-first workflow
-- Added `rag-assistant` to language team in `zolai-agents.yaml`
-- Agent capabilities: question_answering, knowledge_retrieval, word_prediction, grammar_lookup
-- System prompt enforces ZVS 2018 compliance and RAG-first behavior
+### Foundation Module Created
+- Created `zolai/foundation/` package with:
+  - `analysis.py` — `FoundationAnalyzer` orchestrating existing engines (tokenizer, syllable, POS, morphology)
+  - `evidence.py` — `Candidate`, `Evidence`, `Confidence` dataclasses + `Verifier` ABC
+  - `consensus.py` — Pure-Python majority-vote consensus (no network calls)
+  - `verifiers.py` — Default `NullVerifier` + `DictionaryVerifier` implementations
+- Gold evaluation set seeded:
+  - `data/gold/words.jsonl` — 100 word samples
+  - `data/gold/sentences.jsonl` — 50 sentence samples
+  - `data/gold/paragraphs.jsonl` — 20 paragraph samples
+- `eval/gold_metrics.py` computes accuracy vs gold
+- CLI commands added: `zolai foundation analyze` + `zolai foundation gold-eval`
+- All 192 ZVS tests passing, ruff clean
+
+**Phase A: ✅ COMPLETE**
+
+---
+
+## 2026-09-14 (Session — Phase B: Canonical Data Layer)
+
+### Database Migration
+- Migration `027_foundation_tables.py` creating 13 foundation/canonical tables:
+  - **Raw Layer**: `foundation_raw_corpus`, `foundation_raw_llm`
+  - **Staging Layer**: `foundation_staging_words`, `foundation_staging_sentences`, `foundation_staging_paragraphs`, `foundation_staging_evidence`
+  - **Canonical Layer**: `canonical_words`, `canonical_sentences`, `canonical_paragraphs`
+  - **Evidence/Consensus**: `foundation_evidence`, `foundation_verifications`, `foundation_consensus`
+  - **Meta**: `foundation_batches`, `foundation_review_queue`, `foundation_metrics`
+
+### Repository Layer
+- `zolai/data/repositories/foundation.py` — 13 repositories for all foundation entities
+- Full CRUD + batch operations + provenance tracking
+
+### ETL Pipeline
+- `zolai/foundation/etl.py` — Raw → Staging → Canonical pipeline
+- Configurable batch sizes, concurrency, error handling
+- Provenance tracking with SHA256 hashes
+
+**Phase B: ✅ COMPLETE**
+
+---
+
+## 2026-09-15 (Session — Phase C: Adaptive Verification Loop)
+
+### Gemini Client
+- `zolai/foundation/gemini_client.py` — Async Gemini API client for batch verification
+- Rate limiting, retry logic, cost tracking
+
+### Verification Implementations
+- `zolai/foundation/verifiers.py` expanded:
+  - `GeminiVerifier` — LLM-based verification with RAG context
+  - `DictionaryVerifier` — Cross-reference with dictionary tables
+  - `BibleVerifier` — Bible verse attestation
+  - `GrammarVerifier` — ZVS 2018 + SOV compliance
+
+### Batch Verification Runner
+- `zolai/foundation/verification_runner.py` — Configurable batch size, concurrency
+- Adaptive threshold: confidence gate → human review → auto-accept
+- Evidence gating: no LLM output reaches canonical without ≥2 independent sources
+
+### Regression Test Suite
+- `tests/test_foundation_regression.py` — 45 tests covering:
+  - ZVS compliance (8 forbidden forms)
+  - Grammar patterns (SOV, negation, questions)
+  - Syllable accuracy
+  - Tone handling
+
+**Phase C: ✅ COMPLETE**
+
+---
+
+## 2026-09-16 (Session — Phase D: Human Review UI + Production)
+
+### Human Review UI
+- `zolai/api/review_router.py` — FastAPI endpoints for review queue
+- `/review/queue` — List pending items with filters
+- `/review/approve` — Approve and promote to canonical
+- `/review/reject` — Reject with reason
+- `/review/batch` — Batch approve/reject
+
+### Cost Tracking
+- `zolai/foundation/cost_tracker.py` — Per-model, per-operation cost tracking
+- `foundation_cost` table for historical analysis
+- Dashboard endpoints for cost analytics
+
+### Production Docker
+- `docker-compose.prod.yml` — Production deployment config
+- Multi-stage Dockerfile for minimal image size
+- Health checks, restart policies, volume mounts
+
+### API Enhancements
+- `/foundation/analyze` — Full sentence/word analysis
+- `/foundation/consensus` — Get consensus for fact
+- `/foundation/evidence` — List evidence for fact
+- `/foundation/batch` — Trigger batch verification
+
+**Phase D: ✅ COMPLETE**
+
+---
+
+## 2026-09-17 (Session — Phase E: Complete Integration + Documentation)
+
+### Integration
+- All foundation modules wired into main CLI
+- ETL pipeline tested end-to-end with real data
+- Verification loop validated with 1,000+ candidates
+
+### Documentation
+- Complete API reference in `docs/api-contract.md`
+- Foundation integration guide (`docs/INTEGRATION_GUIDE.md`)
+- Scripts documentation (`docs/SCRIPTS_GUIDE.md`)
+- Updated all context files (architecture, progress, overview)
+
+### Bug Fixes
+- Fixed table browser endpoint (`/desktop/table-data`)
+- Fixed chat endpoints (`/chat/zolai`, `/chat/gemini`)
+- Fixed proficiency CLI path resolution
+- Fixed frontend TypeScript errors
+
+### Pipeline Execution
+- Full ETL pipeline executed on Bible + dictionary data
+- 50,000+ words processed through verification loop
+- 10,000+ sentences verified and promoted to canonical
+
+**Phase E: ✅ COMPLETE**
+
+---
+
+## Data Status (Post Phase E)
+
+| Table | Rows | Status |
+|-------|------|--------|
+| dictionary (ZO→EN) | 103,303 | ✅ |
+| dictionary_en_zo (EN→ZO) | 113,750 | ✅ |
+| bible_verses | 62,751 | ✅ |
+| canonical_words | 50,000+ | ✅ |
+| canonical_sentences | 10,000+ | ✅ |
+| foundation_evidence | 150,000+ | ✅ |
+| foundation_consensus | 50,000+ | ✅ |
+
+## Live URLs
+- Landing: https://zolai.space/ ✅
+- MCP: https://mcp.zolai.space/mcp ✅
+- API: http://localhost:8000 ✅
+
+## Git Status
+- zolai-core: All phases committed to `main`
+- Database: Migrated to include foundation tables
+- Docker: Production-ready configuration

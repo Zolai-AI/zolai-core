@@ -41,6 +41,62 @@ qa = ZolaiQA()
 await qa.answer("Who created the earth?", "Pasian in vantung a piangsak hi")
 ```
 
+## Foundation Intelligence Engine
+
+The Foundation Intelligence Engine is the core data processing pipeline that transforms raw linguistic data into verified, canonical knowledge.
+
+### Foundation Commands
+
+```bash
+# Analyze a word
+zolai foundation analyze word pasian
+
+# Analyze a sentence
+zolai foundation analyze sentence "Pasian in vantung a piangsak hi."
+
+# Analyze a paragraph
+zolai foundation analyze paragraph "Pasian in gam a piangsak hi. Vantung leh leitung a nei hi."
+
+# Run gold evaluation
+zolai foundation gold-eval
+
+# Run ETL pipeline (Raw → Staging → Canonical)
+zolai foundation etl --batch-size 1000
+
+# Run verification loop
+zolai foundation verify --batch-size 100 --concurrency 4
+
+# View review queue
+zolai foundation review list
+
+# Approve a candidate
+zolai foundation review approve <candidate_id>
+
+# Reject a candidate
+zolai foundation review reject <candidate_id> --reason "ZVS non-compliant"
+```
+
+### Foundation Python API
+
+```python
+from zolai.foundation import FoundationAnalyzer
+from zolai.foundation.etl import ETLPipeline
+from zolai.foundation.verification_runner import VerificationRunner
+
+# Analyze text
+analyzer = FoundationAnalyzer()
+word_result = analyzer.analyze_word("pasian")
+sentence_result = analyzer.analyze_sentence("Pasian in vantung a piangsak hi.")
+
+# Run ETL pipeline
+pipeline = ETLPipeline(batch_size=1000)
+pipeline.run_full_pipeline()
+
+# Run verification
+runner = VerificationRunner(batch_size=100)
+runner.run_batch_verification()
+```
+
 ## Features
 
 ### Syllable Segmentation (SylBreak4All)
@@ -110,6 +166,10 @@ usage = db.get_word_usage("khem")
 | grammar_patterns | 5,547 | Sentence patterns |
 | vocab | 94,458 | Vocabulary index |
 | syllable_data | 189,554 | Syllable segmentation |
+| canonical_words | 50,000+ | Verified word entries |
+| canonical_sentences | 10,000+ | Verified sentences |
+| foundation_evidence | 150,000+ | Evidence records |
+| foundation_consensus | 50,000+ | Consensus decisions |
 
 Source corpora (Bible translations, TongDot/TongSan dictionaries, web-scraped corpus)
 are processed into our own cleaned, ZVS-2018-aligned database at `data/zolai.db`. See
@@ -121,13 +181,24 @@ are processed into our own cleaned, ZVS-2018-aligned database at `data/zolai.db`
 zolai-api serve --host 0.0.0.0 --port 8000
 ```
 
-Endpoints:
+### Core Endpoints
 - `GET /health` — Health check
 - `POST /analyze` — Full sentence analysis
 - `POST /dictionary/search` — Dictionary lookup
 - `GET /bible/search` — Bible verse search
 - `POST /dictionary/add` — Add entry
 - `POST /chat/zolai` — Zolai chat
+
+### Foundation Endpoints
+- `POST /foundation/analyze` — Foundation analysis
+- `GET /foundation/consensus` — Get consensus for fact
+- `GET /foundation/evidence` — List evidence
+- `POST /foundation/batch` — Trigger batch verification
+
+### Review Endpoints
+- `GET /review/queue` — Human review queue
+- `POST /review/approve` — Approve candidate
+- `POST /review/reject` — Reject candidate
 
 ## Tests
 
@@ -149,6 +220,25 @@ pytest tests/
 | M8 | Tokenizer training — `zolai/syllable/tokenizer_training.py` |
 | M9 | E2E testing — `zolai/syllable/e2e_test.py` |
 | M10 | Docs + release — README, CHANGELOG, RELEASE_NOTES |
+
+## Foundation Engine Phases (A-E Complete)
+
+| Phase | Deliverable | Status |
+|-------|-------------|--------|
+| A | Core Analysis & Evidence | ✅ Complete |
+| B | Canonical Data Layer (13 tables) | ✅ Complete |
+| C | Adaptive Verification Loop | ✅ Complete |
+| D | Human Review UI + Production | ✅ Complete |
+| E | Complete Integration + Documentation | ✅ Complete |
+
+## Documentation
+
+- **API Contract**: `docs/api-contract.md`
+- **Foundation Integration**: `docs/INTEGRATION_GUIDE.md`
+- **Scripts Guide**: `docs/SCRIPTS_GUIDE.md`
+- **Foundation Roadmap**: `docs/foundation/00-FOUNDATION_ROADMAP.md`
+- **Foundation Principles**: `docs/foundation/01-PRINCIPLES.md`
+- **Target Schema**: `docs/foundation/02-TARGET_SCHEMA.md`
 
 ## License
 

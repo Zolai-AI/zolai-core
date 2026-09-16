@@ -156,3 +156,36 @@ confidence < 0.70  → human review queue
 - `Verifier` ABC allows injecting LLM verifiers for batch jobs, but default is `NullVerifier` (no-op)
 - Consensus is pure Python (majority vote + evidence weighting)
 - Gold evaluation runs offline against local JSONL fixtures
+
+---
+
+## 11. Human-in-the-Loop Verification
+
+**Rule:** Low-confidence candidates require human review before canonical promotion.
+
+- Candidates with confidence < 0.70 enter the review queue
+- Human reviewers can approve, reject, or request modifications
+- All human decisions are logged for audit and model improvement
+- Review queue is accessible via API and CLI
+
+---
+
+## 12. Cost-Aware Processing
+
+**Rule:** All LLM operations are tracked for cost analysis and budget management.
+
+- Per-model cost tracking (input/output tokens, API calls)
+- Batch operations report total cost and per-item cost
+- Cost thresholds can trigger alerts or automatic throttling
+- Historical cost data enables budget forecasting
+
+---
+
+## 13. Production-Ready Deployment
+
+**Rule:** Foundation Engine must be deployable with minimal configuration.
+
+- Docker support for consistent environments
+- Health checks and graceful shutdown
+- Configurable batch sizes and concurrency limits
+- Comprehensive logging and monitoring endpoints

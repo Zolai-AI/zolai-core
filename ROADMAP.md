@@ -75,6 +75,47 @@
 
 ---
 
+## Foundation Engine Phases (A-E) — Complete ✅
+
+### Phase A — Core Analysis & Evidence (2026-09-13) ✅
+- [x] `zolai/foundation/` module importable with `FoundationAnalyzer`
+- [x] `evidence.py` with `Candidate`, `Evidence`, `Confidence` dataclasses + `Verifier` ABC
+- [x] `consensus.py` with pure-Python majority-vote consensus
+- [x] Gold evaluation set seeded (`data/gold/{words,sentences,paragraphs}.jsonl`)
+- [x] `eval/gold_metrics.py` computes accuracy vs gold
+- [x] CLI: `zolai foundation analyze` + `zolai foundation gold-eval`
+- [x] All new + pre-existing tests pass; ruff clean
+
+### Phase B — Canonical Data Layer (2026-09-14) ✅
+- [x] `foundation_*` and `canonical_*` tables created in `data/zolai.db` (13 tables)
+- [x] Repository layer for foundation entities (`FoundationRepository`)
+- [x] Raw → Staging → Canonical ETL pipeline with provenance tracking
+- [x] Versioning + audit log integration for all foundation tables
+
+### Phase C — Adaptive Verification Loop (2026-09-15) ✅
+- [x] Batch verification runner (configurable batch size, concurrency)
+- [x] Adaptive threshold: confidence gate → human review → auto-accept
+- [x] Evidence gating: no LLM output reaches canonical without ≥2 independent sources
+- [x] Regression test suite for linguistic errors (ZVS, grammar, syllable, tone)
+
+### Phase D — Human Review UI + Production (2026-09-16) ✅
+- [x] Human Review UI with approve/reject workflow
+- [x] Cost tracking per model and operation
+- [x] Production Docker configuration
+- [x] API endpoints for foundation operations
+
+### Phase E — Complete Integration + Documentation (2026-09-17) ✅
+- [x] All foundation modules wired into main CLI
+- [x] ETL pipeline tested end-to-end with real data
+- [x] Verification loop validated with 1,000+ candidates
+- [x] Complete API reference and documentation
+- [x] Foundation integration guide
+- [x] Scripts documentation
+- [x] All bug fixes applied (table browser, chat endpoints, proficiency CLI)
+- [x] Full pipeline execution completed
+
+---
+
 ## Data Release Plan
 
 Large datasets are not stored in this repository. They are released via:
