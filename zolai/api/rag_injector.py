@@ -8,7 +8,6 @@ and formats results as a structured context block truncated to max_tokens.
 import logging
 import re
 import sqlite3
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 

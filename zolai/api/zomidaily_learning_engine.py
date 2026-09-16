@@ -17,7 +17,6 @@ import json
 import logging
 import re
 from pathlib import Path
-from collections import Counter, defaultdict
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)

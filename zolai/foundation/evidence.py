@@ -10,7 +10,7 @@ import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
@@ -47,7 +47,7 @@ class Evidence:
     confidence: float                 # 0.0–1.0 (source-internal confidence)
     provenance_hash: str              # SHA256 of source record(s)
     payload: dict[str, Any]           # Source-specific detail
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     @classmethod
     def create(
@@ -83,7 +83,7 @@ class Candidate:
     value: dict[str, Any]             # The proposed canonical value
     evidence: tuple[Evidence, ...]    # Supporting evidence
     source: str                       # Origin: 'analyzer', 'llm_batch', 'human', etc.
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def aggregate_confidence(self) -> float:

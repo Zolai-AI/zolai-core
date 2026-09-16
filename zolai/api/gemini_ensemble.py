@@ -8,7 +8,6 @@ rate limits. Collects responses and runs fuzzy majority voting.
 import asyncio
 import logging
 from difflib import SequenceMatcher
-from typing import Optional
 
 import httpx
 

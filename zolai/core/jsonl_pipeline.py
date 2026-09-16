@@ -12,10 +12,8 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
 
-from sqlalchemy import text, Column, DateTime, Integer, String, Text, create_engine, func, select
-from sqlalchemy.dialects.sqlite import JSON
+from sqlalchemy import text, Column, DateTime, Integer, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 # ─── Configuration ────────────────────────────────────────────────────────

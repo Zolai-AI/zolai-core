@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, text
-from sqlalchemy.dialects.sqlite import JSON
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy import inspect as sa_inspect
 
