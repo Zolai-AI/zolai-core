@@ -70,6 +70,7 @@ async def review_queue_list(
             logger.error("Failed to load review queue: %s", e)
 
     return templates.TemplateResponse(
+        request,
         "review_queue.html",
         {
             "request": request,
@@ -149,6 +150,7 @@ async def review_detail(request: Request, item_id: int):
         return HTMLResponse(content="<h1>Item not found</h1>", status_code=404)
 
     return templates.TemplateResponse(
+        request,
         "review_detail.html",
         {
             "request": request,
@@ -220,6 +222,7 @@ async def review_stats(request: Request):
         logger.error("Failed to load stats: %s", e)
 
     return templates.TemplateResponse(
+        request,
         "review_queue.html",
         {
             "request": request,
