@@ -22,8 +22,14 @@ import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from zolai.config import config
+
 DIALECT = "tedim"
 SOURCE  = "Bible-Parallel-Corpus"
+
+# Use Foundation's config for output paths
+OUT_ZO_EN = config.paths.data / "dictionary" / "processed" / "dict_bible_zo_en_v1.jsonl"
+OUT_EN_ZO = config.paths.data / "dictionary" / "processed" / "dict_bible_en_zo_v1.jsonl"
 
 # Zolai Standard hard corrections (non-Zolai Standard → Zolai Standard correct)
 # lo is NOT here — it is valid Zolai Standard negation (e.g. "Amah dam lo hi")
@@ -336,18 +342,17 @@ def build_entries(zo_en, zo_zo, zo_neg, zo_examples, tdb_to_tdm, book_count, tot
 
 def main():
     bible_dir = "data/corpus/bible/markdown"
-    out_zo_en = "data/dictionary/processed/dict_bible_zo_en_v1.jsonl"
-    out_en_zo = "data/dictionary/processed/dict_bible_en_zo_v1.jsonl"
 
     zo_en, zo_zo, zo_neg, zo_examples, tdb_to_tdm, book_count, total_verses = study_corpus(bible_dir)
 
     print(f"Building entries for {len(zo_en)} tokens...")
     entries = build_entries(zo_en, zo_zo, zo_neg, zo_examples, tdb_to_tdm, book_count, total_verses)
 
-    with open(out_zo_en, "w", encoding="utf-8") as f:
+    OUT_ZO_EN.parent.mkdir(parents=True, exist_ok=True)
+    with open(OUT_ZO_EN, "w", encoding="utf-8") as f:
         for e in entries:
             f.write(json.dumps(e, ensure_ascii=False) + "\n")
-    print(f"Wrote {len(entries)} ZO→EN entries → {out_zo_en}")
+    print(f"Wrote {len(entries)} ZO→EN entries → {OUT_ZO_EN}")
 
     # EN→ZO reverse index
     en_map = defaultdict(list)
@@ -355,13 +360,14 @@ def main():
         for en in e["translations"]:
             en_map[en].append(e["zolai"])
 
-    with open(out_en_zo, "w", encoding="utf-8") as f:
+    OUT_EN_ZO.parent.mkdir(parents=True, exist_ok=True)
+    with open(OUT_EN_ZO, "w", encoding="utf-8") as f:
         for en, zo_list in sorted(en_map.items()):
             f.write(json.dumps({
                 "english": en, "zolai_equivalents": zo_list,
                 "source": SOURCE, "category": "reverse-index"
             }, ensure_ascii=False) + "\n")
-    print(f"Wrote {len(en_map)} EN→ZO entries → {out_en_zo}")
+    print(f"Wrote {len(en_map)} EN→ZO entries → {OUT_EN_ZO}")
 
 
 if __name__ == "__main__":

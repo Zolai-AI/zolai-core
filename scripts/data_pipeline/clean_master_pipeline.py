@@ -32,6 +32,9 @@ import pandas as pd
 import spacy
 from cleantext import clean
 
+from zolai.config import config
+from zolai.zvs import validate as zvs_validate
+
 # ── Setup ─────────────────────────────────────────────────────────────────────
 nltk.download("punkt_tab", quiet=True)
 nltk.download("stopwords", quiet=True)
@@ -42,7 +45,7 @@ DATA = Path("data")
 OUT  = DATA / "clean"
 OUT.mkdir(parents=True, exist_ok=True)
 
-# ZVS forbidden dialect words (Chin/FCL variants)
+# ZVS forbidden dialect words (Chin/FCL variants) — using Foundation's ZVS validator
 FORBIDDEN = re.compile(
     r"\b(pathian|fapa|bawipa|siangpahrang)\b|\bram\b|\bcu\b|\bcun\b",
     re.IGNORECASE,
@@ -96,7 +99,13 @@ def remove_en_entities(text: str) -> str:
 
 
 def is_forbidden(text: str) -> bool:
-    return bool(FORBIDDEN.search(text or ""))
+    """Check if text contains ZVS forbidden forms using Foundation's validator."""
+    # First check with regex for speed
+    if FORBIDDEN.search(text or ""):
+        return True
+    # Then use Foundation's ZVS validator for comprehensive check
+    report = zvs_validate(text or "")
+    return not report.is_valid
 
 
 def fingerprint(record: dict) -> str:

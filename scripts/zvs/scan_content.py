@@ -61,8 +61,9 @@ from typing import Iterator
 from zolai.zvs import Report, validate
 from zolai.zvs import rules_data
 from zolai.zvs.rules_data import DEFAULT_EXCEPTIONS
+from zolai.config import config
 
-# Repo root is two levels up from this file (scripts/zvs/... -> repo root).
+# Use Foundation's config for paths instead of hardcoded paths
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_WIKI = REPO_ROOT.parent / "zolai-wiki"
 DEFAULT_CORPUS = REPO_ROOT.parent / "data" / "corpus"

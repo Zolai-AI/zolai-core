@@ -33,16 +33,26 @@ try:
 except ImportError:
     pass
 
-# ── ZVS 2018 system prompt ────────────────────────────────────────────────────
+# Import Foundation's ZVS rules and Gemini client patterns
+from zolai.config import config
+from zolai.llm.gemini import GeminiClient as FoundationGeminiClient
+from zolai.llm.gemini import VERIFY_WORD_PROMPT, VERIFY_SENTENCE_PROMPT, VERIFY_GRAMMAR_PROMPT
+
+# ── ZVS 2018 system prompt (synced from Foundation) ──────────────────────────
 SYSTEM_PROMPT = """You are a Tedim Zolai (Chin) linguistics expert following ZVS 2018.
 
 STRICT RULES (never violate):
 1. Vocabulary: pasian, gam, tapa, topa, kumpipa, tua — NEVER pathian/ram/fapa/bawipa/siangpahrang/cu/cun
 2. Orthography: compounds joined — nasep, leitung, nading, hihleh, hihna
 3. Plurality: never combine 'uh' with first-person inclusive 'i'
-4. Negation: 'kei' for conditionals, 'lo' for simple negatives
-5. Word order: SOV
-6. Stem II for nominalization (mu → muhna)
+4. Negation: 'kei' for all persons (e.g. 'Ka pai kei hi'). 'lo' is literary/standalone — never attach agreement marker 'a' to 'lo'
+5. Word order: SOV (Subject-Object-Verb). Verb always comes last.
+6. Questions: 'hiam' for yes/no. 'bang hang' + verb + subject + 'hiam' for content questions (NOT 'bang hang' + subject + verb)
+7. Ergative: 'in' marks the agent of transitive verbs
+8. Pronouns: 'a' = agreement marker before verb; 'amah' = emphatic standalone
+9. Tense: 'hi' (present), 'ta' (past), 'ding' (future), 'zo' (completive), 'khin' (experiential), 'lai' (progressive)
+10. Negative future: 'kei + ding' or 'lo + ding'
+11. Tone sandhi: T1+T3→T2+T3, T3+T1→T2+T1, T3+T3→T2+T3, T3+T4→T3+T2, T4+T1→T4+T1
 
 Quality: 'high' = fully ZVS; 'medium' = minor issues; 'low' = non-Tedim words or severe errors.
 """
@@ -53,14 +63,19 @@ ZVS RULES:
 1. VOCABULARY: pasian/gam/tapa/topa/kumpipa/tua are correct. FORBIDDEN: pathian/ram/fapa/bawipa/siangpahrang/cu/cun
 2. ORTHOGRAPHY: compounds joined — nasep/leitung/nading/hihleh/hihna
 3. PLURALITY: never 'uh' with first-person 'i'
-4. NEGATION: 'kei' for conditionals, 'lo' for simple negatives
+4. NEGATION: 'kei' for all persons. 'lo' is literary/standalone — never attach agreement marker 'a' to 'lo'
 5. WORD ORDER: SOV strictly
-6. SEMANTICS: sentence must make logical sense in context, not just use correct words
+6. QUESTIONS: 'hiam' for yes/no. 'bang hang' + verb + subject + 'hiam' for content questions
+7. ERGATIVE: 'in' marks the agent of transitive verbs
+8. PRONOUNS: 'a' = agreement marker before verb; 'amah' = emphatic standalone
+9. TENSE: 'hi' (present), 'ta' (past), 'ding' (future), 'zo' (completive), 'khin' (experiential), 'lai' (progressive)
+10. SEMANTICS: sentence must make logical sense in context, not just use correct words
 
 EXAMPLES OF ERRORS:
 - "Pasian in gam a om hi" → WRONG: 'in' (topic/agent marker) misused; 'om' (exist) needs a location. Fix: "Pasian gam a om hi" (God's country exists)
 - "I pai uh hi" → WRONG: 'uh' with 'i'. Fix: "I pai hi"
 - "Pathian in ka it hi" → WRONG: 'Pathian' is Hakha dialect. Fix: "Pasian in ka it hi"
+- "Bang hang na pai hiam?" → WRONG: content question word order. Fix: "Bang hang pai na hiam?"
 
 GRAMMAR NOTE — 'in' is the SUBJECT/ERGATIVE marker. 'hong' is directional particle (toward speaker = me/us):
 - "Pasian in hong it hi" → "God loves me" (Pasian=SUBJ, hong=toward-me, it=love)
@@ -109,6 +124,8 @@ def _parse_json(raw: str) -> dict:
 
 
 class OfficialGeminiBackend:
+    """Uses Foundation's GeminiClient patterns with key rotation."""
+
     def __init__(self, api_keys: list[str], model: str):
         self.api_keys = api_keys
         self.model = model
@@ -171,6 +188,7 @@ class ZolaiGeminiTool:
         self._sdk: OfficialGeminiBackend | None = None
         self._web: WebGeminiBackend | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._db_path = config.paths.db  # Use Foundation's config for DB path
 
         if keys and genai:
             print(f"[zolai] Official SDK ({model}, {len(keys)} key(s)) — fallback only")

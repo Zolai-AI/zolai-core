@@ -11,12 +11,26 @@ from pathlib import Path
 
 import requests
 
+from zolai.config import config
+from zolai.foundation import FoundationAnalyzer, get_foundation_analyzer
+
 OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "")
 GROQ_KEY = os.getenv("GROQ_API_KEY", "")
 
 BIBLE_DIR = Path(str(Path(__file__).resolve().parents[1]) + "/Cleaned_Bible/Parallel_Corpus/Tedim_Chin")
 OUTPUT_DIR = Path(str(Path(__file__).resolve().parents[1]) + "/wiki/vocabulary/bible_context")
 LOG_FILE = Path(str(Path(__file__).resolve().parents[1]) + "/wiki/testing/bible_vocab_extraction.jsonl")
+
+# Foundation analyzer for linguistic analysis
+_analyzer: FoundationAnalyzer | None = None
+
+
+def get_analyzer() -> FoundationAnalyzer:
+    """Get or create the Foundation analyzer singleton."""
+    global _analyzer
+    if _analyzer is None:
+        _analyzer = get_foundation_analyzer()
+    return _analyzer
 
 PROMPT = """Analyze this Zolai Bible text with English translation.
 

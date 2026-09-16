@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Collect raw Zolai data from various sources."""
+"""Collect raw Zolai data from various sources.
+Uses Foundation's config for paths.
+"""
 
 from __future__ import annotations
 
@@ -10,9 +12,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator
 
-# Configuration
+from zolai.config import config
+
+# Use Foundation's config for paths
 ROOT = Path(__file__).resolve().parent.parent
-RAW_DIR = ROOT / "raw"
+RAW_DIR = config.paths.data_raw
 SCHEMA = ROOT / "schema.md"
 
 
