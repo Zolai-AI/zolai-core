@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Review Item #{{ item.id }} - Zolai Review Queue</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.14.3/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="/review/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>Review Item #{{ item.id }}</h1>
+            <nav class="nav">
+                <a href="/review/" class="nav-link">Back to Queue</a>
+                <a href="/review/stats" class="nav-link">Pipeline Stats</a>
+                <a href="/docs" class="nav-link">API Docs</a>
+            </nav>
+        </header>
+
+        <div class="detail-container">
+            <!-- Item Header -->
+            <div class="detail-header">
+                <div class="detail-meta">
+                    <span class="item-type badge badge-{{ item.fact_type }}">{{ item.fact_type }}</span>
+                    <span class="item-status badge badge-{{ item.status }}">{{ item.status }}</span>
+                    <span class="item-priority">Priority: {{ item.priority | default(0) }}</span>
+                </div>
+                <h2>{{ item.fact_key }}</h2>
+                {% if item.assignee %}
+                <p class="assignee">Assigned to: <strong>{{ item.assignee }}</strong></p>
+                {% endif %}
+                <p class="created">Created: {{ item.created_at | default('N/A') }}</p>
+            </div>
+
+            <!-- Candidate Value -->
+            {% if candidate_value %}
+            <div class="section">
+                <h3>Candidate Value</h3>
+                <pre class="code-block">{{ candidate_value | tojson(indent=2) }}</pre>
+            </div>
+            {% endif %}
+
+            <!-- Evidence List -->
+            <div class="section">
+                <h3>Evidence ({{ evidence | length }} records)</h3>
+                {% if evidence %}
+                <div class="evidence-list">
+                    {% for ev in evidence %}
+                    <div class="evidence-item">
+                        <div class="evidence-header">
+                            <span class="evidence-tier badge badge-tier-{{ ev.tier | default('unknown') }}">{{ ev.tier | default('N/A') }}</span>
+                            <span class="evidence-source">{{ ev.source | default('N/A') }}</span>
+                            <span class="evidence-confidence">Confidence: {{ "%.2f" | format(ev.confidence | default(0)) }}</span>
+                        </div>
+                        <div class="evidence-content">
+                            <p>{{ ev.evidence | default('No details') }}</p>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="no-data">No evidence records found.</p>
+                {% endif %}
+            </div>
+
+            <!-- Consensus -->
+            <div class="section">
+                <h3>Consensus Decision</h3>
+                {% if consensus %}
+                <div class="consensus-info">
+                    <p><strong>Method:</strong> {{ consensus.method | default('N/A') }}</p>
+                    <p><strong>Confidence:</strong> {{ "%.2f" | format(confidence) }}</p>
+                    {% if consensus.decision %}
+                    <pre class="code-block">{{ consensus.decision | tojson(indent=2) if consensus.decision is mapping else consensus.decision }}</pre>
+                    {% endif %}
+                </div>
+                {% else %}
+                <p class="no-data">No consensus record found.</p>
+                {% endif %}
+            </div>
+
+            <!-- Actions -->
+            {% if item.status == 'pending' %}
+            <div class="section actions">
+                <h3>Actions</h3>
+                <div class="action-buttons">
+                    <button 
+                        hx-post="/api/v1/foundation/review/{{ item.id }}/approve"
+                        hx-vals='{"promoted_by": "ui_user"}'
+                        hx-target=".actions"
+                        hx-swap="outerHTML"
+                        class="btn btn-success btn-large"
+                        hx-confirm="Approve this item and promote to canonical?"
+                    >✓ Approve & Promote</button>
+                    
+                    <div class="reject-form" x-data="{ showReject: false }">
+                        <button @click="showReject = !showReject" class="btn btn-danger btn-large">✗ Reject</button>
+                        <div x-show="showReject" x-cloak class="reject-reason-form">
+                            <textarea 
+                                id="reject-reason"
+                                placeholder="Enter rejection reason..."
+                                rows="3"
+                                class="form-control"
+                            ></textarea>
+                            <button 
+                                hx-post="/api/v1/foundation/review/{{ item.id }}/reject"
+                                hx-vals='() => JSON.stringify({reason: document.getElementById("reject-reason").value, rejected_by: "ui_user"})'
+                                hx-target=".actions"
+                                hx-swap="outerHTML"
+                                class="btn btn-danger"
+                            >Confirm Reject</button>
+                        </div>
+                    </div>
+
+                    <div class="assign-form" x-data="{ showAssign: false }">
+                        <button @click="showAssign = !showAssign" class="btn btn-secondary btn-large">Assign</button>
+                        <div x-show="showAssign" x-cloak class="assign-form-inner">
+                            <input 
+                                type="text"
+                                id="assignee"
+                                placeholder="Enter assignee name..."
+                                class="form-control"
+                            >
+                            <button 
+                                hx-post="/api/v1/foundation/review/{{ item.id }}/assign"
+                                hx-vals='() => JSON.stringify({assignee: document.getElementById("assignee").value})'
+                                hx-target=".actions"
+                                hx-swap="outerHTML"
+                                class="btn btn-primary"
+                            >Assign</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <div class="section">
+                <p class="status-message">This item has been {{ item.status }}.</p>
+                {% if item.resolved_at %}
+                <p>Resolved at: {{ item.resolved_at }}</p>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

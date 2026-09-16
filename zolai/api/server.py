@@ -3,6 +3,7 @@
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -15,6 +16,8 @@ from pydantic import BaseModel
 from ..analyzer.corpus import CorpusAnalyzer
 from ..api.desktop_router import router as desktop_router
 from ..api.jsonl_router import router as jsonl_router
+from ..api.foundation_router import router as foundation_router
+from ..ui.routes import router as ui_router
 from ..cleaner.pipeline import CleanPipeline
 from ..config import config
 from ..crawler.engine import CrawlEngine
@@ -285,6 +288,10 @@ def create_app() -> FastAPI:
     # app.include_router(jsonl_router)
     for route in jsonl_router.routes:
         app.router.routes.append(route)
+    # Foundation Review Queue API
+    app.include_router(foundation_router, prefix="/api/v1")
+    # UI Routes for review queue
+    app.include_router(ui_router)
 
     # --- Static File Serving for Desktop App ---
     from fastapi.responses import FileResponse
@@ -1026,6 +1033,17 @@ def create_app() -> FastAPI:
     # --- Web UI ---
 
     # (No duplicate "/" route — serve_frontend above handles "/" for the desktop app.)
+
+    # UI Static Files
+    _UI_STATIC_DIR = Path(__file__).parent.parent / "ui" / "static"
+
+    @app.get("/review/static/{file_path:path}")
+    async def serve_ui_static(file_path: str):
+        """Serve UI static files (CSS/JS/images)."""
+        full_path = _UI_STATIC_DIR / file_path
+        if full_path.exists() and full_path.is_file():
+            return FileResponse(str(full_path))
+        return {"error": "Not found"}
 
 
     # === Static File Serving (last route - catch-all) ===

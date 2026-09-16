@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zolai Review Queue</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.14.3/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="/review/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>Zolai Foundation Review Queue</h1>
+            <nav class="nav">
+                <a href="/review/" class="nav-link">Review Queue</a>
+                <a href="/review/stats" class="nav-link">Pipeline Stats</a>
+                <a href="/docs" class="nav-link">API Docs</a>
+            </nav>
+        </header>
+
+        {% if show_stats %}
+            <!-- Pipeline Stats View -->
+            <div class="stats-container">
+                <h2>Pipeline Statistics</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3>Raw Layer</h3>
+                        <p class="stat-value">{{ stats.raw_count | default(0) }}</p>
+                        <p class="stat-label">Total Records</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Staging Layer</h3>
+                        <p class="stat-value">{{ stats.staging_count | default(0) }}</p>
+                        <p class="stat-label">Candidates</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Canonical Layer</h3>
+                        <p class="stat-value">{{ stats.canonical_count | default(0) }}</p>
+                        <p class="stat-label">Verified</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Evidence</h3>
+                        <p class="stat-value">{{ stats.evidence_count | default(0) }}</p>
+                        <p class="stat-label">Records</p>
+                    </div>
+                    <div class="stat-card warning">
+                        <h3>Review Queue</h3>
+                        <p class="stat-value">{{ stats.review_pending_count | default(0) }}</p>
+                        <p class="stat-label">Pending</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Batches</h3>
+                        <p class="stat-value">{{ stats.batches_count | default(0) }}</p>
+                        <p class="stat-label">Processed</p>
+                    </div>
+                </div>
+
+                {% if stats.cost_summary %}
+                <div class="cost-summary">
+                    <h3>Cost Summary</h3>
+                    <p>Total Cost: ${{ "%.4f" | format(stats.cost_summary.total_cost | default(0)) }}</p>
+                </div>
+                {% endif %}
+            </div>
+
+        {% else %}
+            <!-- Review Queue List View -->
+            <div class="filters">
+                <form method="get" action="/review/" class="filter-form">
+                    <div class="filter-group">
+                        <label for="status">Status:</label>
+                        <select name="status" id="status">
+                            <option value="">All</option>
+                            <option value="pending" {% if status_filter == 'pending' %}selected{% endif %}>Pending</option>
+                            <option value="approved" {% if status_filter == 'approved' %}selected{% endif %}>Approved</option>
+                            <option value="rejected" {% if status_filter == 'rejected' %}selected{% endif %}>Rejected</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label for="fact_type">Fact Type:</label>
+                        <select name="fact_type" id="fact_type">
+                            <option value="">All</option>
+                            <option value="word" {% if fact_type_filter == 'word' %}selected{% endif %}>Word</option>
+                            <option value="sentence" {% if fact_type_filter == 'sentence' %}selected{% endif %}>Sentence</option>
+                            <option value="paragraph" {% if fact_type_filter == 'paragraph' %}selected{% endif %}>Paragraph</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Filter</button>
+                </form>
+            </div>
+
+            <div class="queue-info">
+                <p>Showing {{ items | length }} of {{ total }} items (Page {{ page }} of {{ total_pages }})</p>
+            </div>
+
+            <div class="queue-list">
+                {% if items %}
+                    {% for item in items %}
+                    <div class="queue-item" id="item-{{ item.id }}">
+                        <div class="item-header">
+                            <span class="item-id">#{{ item.id }}</span>
+                            <span class="item-type badge badge-{{ item.fact_type }}">{{ item.fact_type }}</span>
+                            <span class="item-status badge badge-{{ item.status }}">{{ item.status }}</span>
+                            <span class="item-priority">Priority: {{ item.priority | default(0) }}</span>
+                        </div>
+                        <div class="item-content">
+                            <p class="item-key"><strong>Key:</strong> {{ item.fact_key }}</p>
+                            {% if item.assignee %}
+                            <p class="item-assignee"><strong>Assignee:</strong> {{ item.assignee }}</p>
+                            {% endif %}
+                            <p class="item-created"><strong>Created:</strong> {{ item.created_at | default('N/A') }}</p>
+                        </div>
+                        <div class="item-actions">
+                            <a href="/review/{{ item.id }}" class="btn btn-secondary">View Details</a>
+                            {% if item.status == 'pending' %}
+                            <button 
+                                hx-post="/api/v1/foundation/review/{{ item.id }}/approve"
+                                hx-vals='{"promoted_by": "ui_user"}'
+                                hx-target="#item-{{ item.id }}"
+                                hx-swap="outerHTML"
+                                class="btn btn-success"
+                                hx-confirm="Approve this item?"
+                            >Approve</button>
+                            <button 
+                                hx-post="/api/v1/foundation/review/{{ item.id }}/reject"
+                                hx-vals='{"reason": "UI rejection", "rejected_by": "ui_user"}'
+                                hx-target="#item-{{ item.id }}"
+                                hx-swap="outerHTML"
+                                class="btn btn-danger"
+                                hx-confirm="Reject this item?"
+                            >Reject</button>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="empty-state">
+                        <p>No review items found.</p>
+                    </div>
+                {% endif %}
+            </div>
+
+            <!-- Pagination -->
+            {% if total_pages > 1 %}
+            <div class="pagination">
+                {% if page > 1 %}
+                <a href="/review/?page={{ page - 1 }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if fact_type_filter %}&fact_type={{ fact_type_filter }}{% endif %}" class="btn btn-secondary">Previous</a>
+                {% endif %}
+                
+                <span class="page-info">Page {{ page }} of {{ total_pages }}</span>
+                
+                {% if page < total_pages %}
+                <a href="/review/?page={{ page + 1 }}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if fact_type_filter %}&fact_type={{ fact_type_filter }}{% endif %}" class="btn btn-secondary">Next</a>
+                {% endif %}
+            </div>
+            {% endif %}
+        {% endif %}
+    </div>
+</body>
+</html>

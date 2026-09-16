@@ -887,6 +887,21 @@ def foundation_status(
     console.print(table)
 
 
+@app.command()
+def foundation_review_web(
+    host: str = typer.Option("0.0.0.0", "--host", "-h", help="Bind host"),
+    port: int = typer.Option(8080, "--port", "-p", help="Bind port"),
+    reload: bool = typer.Option(False, "--reload", "-r", help="Auto-reload on changes"),
+):
+    """🌐 Launch the Foundation Review UI server."""
+    import uvicorn
+
+    rprint(f"[bold green]Starting Foundation Review UI on http://{host}:{port}[/bold green]")
+    rprint(f"[dim]Review Queue: http://{host}:{port}/review/[/dim]")
+    rprint(f"[dim]API Docs: http://{host}:{port}/docs[/dim]")
+    uvicorn.run("zolai.api.server:app", host=host, port=port, reload=reload)
+
+
 def _print_word_analysis(result) -> None:
     """Pretty-print word analysis."""
     table = Table(title=f"Word Analysis: {result.word}", show_header=True)
