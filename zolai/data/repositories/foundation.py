@@ -719,6 +719,177 @@ class FoundationMetricsRepository(BaseRepository):
 
 
 # =============================================================================
+# COST TRACKING REPOSITORY
+# =============================================================================
+
+class FoundationCostTrackingRepository(BaseRepository):
+    """Repository for LLM cost tracking (foundation_cost_tracking)."""
+
+    def __init__(self, engine: Engine) -> None:
+        super().__init__(engine, "foundation_cost_tracking")
+
+    def log_request(
+        self,
+        request_id: str,
+        task_type: str,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        cost_usd: float,
+        extra_info: str | None = None,
+    ) -> int:
+        """Log an LLM API request with cost data.
+
+        Args:
+            request_id: UUID for this request.
+            task_type: Type of task ('word', 'sentence', 'paragraph', 'grammar', 'batch').
+            model: Model name used.
+            input_tokens: Number of input tokens.
+            output_tokens: Number of output tokens.
+            cost_usd: Cost in USD.
+            extra_info: Optional JSON metadata.
+
+        Returns:
+            The ID of the created record.
+        """
+        data = {
+            "request_id": request_id,
+            "task_type": task_type,
+            "model": model,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cost_usd": cost_usd,
+            "extra_info": extra_info,
+            "created_at": self._get_timestamp(),
+        }
+        return self.create(data)
+
+    def get_summary(
+        self, start_date: str | None = None, end_date: str | None = None
+    ) -> dict[str, Any]:
+        """Get cost summary for a date range.
+
+        Args:
+            start_date: ISO date string for start of range (inclusive).
+            end_date: ISO date string for end of range (inclusive).
+
+        Returns:
+            Dict with total_cost, by_task, by_model, daily breakdown.
+        """
+        conditions = []
+        if start_date:
+            conditions.append(f"created_at >= '{start_date}'")
+        if end_date:
+            conditions.append(f"created_at <= '{end_date}'")
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        with self._engine.connect() as conn:
+            # Total cost
+            total_row = conn.execute(
+                text(f"SELECT COALESCE(SUM(cost_usd), 0.0) FROM foundation_cost_tracking {where_clause}")
+            ).first()
+            total_cost = float(total_row[0])
+
+            # By task type
+            task_rows = conn.execute(
+                text(
+                    f"SELECT task_type, SUM(cost_usd) as cost, COUNT(*) as cnt "
+                    f"FROM foundation_cost_tracking {where_clause} "
+                    f"GROUP BY task_type ORDER BY cost DESC"
+                )
+            ).fetchall()
+            by_task = {row[0]: {"cost": float(row[1]), "count": row[2]} for row in task_rows}
+
+            # By model
+            model_rows = conn.execute(
+                text(
+                    f"SELECT model, SUM(cost_usd) as cost, COUNT(*) as cnt "
+                    f"FROM foundation_cost_tracking {where_clause} "
+                    f"GROUP BY model ORDER BY cost DESC"
+                )
+            ).fetchall()
+            by_model = {row[0]: {"cost": float(row[1]), "count": row[2]} for row in model_rows}
+
+            # Daily breakdown
+            daily_rows = conn.execute(
+                text(
+                    f"SELECT DATE(created_at) as day, SUM(cost_usd) as cost, COUNT(*) as cnt "
+                    f"FROM foundation_cost_tracking {where_clause} "
+                    f"GROUP BY DATE(created_at) ORDER BY day DESC"
+                )
+            ).fetchall()
+            daily = [{"date": row[0], "cost": float(row[1]), "count": row[2]} for row in daily_rows]
+
+        return {
+            "total_cost": total_cost,
+            "by_task": by_task,
+            "by_model": by_model,
+            "daily": daily,
+        }
+
+    def check_budget(self, monthly_budget_usd: float) -> tuple[bool, float]:
+        """Check if current month's spend is within budget.
+
+        Args:
+            monthly_budget_usd: Monthly budget in USD.
+
+        Returns:
+            Tuple of (within_budget, current_spend).
+        """
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT COALESCE(SUM(cost_usd), 0.0) FROM foundation_cost_tracking "
+                    "WHERE created_at >= :month_start"
+                ),
+                {"month_start": month_start},
+            ).first()
+        current_spend = float(row[0])
+        return current_spend <= monthly_budget_usd, current_spend
+
+    def get_daily_breakdown(self, days: int = 30) -> list[dict[str, Any]]:
+        """Get daily cost breakdown for the last N days.
+
+        Args:
+            days: Number of days to look back.
+
+        Returns:
+            List of dicts with date, cost, count keys.
+        """
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT DATE(created_at) as day, SUM(cost_usd) as cost, COUNT(*) as cnt "
+                    "FROM foundation_cost_tracking "
+                    "WHERE created_at >= DATE('now', :offset) "
+                    "GROUP BY DATE(created_at) ORDER BY day DESC"
+                ),
+                {"offset": f"-{days} days"},
+            ).fetchall()
+        return [{"date": row[0], "cost": float(row[1]), "count": row[2]} for row in rows]
+
+    def get_by_task_type(self) -> dict[str, float]:
+        """Get total cost per task type.
+
+        Returns:
+            Dict mapping task_type to total cost.
+        """
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    "SELECT task_type, SUM(cost_usd) FROM foundation_cost_tracking "
+                    "GROUP BY task_type ORDER BY SUM(cost_usd) DESC"
+                )
+            ).fetchall()
+        return {row[0]: float(row[1]) for row in rows}
+
+
+# =============================================================================
 # REGISTRY
 # =============================================================================
 
@@ -743,6 +914,8 @@ FOUNDATION_REPOSITORIES: dict[str, type[BaseRepository]] = {
     "foundation_batches": FoundationBatchesRepository,
     "foundation_review_queue": FoundationReviewQueueRepository,
     "foundation_metrics": FoundationMetricsRepository,
+    # Cost Tracking
+    "foundation_cost_tracking": FoundationCostTrackingRepository,
 }
 
 

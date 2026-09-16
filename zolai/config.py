@@ -133,6 +133,9 @@ class AppConfig:
     api_host: str = os.environ.get("ZOLAI_API_HOST", "127.0.0.1")
     api_port: int = int(os.environ.get("ZOLAI_API_PORT", "8000"))
     gui_theme: str = os.environ.get("ZOLAI_GUI_THEME", "dark")
+    monthly_budget_usd: float = field(
+        default_factory=lambda: float(os.getenv("ZOLAI_MONTHLY_BUDGET_USD", "50.0"))
+    )
 
 
 # Load .env if present

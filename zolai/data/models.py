@@ -749,6 +749,37 @@ class FoundationMetric(Base):
         return f"<FoundationMetric(run_id={self.run_id!r}, metric={self.metric!r}, value={self.value})>"
 
 
+class FoundationCostTracking(Base):
+    """Cost tracking for LLM API calls.
+
+    Records: request_id, task_type, model, input_tokens, output_tokens, cost_usd, extra_info.
+    """
+
+    __tablename__ = "foundation_cost_tracking"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    request_id: str = Column(String, nullable=False, index=True)  # UUID
+    task_type: str = Column(String, nullable=False, index=True)  # 'word'|'sentence'|'paragraph'|'grammar'|'batch'
+    model: str = Column(String, nullable=False)  # 'gemini-2.0-flash'|'gemini-2.0-pro'|'gemini-2.0-pro-plus'|'approx'
+    input_tokens: int = Column(Integer, nullable=False, default=0)
+    output_tokens: int = Column(Integer, nullable=False, default=0)
+    cost_usd: float = Column(Float, nullable=False, default=0.0)
+    extra_info: str | None = Column(Text, nullable=True)  # JSON: extra info
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+
+    __table_args__ = (
+        Index("ix_fct_task_type", "task_type"),
+        Index("ix_fct_created", "created_at"),
+        Index("ix_fct_model", "model"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<FoundationCostTracking(request_id={self.request_id!r}, "
+            f"model={self.model!r}, cost_usd={self.cost_usd})>"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Model registry for migration/export
 # ---------------------------------------------------------------------------
@@ -789,4 +820,5 @@ MODEL_REGISTRY: dict[str, type[Base]] = {
     "foundation_batches": FoundationBatch,
     "foundation_review_queue": FoundationReviewQueue,
     "foundation_metrics": FoundationMetric,
+    "foundation_cost_tracking": FoundationCostTracking,
 }
