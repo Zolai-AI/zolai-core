@@ -28,38 +28,38 @@ Maps the proposed ~25–35 canonical tables onto existing DB tables + planned `f
 
 ---
 
-## New Foundation Tables (Phase B)
+## Foundation Tables (Phase B - Implemented ✅)
 
 ### Raw Layer (append-only, immutable)
-| Table | Purpose | Source |
-|-------|---------|--------|
-| `foundation_raw_corpus` | Raw JSONL imports (web, PDF, Bible USX) | Ingest pipeline |
-| `foundation_raw_llm` | Raw LLM outputs (candidates) | Batch generation jobs |
+| Table | Purpose | Source | Status |
+|-------|---------|--------|--------|
+| `foundation_raw_corpus` | Raw JSONL imports (web, PDF, Bible USX) | Ingest pipeline | ✅ Implemented |
+| `foundation_raw_llm` | Raw LLM outputs (candidates) | Batch generation jobs | ✅ Implemented |
 
 ### Staging Layer (rebuildable, transient)
-| Table | Purpose | Source |
-|-------|---------|--------|
-| `foundation_staging_words` | Cleaned word candidates + syllable/POS/morphology | `FoundationAnalyzer` |
-| `foundation_staging_sentences` | Cleaned sentence analyses + structure | `FoundationAnalyzer` |
-| `foundation_staging_paragraphs` | Cleaned paragraph analyses + style profile | `FoundationAnalyzer` |
-| `foundation_staging_evidence` | Evidence bundles per candidate | Evidence collection |
+| Table | Purpose | Source | Status |
+|-------|---------|--------|--------|
+| `foundation_staging_words` | Cleaned word candidates + syllable/POS/morphology | `FoundationAnalyzer` | ✅ Implemented |
+| `foundation_staging_sentences` | Cleaned sentence analyses + structure | `FoundationAnalyzer` | ✅ Implemented |
+| `foundation_staging_paragraphs` | Cleaned paragraph analyses + style profile | `FoundationAnalyzer` | ✅ Implemented |
+| `foundation_staging_evidence` | Evidence bundles per candidate | Evidence collection | ✅ Implemented |
 
 ### Canonical Layer (serving reads, versioned, evidence-gated)
-| Table | Purpose | Promotion Rule |
-|-------|---------|----------------|
-| `canonical_words` | Verified word entries: form, syllables, POS, morphology, meanings, tone | ≥2 T1/T2 sources OR consensus ≥0.95 |
-| `canonical_sentences` | Verified sentences: tokens, POS, dependencies, translation, grammar | ≥2 sources OR consensus ≥0.90 |
-| `canonical_paragraphs` | Verified paragraphs: style, structure, multi-style paraphrases | Human review required |
-| `foundation_evidence` | Evidence records: source, tier, confidence, provenance_hash, payload | Auto on staging write |
-| `foundation_verifications` | Verification results: candidate_id, verifier, passed, score, notes | Auto on verify run |
-| `foundation_consensus` | Consensus decisions: fact_key, candidates[], decision, confidence, method | Auto on batch verify |
+| Table | Purpose | Promotion Rule | Status |
+|-------|---------|----------------|--------|
+| `canonical_words` | Verified word entries: form, syllables, POS, morphology, meanings, tone | ≥2 T1/T2 sources OR consensus ≥0.95 | ✅ Implemented |
+| `canonical_sentences` | Verified sentences: tokens, POS, dependencies, translation, grammar | ≥2 sources OR consensus ≥0.90 | ✅ Implemented |
+| `canonical_paragraphs` | Verified paragraphs: style, structure, multi-style paraphrases | Human review required | ✅ Implemented |
+| `foundation_evidence` | Evidence records: source, tier, confidence, provenance_hash, payload | Auto on staging write | ✅ Implemented |
+| `foundation_verifications` | Verification results: candidate_id, verifier, passed, score, notes | Auto on verify run | ✅ Implemented |
+| `foundation_consensus` | Consensus decisions: fact_key, candidates[], decision, confidence, method | Auto on batch verify | ✅ Implemented |
 
 ### Meta / Operational
-| Table | Purpose |
-|-------|---------|
-| `foundation_batches` | Batch job runs: id, type, status, started, completed, stats |
-| `foundation_review_queue` | Human review items: candidate_id, priority, assignee, status |
-| `foundation_metrics` | Evaluation metrics: run_id, metric, value, baseline, delta |
+| Table | Purpose | Status |
+|-------|---------|--------|
+| `foundation_batches` | Batch job runs: id, type, status, started, completed, stats | ✅ Implemented |
+| `foundation_review_queue` | Human review items: candidate_id, priority, assignee, status | ✅ Implemented |
+| `foundation_metrics` | Evaluation metrics: run_id, metric, value, baseline, delta | ✅ Implemented |
 
 ---
 
@@ -145,9 +145,28 @@ CREATE TABLE foundation_consensus (
 CREATE INDEX idx_foundation_consensus_fact ON foundation_consensus(fact_type, fact_key);
 ```
 
+### `foundation_review_queue`
+```sql
+CREATE TABLE foundation_review_queue (
+    id INTEGER PRIMARY KEY,
+    candidate_id INTEGER NOT NULL,         -- References foundation_staging_*.id
+    fact_type TEXT NOT NULL,
+    fact_key TEXT NOT NULL,
+    confidence REAL NOT NULL,
+    priority INTEGER DEFAULT 0,            -- Higher = more urgent
+    assignee TEXT,                         -- Reviewer username
+    status TEXT DEFAULT 'pending',         -- 'pending' | 'in_review' | 'approved' | 'rejected'
+    notes TEXT,                            -- Reviewer notes
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_foundation_review_queue_status ON foundation_review_queue(status);
+CREATE INDEX idx_foundation_review_queue_priority ON foundation_review_queue(priority DESC);
+```
+
 ---
 
-## Mapping: Reference Ontology Sections → Tables
+## Migration: Reference Ontology Sections → Tables
 
 | Ref Section | Ontology Concept | Target Table(s) |
 |-------------|------------------|-----------------|
@@ -212,11 +231,11 @@ CREATE INDEX idx_foundation_consensus_fact ON foundation_consensus(fact_type, fa
 
 ## Migration Strategy
 
-1. **Phase A (current):** No schema changes — Foundation module runs in-memory, writes gold JSONL
-2. **Phase B:** Add migration `027_foundation_tables.py` creating all `foundation_*`/`canonical_*` tables
-3. **Phase B:** Add `FoundationRepository` in `zolai/data/repositories/foundation.py`
-4. **Phase C:** Wire batch verification → consensus → promotion pipeline
-5. **Phase D:** Update serving layer (RAG, API) to read from `canonical_*` tables
+1. **Phase A (Complete):** Foundation module runs in-memory, writes gold JSONL
+2. **Phase B (Complete):** Migration `027_foundation_tables.py` created all `foundation_*`/`canonical_*` tables
+3. **Phase B (Complete):** `FoundationRepository` in `zolai/data/repositories/foundation.py`
+4. **Phase C (Complete):** Batch verification → consensus → promotion pipeline wired
+5. **Phase D (Complete):** Serving layer (RAG, API) reads from `canonical_*` tables
 
 ---
 
