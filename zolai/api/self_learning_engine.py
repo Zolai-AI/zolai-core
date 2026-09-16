@@ -14,7 +14,7 @@ import sqlite3
 import json
 import logging
 from pathlib import Path
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)

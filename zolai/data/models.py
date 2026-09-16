@@ -12,7 +12,7 @@ Usage:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
@@ -347,7 +347,7 @@ class FoundationRawCorpus(Base):
     source_path: str = Column(String, nullable=False)
     content_hash: str = Column(String, nullable=False, index=True)  # SHA256 of content
     payload: str = Column(Text, nullable=False)  # JSON raw content
-    imported_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+    imported_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
 
     __table_args__ = (
         Index("ix_fraw_source_hash", "content_hash"),
@@ -370,7 +370,7 @@ class FoundationRawLLM(Base):
     model: str = Column(String, nullable=False, index=True)
     prompt_hash: str = Column(String, nullable=False, index=True)  # SHA256 of prompt
     response_json: str = Column(Text, nullable=False)
-    created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
 
     __table_args__ = (
         Index("ix_frawllm_model_prompt", "model", "prompt_hash"),
@@ -400,7 +400,7 @@ class FoundationStagingWord(Base):
     zvs_compliant: bool = Column(Integer, nullable=False, default=1)  # SQLite bool
     frequency: int = Column(Integer, nullable=False, default=0)
     source_hash: str = Column(String, nullable=False)  # SHA256 of promoting evidence
-    created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
 
     __table_args__ = (
         Index("ix_fstg_word_form", "form"),
@@ -428,7 +428,7 @@ class FoundationStagingSentence(Base):
     translation: str = Column(Text, nullable=True)  # JSON: {"en": "...", "my": "..."}
     grammar: str = Column(Text, nullable=False, default="{}")  # JSON: {tense, negation, question_type, sov_valid}
     source_hash: str = Column(String, nullable=False)
-    created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
 
     __table_args__ = (
         Index("ix_fstg_sent_text", "text"),
@@ -452,7 +452,7 @@ class FoundationStagingParagraph(Base):
     sentences: str = Column(Text, nullable=False)  # JSON: [{"sentence": "...", "tense": "past", ...}]
     style_profile: str = Column(Text, nullable=False, default="{}")  # JSON: {"narrative": 0.7, "dialogue": 0.2, ...}
     source_hash: str = Column(String, nullable=False)
-    created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
 
     __table_args__ = (
         Index("ix_fstg_para_source_hash", "source_hash"),
@@ -477,7 +477,7 @@ class FoundationStagingEvidence(Base):
     evidence: str = Column(Text, nullable=False)  # JSON: list of evidence records
     tier: int = Column(Integer, nullable=False)  # 1=T1(Bible), 2=T2(Dict), 3=T3(Corpus), 4=T4(Grammar), 5=T5(LLM)
     confidence: float = Column(Float, nullable=False, default=0.0)
-    created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
 
     __table_args__ = (
         Index("ix_fstg_ev_fact", "fact_type", "fact_key"),
@@ -513,7 +513,7 @@ class CanonicalWord(Base):
     verified_at: str | None = Column(String, nullable=True)
     verified_by: str | None = Column(String, nullable=True)  # 'consensus:v1' | 'human:reviewer'
     evidence_ids: str = Column(Text, nullable=False, default="[]")  # JSON array of foundation_evidence.rowids
-    created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
 
     __table_args__ = (
         Index("ix_cword_form", "form"),
@@ -546,7 +546,7 @@ class CanonicalSentence(Base):
     verified_at: str | None = Column(String, nullable=True)
     verified_by: str | None = Column(String, nullable=True)
     evidence_ids: str = Column(Text, nullable=False, default="[]")
-    created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
 
     __table_args__ = (
         Index("ix_csent_text", "text"),
@@ -576,7 +576,7 @@ class CanonicalParagraph(Base):
     verified_at: str | None = Column(String, nullable=True)
     verified_by: str | None = Column(String, nullable=True)
     evidence_ids: str = Column(Text, nullable=False, default="[]")
-    created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
 
     __table_args__ = (
         Index("ix_cpara_version", "version"),
@@ -601,11 +601,12 @@ class FoundationEvidence(Base):
     fact_type: str = Column(String, nullable=False, index=True)  # 'word' | 'sentence' | 'paragraph' | 'grammar'
     fact_key: str = Column(String, nullable=False, index=True)  # e.g. 'word:pasian' | 'sentence:GEN 1:1'
     tier: int = Column(Integer, nullable=False)  # 1=T1(Bible), 2=T2(Dict), 3=T3(Corpus), 4=T4(Grammar), 5=T5(LLM)
-    source: str = Column(String, nullable=False)  # 'bible_verses' | 'dictionary' | 'corpus' | 'grammar_patterns' | 'llm'
+    # 'bible_verses' | 'dictionary' | 'corpus' | 'grammar_patterns' | 'llm'
+    source: str = Column(String, nullable=False)
     confidence: float = Column(Float, nullable=False, default=0.0)
     provenance_hash: str = Column(String, nullable=False, default="")  # SHA256 of source record(s)
     payload: str = Column(Text, nullable=False, default="{}")  # JSON: source-specific evidence detail
-    created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
 
     __table_args__ = (
         Index("ix_fev_fact", "fact_type", "fact_key"),
@@ -632,7 +633,7 @@ class FoundationVerification(Base):
     passed: bool = Column(Integer, nullable=False)  # SQLite bool
     score: float = Column(Float, nullable=False, default=0.0)
     notes: str = Column(Text, nullable=True, default="")
-    created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
 
     __table_args__ = (
         Index("ix_fver_candidate", "candidate_id"),
@@ -640,7 +641,10 @@ class FoundationVerification(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<FoundationVerification(candidate_id={self.candidate_id}, verifier={self.verifier!r}, passed={self.passed})>"
+        return (
+            f"<FoundationVerification(candidate_id={self.candidate_id}, "
+            f"verifier={self.verifier!r}, passed={self.passed})>"
+        )
 
 
 class FoundationConsensus(Base):
@@ -661,7 +665,7 @@ class FoundationConsensus(Base):
     threshold: float = Column(Float, nullable=False, default=0.7)
     agreeing_count: int = Column(Integer, nullable=False, default=0)
     notes: str = Column(Text, nullable=True, default="")  # JSON: array of notes
-    created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
 
     __table_args__ = (
         Index("ix_fcon_fact", "fact_type", "fact_key"),
@@ -669,7 +673,10 @@ class FoundationConsensus(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<FoundationConsensus(fact_type={self.fact_type!r}, fact_key={self.fact_key!r}, method={self.method!r})>"
+        return (
+            f"<FoundationConsensus(fact_type={self.fact_type!r}, "
+            f"fact_key={self.fact_key!r}, method={self.method!r})>"
+        )
 
 
 # --- Meta / Operational ---
@@ -686,7 +693,7 @@ class FoundationBatch(Base):
     batch_type: str = Column(String, nullable=False, index=True)  # 'ingest' | 'build_staging' | 'promote' | 'verify'
     status: str = Column(String, nullable=False, default="pending")  # 'pending' | 'running' | 'completed' | 'failed'
     stats: str = Column(Text, nullable=True)  # JSON: {"records_processed": 100, "promoted": 50, ...}
-    started_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+    started_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
     completed_at: str | None = Column(String, nullable=True)
 
     __table_args__ = (
@@ -712,7 +719,7 @@ class FoundationReviewQueue(Base):
     priority: int = Column(Integer, nullable=False, default=0)  # Higher = more urgent
     assignee: str | None = Column(String, nullable=True)
     status: str = Column(String, nullable=False, default="pending")  # 'pending' | 'in_review' | 'approved' | 'rejected'
-    created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
     resolved_at: str | None = Column(String, nullable=True)
 
     __table_args__ = (
@@ -721,7 +728,10 @@ class FoundationReviewQueue(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<FoundationReviewQueue(fact_type={self.fact_type!r}, fact_key={self.fact_key!r}, status={self.status!r})>"
+        return (
+            f"<FoundationReviewQueue(fact_type={self.fact_type!r}, "
+            f"fact_key={self.fact_key!r}, status={self.status!r})>"
+        )
 
 
 class FoundationMetric(Base):
@@ -738,7 +748,7 @@ class FoundationMetric(Base):
     value: float = Column(Float, nullable=False)
     baseline: float | None = Column(Float, nullable=True)
     delta: float | None = Column(Float, nullable=True)
-    created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
 
     __table_args__ = (
         Index("ix_fmetric_run", "run_id"),
@@ -765,7 +775,7 @@ class FoundationCostTracking(Base):
     output_tokens: int = Column(Integer, nullable=False, default=0)
     cost_usd: float = Column(Float, nullable=False, default=0.0)
     extra_info: str | None = Column(Text, nullable=True)  # JSON: extra info
-    created_at: str = Column(String, nullable=False, default=lambda: datetime.utcnow().isoformat())
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
 
     __table_args__ = (
         Index("ix_fct_task_type", "task_type"),

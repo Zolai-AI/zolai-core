@@ -8,11 +8,9 @@ Works WITH or WITHOUT Gemini:
 """
 
 import sqlite3
-import json
 import logging
 from pathlib import Path
 from dataclasses import dataclass, asdict
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

@@ -11,7 +11,6 @@ Runs three checks:
 import logging
 import re
 import sqlite3
-from pathlib import Path
 
 from .zvs_checker import ZVSComplianceChecker
 

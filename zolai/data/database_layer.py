@@ -10,13 +10,11 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Optional
+from typing import AsyncGenerator, Optional
 
 from sqlalchemy import (
-    Column, DateTime, Integer, String, Text, create_engine, event, inspect, text
+    Column, DateTime, Integer, String, create_engine, event, inspect, text
 )
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.dialects.sqlite import JSON as SQLiteJSON
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker, declared_attr

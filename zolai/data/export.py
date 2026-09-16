@@ -12,10 +12,8 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
 
-from .database import DatabaseManager, get_manager
-from .models import MODEL_REGISTRY
+from .database import get_manager
 
 # Table name → output filename
 _EXPORT_FILES: dict[str, str] = {
