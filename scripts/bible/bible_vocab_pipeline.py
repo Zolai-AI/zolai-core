@@ -21,9 +21,12 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from zolai.config import config
+from zolai.foundation import FoundationAnalyzer, get_foundation_analyzer
+
 DATA     = Path("data/master/sources")
 COMBINED = Path("data/master/combined")
-DB_PATH  = Path("data/master_unified_dictionary.db")
+DB_PATH  = config.paths.db  # Use Foundation's config for DB path
 OUT_VOCAB   = Path("data/processed/bible_vocab")
 PROGRESS    = Path("data/processed/bible_vocab_pipeline_progress.json")
 GAPS_OUT    = Path("data/processed/bible_vocab_still_missing.jsonl")
@@ -51,6 +54,17 @@ FORBIDDEN = re.compile(r"\b(pathian|bawipa|siangpahrang|fapa)\b|(?<!\w)(cu|cun)(
 COND_NEG  = re.compile(r"\blo\s+leh\b", re.I)
 PLURAL_VIO = re.compile(r"\bi\b.{0,30}\buh\b", re.I)
 HTML_ENT  = re.compile(r"&#\d+;|&amp;|&quot;|&lt;|&gt;")
+
+# Foundation analyzer for linguistic analysis
+_analyzer: FoundationAnalyzer | None = None
+
+
+def get_analyzer() -> FoundationAnalyzer:
+    """Get or create the Foundation analyzer singleton."""
+    global _analyzer
+    if _analyzer is None:
+        _analyzer = get_foundation_analyzer()
+    return _analyzer
 
 
 # ── Loaders ───────────────────────────────────────────────────────────────────
@@ -170,6 +184,7 @@ def db_insert(entry: dict, conn: sqlite3.Connection) -> bool:
 # ── Quality auditor ───────────────────────────────────────────────────────────
 
 def audit_verse(ref: str, text: str, source: str, en_text: str = "") -> list[dict]:
+    """Audit a verse using Foundation's ZVS validator and analyzer."""
     flags = []
 
     def flag(issues: list[str], severity: str, rec: str) -> None:
@@ -188,6 +203,14 @@ def audit_verse(ref: str, text: str, source: str, en_text: str = "") -> list[dic
     if PLURAL_VIO.search(text):
         flag(["plural_violation"], "warning",
              "Remove 'uh' when subject is 'i' (inclusive we)")
+
+    # Use Foundation's ZVS validator for comprehensive check
+    analyzer = get_analyzer()
+    sentence_analysis = analyzer.analyze_sentence(text)
+    if not sentence_analysis.zvs_compliant:
+        for violation in sentence_analysis.zvs_violations:
+            flag(["zvs_violation"], "warning", violation)
+
     tokens = tokenize(text)
     if len(tokens) < 4:
         flag(["short_verse"], "info", "Verify this is a full verse, not a header/label")

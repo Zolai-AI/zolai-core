@@ -7,9 +7,11 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-# Paths
+from zolai.config import config
+
+# Use Foundation's config for paths
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = PROJECT_ROOT / "data" / "processed" / "rebuild_v2"
+DATA_DIR = config.paths.data / "processed" / "rebuild_v2"
 MEMORY_DIR = DATA_DIR / "memory"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 MEMORY_DIR.mkdir(parents=True, exist_ok=True)

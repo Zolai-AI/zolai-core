@@ -2,6 +2,7 @@
 """
 Zolai Data Ingestion Pipeline v2
 Orchestrates collection, cleaning, and linguistic scoring (ZVS v9).
+Uses Foundation modules for analysis and ETL operations.
 """
 
 import argparse
@@ -11,19 +12,21 @@ import re
 import sys
 from datetime import datetime
 
+from zolai.config import config
+from zolai.foundation import FoundationAnalyzer, get_foundation_analyzer
+from zolai.zvs import validate as zvs_validate
+
 # Add project root to path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from pipelines.clean import CleanConfig, ZolaiCleaner
 
-from scripts.test_grammar_rules import ZolaiGrammarAuditor
-
 
 class IngestionPipelineV2:
     def __init__(self, register="general"):
-        self.auditor = ZolaiGrammarAuditor()
         self.cleaner = ZolaiCleaner(CleanConfig())
         self.register = register
+        self._analyzer: FoundationAnalyzer | None = None
         self.refactor_patterns = [
             (re.compile(r'\buhhi\b', re.IGNORECASE), 'uh hi'),
             (re.compile(r"Nan'?g\b", re.IGNORECASE), "na'ng"),
@@ -34,6 +37,13 @@ class IngestionPipelineV2:
             (re.compile(r'\bkik\s+ding\b', re.IGNORECASE), 'kikding'),
             (re.compile(r'\blo\s+leh\b', re.IGNORECASE), 'kei leh'),
         ]
+
+    @property
+    def analyzer(self) -> FoundationAnalyzer:
+        """Lazy-initialized Foundation analyzer."""
+        if self._analyzer is None:
+            self._analyzer = get_foundation_analyzer()
+        return self._analyzer
 
     def auto_refactor(self, text):
         """Apply high-confidence linguistic fixes."""
@@ -48,16 +58,25 @@ class IngestionPipelineV2:
         # 2. Advanced Standardizer (Apply fixes automatically)
         refactored_text = self.auto_refactor(cleaned_text)
 
-        # 3. Linguistic Scoring (On the refactored text)
-        score = self.auditor.score(refactored_text, self.register)
-        errors = self.auditor.audit(refactored_text, self.register)
-        error_ids = [e.rule_id for e in errors]
+        # 3. Linguistic Scoring using Foundation's ZVS validator
+        report = zvs_validate(refactored_text)
+        zvs_compliant = report.is_valid
+        violations = [v.rule_id for v in report.violations]
+
+        # 4. Foundation sentence analysis for grammar patterns
+        sentence_analysis = self.analyzer.analyze_sentence(refactored_text)
 
         return {
             "zolai": refactored_text,
             "original_zolai": cleaned_text if cleaned_text != refactored_text else None,
-            "grammar_score": round(score, 2),
-            "error_ids": error_ids,
+            "zvs_compliant": zvs_compliant,
+            "zvs_violations": violations,
+            "grammar_score": 1.0 if zvs_compliant else 0.5,
+            "sov_valid": sentence_analysis.sov_valid,
+            "ergative_present": sentence_analysis.ergative_present,
+            "negation_type": sentence_analysis.negation_type,
+            "question_type": sentence_analysis.question_type,
+            "tense": sentence_analysis.tense,
             "register": self.register,
             "ingested_at": datetime.now().isoformat(),
             "source": source_info or "unknown"

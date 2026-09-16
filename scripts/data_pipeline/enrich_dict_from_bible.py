@@ -4,6 +4,7 @@ Enrich dict_canonical_v1.jsonl by scanning all Bible parallel files:
 - For each word, find its best example verse (shortest clear verse)
 - Add context-derived translations (top EN glosses from all books)
 - Add simple short example: shortest verse containing the word
+Uses Foundation's config for paths and ETL operations.
 """
 
 import glob
@@ -12,13 +13,15 @@ import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from zolai.config import config
+
 BIBLE_DIRS = [
     "data/corpus/bible/markdown/Parallel_Corpus/TDB77",
     "data/corpus/bible/markdown/Parallel_Corpus/Tedim_Chin",
     "data/corpus/bible/markdown/Parallel",
 ]
-MASTER    = "data/dictionary/processed/dict_canonical_v1.jsonl"
-OUT       = "data/dictionary/processed/dict_canonical_v1.jsonl"
+MASTER = config.paths.data / "dictionary" / "processed" / "dict_canonical_v1.jsonl"
+OUT = config.paths.data / "dictionary" / "processed" / "dict_canonical_v1.jsonl"
 
 SKIP = {
     "in","a","hi","uh","leh","tawh","ah","kha","ta","pah","ciangin",

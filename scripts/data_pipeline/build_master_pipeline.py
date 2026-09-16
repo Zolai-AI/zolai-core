@@ -8,6 +8,8 @@ All-in-one pipeline:
 5. Add CEFR tags based on first_book + frequency
 6. Generate instruction pairs from bible study verse alignments
 7. Update wiki memory files
+
+Uses Foundation ETL for data operations.
 """
 
 import json
@@ -15,6 +17,9 @@ import re
 import shutil
 from collections import Counter, defaultdict
 from pathlib import Path
+
+from zolai.config import config
+from zolai.pipeline.foundation import FoundationETL
 
 
 # ── 1. Copy NAH ────────────────────────────────────────────────────────────────
@@ -282,6 +287,10 @@ def main():
     os.chdir(project_root)
     print(f"Working dir: {Path.cwd()}")
 
+    # Use Foundation's config for paths
+    out_master = config.paths.data / "dictionary" / "processed" / "dict_canonical_v1.jsonl"
+    out_inst = config.paths.data / "training" / "instructions_bible_v1.jsonl"
+
     # 1. Fix NAH
     print("\n── 1. NAH ──")
     fix_nah()
@@ -321,7 +330,7 @@ def main():
         entry.setdefault("related", [])
 
     # Save master dict
-    out_master = Path("data/dictionary/processed/dict_canonical_v1.jsonl")
+    out_master.parent.mkdir(parents=True, exist_ok=True)
     with open(out_master, "w", encoding="utf-8") as f:
         for word, entry in sorted(master.items()):
             entry["zolai"] = word  # normalize to lowercase key
@@ -331,7 +340,7 @@ def main():
     # 5. Generate instruction pairs
     print("\n── 5. Generating instruction pairs ──")
     instructions = generate_instructions(limit=50000)
-    out_inst = Path("data/training/instructions_bible_v1.jsonl")
+    out_inst.parent.mkdir(parents=True, exist_ok=True)
     with open(out_inst, "w", encoding="utf-8") as f:
         for inst in instructions:
             f.write(json.dumps(inst, ensure_ascii=False) + "\n")

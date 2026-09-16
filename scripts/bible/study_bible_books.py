@@ -7,6 +7,7 @@ Outputs a structured learning record per verse with:
   - Grammar patterns detected (negation, tense markers, particles)
   - New vocabulary discovered (not seen in previous books)
   - Running dictionary updated after each book
+Uses Foundation's analyzer for linguistic analysis.
 """
 
 import glob
@@ -14,6 +15,9 @@ import json
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
+
+from zolai.config import config
+from zolai.foundation import FoundationAnalyzer, get_foundation_analyzer
 
 # Canonical Bible book order (66 books)
 BOOK_ORDER = [
@@ -30,7 +34,18 @@ BOOK_ORDER = [
 
 BIBLE_DIR = "data/corpus/bible/markdown/Parallel_Corpus/TDB77"
 OUT_DIR   = Path("data/dictionary/bible_study")
-OUT_DICT  = Path("data/dictionary/processed/dict_bible_learned_v1.jsonl")
+OUT_DICT  = config.paths.data / "dictionary" / "processed" / "dict_bible_learned_v1.jsonl"
+
+# Foundation analyzer for linguistic analysis
+_analyzer: FoundationAnalyzer | None = None
+
+
+def get_analyzer() -> FoundationAnalyzer:
+    """Get or create the Foundation analyzer singleton."""
+    global _analyzer
+    if _analyzer is None:
+        _analyzer = get_foundation_analyzer()
+    return _analyzer
 
 SKIP = {
     "in","a","hi","uh","leh","tawh","ah","kha","ta","pah","ciangin",

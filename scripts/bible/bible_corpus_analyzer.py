@@ -3,6 +3,7 @@
 Bible Corpus Analyzer
 =====================
 Analyzes Bible parallel corpus to extract verified word usage patterns and context.
+Uses Foundation's analyzer for linguistic analysis.
 """
 
 import json
@@ -10,6 +11,9 @@ import re
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
+
+from zolai.config import config
+from zolai.foundation import FoundationAnalyzer, get_foundation_analyzer
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 PARALLEL_DIR = PROJECT_ROOT / 'data' / 'parallel'
@@ -23,6 +27,14 @@ class BibleCorpusAnalyzer:
         self.directional_usage = defaultdict(list)
         self.agreement_patterns = defaultdict(list)
         self.errors_found = []
+        self._analyzer: FoundationAnalyzer | None = None
+
+    @property
+    def analyzer(self) -> FoundationAnalyzer:
+        """Lazy-initialized Foundation analyzer."""
+        if self._analyzer is None:
+            self._analyzer = get_foundation_analyzer()
+        return self._analyzer
 
     def analyze_corpus(self, corpus_file, max_records=10000):
         """Analyze Bible corpus for patterns"""
