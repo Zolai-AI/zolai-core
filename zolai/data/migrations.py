@@ -769,6 +769,95 @@ def apply_foundation_indexes(mgr: DatabaseManager) -> dict[str, Any]:
     return {"applied": applied, "skipped": skipped, "errors": errors}
 
 
+def create_foundation_cost_tracking_table(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create the foundation_cost_tracking table.
+
+    Returns:
+        Dict with 'created', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+
+    if "foundation_cost_tracking" in existing_tables:
+        return {"created": [], "skipped": ["foundation_cost_tracking (already exists)"], "errors": []}
+
+    try:
+        foundation_metadata = Base.metadata
+        tables_to_create = [
+            foundation_metadata.tables[t]
+            for t in ["foundation_cost_tracking"]
+            if t in foundation_metadata.tables
+        ]
+        if tables_to_create:
+            foundation_metadata.create_all(mgr.engine, tables=tables_to_create)
+            return {"created": ["foundation_cost_tracking"], "skipped": [], "errors": []}
+    except Exception as exc:
+        return {"created": [], "skipped": [], "errors": [f"create_all: {exc}"]}
+
+    return {"created": [], "skipped": [], "errors": []}
+
+
+# Cost tracking indexes
+FOUNDATION_COST_TRACKING_INDEXES = [
+    (
+        "foundation_cost_tracking",
+        "CREATE INDEX IF NOT EXISTS ix_fct_request_id ON foundation_cost_tracking(request_id)",
+    ),
+    (
+        "foundation_cost_tracking",
+        "CREATE INDEX IF NOT EXISTS ix_fct_task_type ON foundation_cost_tracking(task_type)",
+    ),
+    (
+        "foundation_cost_tracking",
+        "CREATE INDEX IF NOT EXISTS ix_fct_created ON foundation_cost_tracking(created_at)",
+    ),
+    (
+        "foundation_cost_tracking",
+        "CREATE INDEX IF NOT EXISTS ix_fct_model ON foundation_cost_tracking(model)",
+    ),
+]
+
+
+def apply_foundation_cost_tracking_indexes(mgr: DatabaseManager) -> dict[str, Any]:
+    """Apply Foundation cost tracking performance indexes.
+
+    Returns:
+        Dict with 'applied', 'skipped', 'errors' lists.
+    """
+    applied = []
+    skipped = []
+    errors = []
+
+    for table_name, index_sql in FOUNDATION_COST_TRACKING_INDEXES:
+        try:
+            with mgr.engine.connect() as conn:
+                idx_name = index_sql.split("INDEX IF NOT EXISTS ")[1].split(" ON")[0]
+                if mgr._db_url.startswith("sqlite"):
+                    check_sql = f"SELECT 1 FROM sqlite_master WHERE type='index' AND name='{idx_name}'"
+                else:
+                    check_sql = f"""
+                        SELECT 1 FROM pg_indexes
+                        WHERE indexname = '{idx_name}' AND tablename = '{table_name}'
+                    """
+
+                exists = conn.execute(text(check_sql)).first()
+
+                if exists:
+                    skipped.append(f"{table_name}.{idx_name} (already exists)")
+                    continue
+
+                conn.execute(text(index_sql))
+                conn.commit()
+                applied.append(f"{table_name}.{idx_name}")
+
+        except Exception as exc:
+            errors.append(f"{table_name}.{index_sql}: {exc}")
+
+    return {"applied": applied, "skipped": skipped, "errors": errors}
+
+
 def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
     """Run all constraint and index migrations including Foundation tables.
 
@@ -779,12 +868,16 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
     index_results = apply_indexes(mgr)
     foundation_constraint_results = apply_foundation_constraints(mgr)
     foundation_index_results = apply_foundation_indexes(mgr)
+    cost_tracking_table = create_foundation_cost_tracking_table(mgr)
+    cost_tracking_indexes = apply_foundation_cost_tracking_indexes(mgr)
 
     return {
         "constraints": constraint_results,
         "indexes": index_results,
         "foundation_constraints": foundation_constraint_results,
         "foundation_indexes": foundation_index_results,
+        "cost_tracking_table": cost_tracking_table,
+        "cost_tracking_indexes": cost_tracking_indexes,
     }
 
 
