@@ -271,6 +271,23 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         config.paths.ensure_dirs()
+
+        # Run database migrations on startup
+        try:
+            from ..data.database import get_manager
+            from ..data.migrations import run_all_migrations
+
+            mgr = get_manager()
+            migration_result = run_all_migrations(mgr)
+            logger.info("Database migrations completed: %s", {
+                "constraints_applied": len(migration_result.get("constraints", {}).get("applied", [])),
+                "indexes_applied": len(migration_result.get("indexes", {}).get("applied", [])),
+                "foundation_constraints": len(migration_result.get("foundation_constraints", {}).get("applied", [])),
+                "foundation_indexes": len(migration_result.get("foundation_indexes", {}).get("applied", [])),
+            })
+        except Exception:
+            logger.exception("Failed to run database migrations on startup")
+
         logger.info("Zolai API started on %s:%d", config.api_host, config.api_port)
         yield
         logger.info("Zolai API shutting down")
