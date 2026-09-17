@@ -68,6 +68,19 @@ class TranslationEngine:
         # Try dictionary lookup first (tier 1: highest confidence)
         result = self._dictionary_lookup(text, direction)
         if result and result["confidence"] > 0.8:
+            # Check for polysemy: if word has multiple meanings, disambiguate
+            disambig = self._disambiguate_polysemy(text, context=context, direction=direction)
+            if disambig.get("total_senses", 0) and disambig["total_senses"] > 1:
+                # Use the top candidate from disambiguation
+                top = disambig["candidates"][0]
+                result["translation"] = top["meaning"]
+                result["confidence"] = top["confidence"]
+                result["disambiguation"] = {
+                    "total_senses": disambig["total_senses"],
+                    "candidates": disambig["candidates"],
+                    "selected": 0,
+                }
+
             tier = self._get_evidence_tier("dictionary")
             result["tier"] = tier
             result["confidence"] = self._compute_confidence(tier, [result])
@@ -130,6 +143,165 @@ class TranslationEngine:
             "note": "No translation found",
             "evidence_chain": [],
         }
+
+    # ── Polysemy disambiguation ──────────────────────────────────────────
+
+    def _disambiguate_polysemy(
+        self,
+        word: str,
+        context: str | None = None,
+        direction: str = "zo-en",
+    ) -> dict[str, Any]:
+        """Disambiguate polysemous words using dictionary + word_usage context.
+
+        When a word has multiple meanings, this method:
+        1. Fetches all meanings from the dictionary
+        2. If context is provided, queries word_usage for per-book frequency
+        3. Ranks meanings by context relevance + frequency
+        4. Returns candidates with confidence and evidence
+
+        Args:
+            word: The polysemous word.
+            context: Optional context string (e.g., "bible", book name, or sentence).
+            direction: Translation direction.
+
+        Returns:
+            Dict with candidates list, each having meaning, confidence, evidence.
+        """
+        conn = self._get_connection()
+        cur = conn.cursor()
+
+        try:
+            # Fetch all dictionary entries for this word
+            if direction == "zo-en":
+                cur.execute(
+                    """SELECT zolai, english_clean, english, pos, source
+                       FROM dictionary
+                       WHERE zolai = ?""",
+                    (word.lower(),),
+                )
+            else:
+                cur.execute(
+                    """SELECT headword, translations_clean, translations, pos, source
+                       FROM dictionary_en_zo
+                       WHERE headword = ?""",
+                    (word.lower(),),
+                )
+
+            rows = cur.fetchall()
+
+            if not rows:
+                return {"candidates": [], "word": word, "direction": direction}
+
+            if len(rows) == 1:
+                # Single meaning — no disambiguation needed
+                row = rows[0]
+                if direction == "zo-en":
+                    meaning = row["english_clean"] or row["english"]
+                else:
+                    import json
+                    trans = row["translations_clean"]
+                    if not trans:
+                        try:
+                            trans_list = json.loads(row["translations"] or "[]")
+                            trans = trans_list[0] if trans_list else ""
+                        except Exception:
+                            trans = ""
+                    meaning = trans
+
+                return {
+                    "candidates": [{
+                        "meaning": meaning,
+                        "confidence": 1.0,
+                        "evidence": "single dictionary entry",
+                    }],
+                    "word": word,
+                    "direction": direction,
+                }
+
+            # Multiple meanings — disambiguate
+            candidates: list[dict[str, Any]] = []
+            book_frequencies: dict[str, int] = {}
+
+            # Query word_usage for per-book frequency if context is available
+            if context:
+                try:
+                    cur.execute(
+                        """SELECT book, frequency
+                           FROM word_usage
+                           WHERE word = ?
+                           ORDER BY frequency DESC""",
+                        (word.lower(),),
+                    )
+                    for urow in cur.fetchall():
+                        book_frequencies[urow["book"]] = urow["frequency"]
+                except Exception:
+                    pass  # word_usage table may not have this word
+
+            # Build candidates from all dictionary entries
+            for i, row in enumerate(rows):
+                if direction == "zo-en":
+                    meaning = row["english_clean"] or row["english"]
+                    pos = row["pos"] or ""
+                else:
+                    import json
+                    trans = row["translations_clean"]
+                    if not trans:
+                        try:
+                            trans_list = json.loads(row["translations"] or "[]")
+                            trans = trans_list[0] if trans_list else ""
+                        except Exception:
+                            trans = ""
+                    meaning = trans
+                    pos = row["pos"] or ""
+
+                # Base confidence: first entry slightly higher (ordering bias)
+                confidence = 0.5 + 0.1 * (1.0 / (i + 1))
+
+                # Context boost: if context mentions a book where this meaning is common
+                evidence_parts = [f"dictionary entry {i + 1}/{len(rows)}"]
+
+                if context and book_frequencies:
+                    # Simple heuristic: boost if context word appears in book names
+                    context_lower = context.lower()
+                    for book, freq in book_frequencies.items():
+                        if context_lower in book.lower() or book.lower() in context_lower:
+                            boost = min(0.3, freq / 1000.0)
+                            confidence += boost
+                            evidence_parts.append(f"context match: {book} (freq={freq})")
+
+                # POS diversity bonus: different POS entries are more likely
+                # to be genuinely different senses
+                if i > 0 and pos:
+                    prev_pos = rows[i - 1]["pos"] if rows[i - 1]["pos"] else ""
+                    if pos != prev_pos:
+                        confidence += 0.05
+                        evidence_parts.append(f"POS '{pos}' differs from previous")
+
+                confidence = min(1.0, max(0.1, confidence))
+
+                candidates.append({
+                    "meaning": meaning,
+                    "confidence": round(confidence, 3),
+                    "evidence": "; ".join(evidence_parts),
+                    "pos": pos,
+                })
+
+            # Sort by confidence descending
+            candidates.sort(key=lambda x: x["confidence"], reverse=True)
+
+            return {
+                "candidates": candidates,
+                "word": word,
+                "direction": direction,
+                "total_senses": len(candidates),
+            }
+
+        except Exception as e:
+            logger.debug("Polysemy disambiguation failed: %s", e)
+            return {"candidates": [], "word": word, "direction": direction, "error": str(e)}
+        finally:
+            conn.close()
 
     # ── Evidence tier helpers ──────────────────────────────────────────────
     def _get_evidence_tier(self, source: str) -> str:

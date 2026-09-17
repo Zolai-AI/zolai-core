@@ -1,9 +1,18 @@
-"""Spaced repetition and progress tracking with CEFR-aligned adaptive difficulty."""
+"""Spaced repetition and progress tracking with CEFR-aligned adaptive difficulty.
+
+Provides:
+- SM-2 spaced repetition scheduling
+- CEFR level tracking (A1-C2)
+- Learning streak tracking
+- Error categorization (ZVS, grammar, tone, morphology)
+- Adaptive quiz difficulty
+"""
 
 from __future__ import annotations
 
 import logging
 import math
+import re
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Any
@@ -677,6 +686,364 @@ class ProgressTracker:
                 "total_corrections": 0,
                 "freq_distribution": {},
                 "completion_rate": 0,
+            }
+        finally:
+            conn.close()
+
+    # ── Streak tracking ──────────────────────────────────────────────────
+
+    def get_streak(self, user_id: str | None = None, streak_type: str = "daily") -> dict[str, Any]:
+        """Get learning streak for a user.
+
+        Reads/writes the user_streaks table to track consecutive days
+        of learning activity.
+
+        Args:
+            user_id: User ID (defaults to self.user_id).
+            streak_type: Type of streak ("daily", "review", "quiz").
+
+        Returns:
+            Dict with current_streak, longest_streak, last_activity_date, is_active.
+        """
+        uid = user_id or self.user_id
+        conn = self._get_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute(
+                """SELECT current_streak, longest_streak, last_activity_date
+                   FROM user_streaks
+                   WHERE user_id = ? AND streak_type = ?
+                   LIMIT 1""",
+                (uid, streak_type),
+            )
+            row = cur.fetchone()
+
+            if not row:
+                return {
+                    "user_id": uid,
+                    "streak_type": streak_type,
+                    "current_streak": 0,
+                    "longest_streak": 0,
+                    "last_activity_date": None,
+                    "is_active": False,
+                }
+
+            last_date = row["last_activity_date"]
+            current = row["current_streak"]
+            longest = row["longest_streak"]
+
+            # Check if streak is still active (last activity was today or yesterday)
+            is_active = False
+            if last_date:
+                last_dt = datetime.strptime(last_date, "%Y-%m-%d")
+                diff = (datetime.now() - last_dt).days
+                is_active = diff <= 1
+
+            return {
+                "user_id": uid,
+                "streak_type": streak_type,
+                "current_streak": current,
+                "longest_streak": longest,
+                "last_activity_date": last_date,
+                "is_active": is_active,
+            }
+
+        except Exception as e:
+            logger.debug("Get streak failed: %s", e)
+            return {
+                "user_id": uid,
+                "streak_type": streak_type,
+                "current_streak": 0,
+                "longest_streak": 0,
+                "last_activity_date": None,
+                "is_active": False,
+            }
+        finally:
+            conn.close()
+
+    def update_streak(
+        self,
+        user_id: str | None = None,
+        streak_type: str = "daily",
+    ) -> dict[str, Any]:
+        """Update learning streak for today's activity.
+
+        Increments streak if last activity was yesterday, resets if older.
+
+        Args:
+            user_id: User ID (defaults to self.user_id).
+            streak_type: Type of streak.
+
+        Returns:
+            Dict with updated streak info.
+        """
+        uid = user_id or self.user_id
+        today = datetime.now().strftime("%Y-%m-%d")
+        conn = self._get_connection()
+        cur = conn.cursor()
+
+        try:
+            cur.execute(
+                """SELECT id, current_streak, longest_streak, last_activity_date
+                   FROM user_streaks
+                   WHERE user_id = ? AND streak_type = ?
+                   LIMIT 1""",
+                (uid, streak_type),
+            )
+            row = cur.fetchone()
+
+            if not row:
+                # First activity — start streak
+                cur.execute(
+                    """INSERT INTO user_streaks
+                       (user_id, streak_type, current_streak, longest_streak,
+                        last_activity_date, created_at, updated_at)
+                       VALUES (?, ?, 1, 1, ?, datetime('now'), datetime('now'))""",
+                    (uid, streak_type, today),
+                )
+                conn.commit()
+                return {
+                    "user_id": uid,
+                    "streak_type": streak_type,
+                    "current_streak": 1,
+                    "longest_streak": 1,
+                    "last_activity_date": today,
+                }
+
+            last_date = row["last_activity_date"]
+            current = row["current_streak"]
+            longest = row["longest_streak"]
+
+            if last_date == today:
+                # Already recorded today — no change
+                return {
+                    "user_id": uid,
+                    "streak_type": streak_type,
+                    "current_streak": current,
+                    "longest_streak": longest,
+                    "last_activity_date": today,
+                }
+
+            # Calculate gap
+            if last_date:
+                last_dt = datetime.strptime(last_date, "%Y-%m-%d")
+                gap = (datetime.now() - last_dt).days
+            else:
+                gap = 999
+
+            if gap == 1:
+                # Consecutive day — increment
+                new_current = current + 1
+            else:
+                # Streak broken — reset to 1
+                new_current = 1
+
+            new_longest = max(longest, new_current)
+
+            cur.execute(
+                """UPDATE user_streaks
+                   SET current_streak = ?, longest_streak = ?,
+                       last_activity_date = ?, updated_at = datetime('now')
+                   WHERE id = ?""",
+                (new_current, new_longest, today, row["id"]),
+            )
+            conn.commit()
+
+            return {
+                "user_id": uid,
+                "streak_type": streak_type,
+                "current_streak": new_current,
+                "longest_streak": new_longest,
+                "last_activity_date": today,
+            }
+
+        except Exception as e:
+            conn.rollback()
+            logger.debug("Update streak failed: %s", e)
+            return {
+                "user_id": uid,
+                "streak_type": streak_type,
+                "current_streak": 0,
+                "longest_streak": 0,
+                "last_activity_date": None,
+                "error": str(e),
+            }
+        finally:
+            conn.close()
+
+    # ── Error categorization ─────────────────────────────────────────────
+
+    @staticmethod
+    def categorize_correction(original: str, corrected: str) -> dict[str, str]:
+        """Categorize the type of error in a correction.
+
+        Checks for:
+        - ZVS forbidden forms (pathian→pasian, ram→gam, etc.)
+        - SOV/negation/question grammar patterns
+        - Tone sandhi violations
+        - Compound decomposition errors
+
+        Args:
+            original: Original (incorrect) text.
+            corrected: Corrected text.
+
+        Returns:
+            Dict with category, subcategory, rule.
+        """
+        orig_lower = original.lower()
+        corr_lower = corrected.lower()
+
+        # ── ZVS forbidden forms ─────────────────────────────────────────
+        from ..offline.rule_engine import ZVS_CORRECTIONS
+
+        for forbidden, correct in ZVS_CORRECTIONS.items():
+            if forbidden in orig_lower and correct in corr_lower:
+                return {
+                    "category": "zvs",
+                    "subcategory": "forbidden_form",
+                    "rule": f"'{forbidden}' → '{correct}' (ZVS 2018)",
+                }
+
+        # ── SOV word order ──────────────────────────────────────────────
+        # Check if word order changed (e.g., "S V O" → "S O V")
+        orig_words = orig_lower.split()
+        corr_words = corr_lower.split()
+        if len(orig_words) == len(corr_words) and set(orig_words) == set(corr_words):
+            if orig_words != corr_words:
+                return {
+                    "category": "grammar",
+                    "subcategory": "word_order",
+                    "rule": "SOV word order: Subject-Object-Verb",
+                }
+
+        # ── Negation patterns ───────────────────────────────────────────
+        negation_words = {"kei", "lo"}
+        orig_has_neg = any(w in negation_words for w in orig_words)
+        corr_has_neg = any(w in negation_words for w in corr_words)
+        if orig_has_neg != corr_has_neg or (orig_has_neg and corr_has_neg and orig_words != corr_words):
+            # Check if negation position changed
+            return {
+                "category": "grammar",
+                "subcategory": "negation",
+                "rule": "Negation 'kei'/'lo' placement before verb",
+            }
+
+        # ── Question patterns ───────────────────────────────────────────
+        if "hiam" in orig_lower and "hiam" not in corr_lower:
+            return {
+                "category": "grammar",
+                "subcategory": "question_marker",
+                "rule": "Question marker 'hiam' usage",
+            }
+        if "hiam" not in orig_lower and "hiam" in corr_lower:
+            return {
+                "category": "grammar",
+                "subcategory": "question_marker",
+                "rule": "Question marker 'hiam' should be at sentence end",
+            }
+
+        # ── Tone sandhi (detect if correction changes tones) ────────────
+        # Simplified: if words differ only by tone-related characters
+        if len(orig_words) == len(corr_words):
+            tone_diff = False
+            for ow, cw in zip(orig_words, corr_words):
+                if ow != cw and len(ow) == len(cw):
+                    # Check if only tone-marking difference
+                    ow_base = re.sub(r"[0-4]", "", ow)
+                    cw_base = re.sub(r"[0-4]", "", cw)
+                    if ow_base == cw_base:
+                        tone_diff = True
+                        break
+            if tone_diff:
+                return {
+                    "category": "tone",
+                    "subcategory": "tone_sandhi",
+                    "rule": "Tone sandhi rules (19 rules)",
+                }
+
+        # ── Morphology / compound decomposition ─────────────────────────
+        # If correction adds/removes morpheme boundaries (indicated by spaces or +)
+        if "+" in corrected or len(corr_words) > len(orig_words):
+            return {
+                "category": "morphology",
+                "subcategory": "compound_decomposition",
+                "rule": "Compound morpheme analysis",
+            }
+
+        # ── Fallback: general grammar ───────────────────────────────────
+        return {
+            "category": "grammar",
+            "subcategory": "general",
+            "rule": "General grammar correction",
+        }
+
+    def get_error_breakdown(self, user_id: str | None = None) -> dict[str, Any]:
+        """Get error breakdown by category for a user.
+
+        Aggregates from user_reviews table and categorizes each correction.
+
+        Args:
+            user_id: User ID (defaults to self.user_id).
+
+        Returns:
+            Dict with category counts, total errors, most common category.
+        """
+        uid = user_id or self.user_id
+        conn = self._get_connection()
+        cur = conn.cursor()
+
+        try:
+            # Get user's review history
+            cur.execute(
+                """SELECT word, quality
+                   FROM user_reviews
+                   WHERE user_id = ?
+                   ORDER BY reviewed_at DESC
+                   LIMIT 200""",
+                (uid,),
+            )
+            reviews = cur.fetchall()
+
+            if not reviews:
+                return {
+                    "user_id": uid,
+                    "total_errors": 0,
+                    "categories": {},
+                    "most_common": None,
+                }
+
+            # Categorize errors from low-quality reviews (quality < 3 = failure)
+            categories: dict[str, int] = {}
+            total_errors = 0
+
+            for review in reviews:
+                if review["quality"] < 3:
+                    # Use word as both original and corrected (since we don't
+                    # store the corrected form in user_reviews)
+                    # For now, count each failed review as a grammar error
+                    cat = self.categorize_correction(review["word"], review["word"])
+                    category = cat["category"]
+                    categories[category] = categories.get(category, 0) + 1
+                    total_errors += 1
+
+            most_common = max(categories, key=categories.get) if categories else None
+
+            return {
+                "user_id": uid,
+                "total_errors": total_errors,
+                "categories": categories,
+                "most_common": most_common,
+            }
+
+        except Exception as e:
+            logger.debug("Get error breakdown failed: %s", e)
+            return {
+                "user_id": uid,
+                "total_errors": 0,
+                "categories": {},
+                "most_common": None,
+                "error": str(e),
             }
         finally:
             conn.close()
