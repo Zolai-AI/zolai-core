@@ -20,8 +20,6 @@ from typing import Optional
 from zolai.morphology import (
     _KNOWN_PARTICLES,
     _KNOWN_ROOTS,
-    _PREFIXES,
-    _SUFFIXES,
     ZolaiMorphology,
     get_morphology,
 )

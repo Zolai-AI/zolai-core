@@ -7,10 +7,9 @@ Provides request/response schemas for:
 """
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
-
 
 # ── Corpus Analysis ──────────────────────────────────────────────────────────
 

@@ -13,10 +13,9 @@ word_usage. All expensive queries use @lru_cache for performance.
 from __future__ import annotations
 
 import logging
-import math
 import sqlite3
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Optional
 
