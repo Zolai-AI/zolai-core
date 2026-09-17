@@ -8,6 +8,12 @@ Provides endpoints for:
 - Enhanced translation (3-tier confidence, morphology-aware)
 - Morphological decomposition
 - Adaptive difficulty computation
+- Ranked search, cross-lingual search, topical Bible search
+- Search analytics
+- Sentence structure validation (SOV/ergative)
+- Polysemy disambiguation
+- Learning streak tracking
+- Error categorization and breakdown
 """
 
 from __future__ import annotations
@@ -737,4 +743,258 @@ async def get_adaptive_difficulty(request: dict):
         return result
     except Exception as e:
         logger.error("Adaptive difficulty computation failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Search Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/search/ranked")
+async def search_ranked(request: dict):
+    """Search with TF-IDF-inspired relevance ranking.
+
+    Returns results ranked by relevance score from dictionary, Bible,
+    and grammar pattern sources.
+    """
+    try:
+        from ..learning.online_search import get_online_search
+        search = get_online_search()
+
+        query = request.get("query", "")
+        category = request.get("category")
+        limit = request.get("limit", 10)
+
+        if not query:
+            raise HTTPException(status_code=400, detail="Query is required")
+
+        results = search.search_ranked(query, category=category, limit=limit)
+
+        return {
+            "query": query,
+            "results": results,
+            "total": len(results),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Ranked search failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/search/cross-lingual")
+async def search_cross_lingual(request: dict):
+    """Cross-lingual dictionary search between English and Zolai.
+
+    When source_lang="en", queries dictionary_en_zo table.
+    When source_lang="zo", queries dictionary table.
+    """
+    try:
+        from ..learning.online_search import get_online_search
+        search = get_online_search()
+
+        query = request.get("query", "")
+        source_lang = request.get("source_lang", "en")
+        target_lang = request.get("target_lang", "zo")
+        limit = request.get("limit", 10)
+
+        if not query:
+            raise HTTPException(status_code=400, detail="Query is required")
+
+        if source_lang not in ("en", "zo"):
+            raise HTTPException(status_code=400, detail="source_lang must be 'en' or 'zo'")
+
+        results = search.search_cross_lingual(
+            query, source_lang=source_lang, target_lang=target_lang, limit=limit,
+        )
+
+        return {
+            "query": query,
+            "source_lang": source_lang,
+            "target_lang": target_lang,
+            "results": results,
+            "total": len(results),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Cross-lingual search failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/search/topical")
+async def search_topical(request: dict):
+    """Search Bible verses by topic/theme keywords across books.
+
+    Matches theme keywords against English and Zolai text to find
+    thematically related verses.
+    """
+    try:
+        from ..learning.online_search import get_online_search
+        search = get_online_search()
+
+        theme = request.get("theme", "")
+        limit = request.get("limit", 10)
+
+        if not theme:
+            raise HTTPException(status_code=400, detail="Theme is required")
+
+        results = search.search_topical(theme, limit=limit)
+
+        return {
+            "theme": theme,
+            "results": results,
+            "total": len(results),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Topical search failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/search/analytics")
+async def get_search_analytics():
+    """Get search analytics sorted by count (descending).
+
+    Returns query frequency, category breakdown, and last-seen timestamps.
+    """
+    try:
+        from ..learning.online_search import get_online_search
+        search = get_online_search()
+
+        analytics = search.get_analytics()
+
+        return {
+            "analytics": analytics,
+            "total_queries": sum(a.get("count", 0) for a in analytics),
+        }
+    except Exception as e:
+        logger.error("Get search analytics failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Grammar Validation Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/grammar/validate-structure")
+async def validate_structure(request: dict):
+    """Validate SOV sentence structure and grammar markers.
+
+    Checks verb position, ergative 'in' placement, negation patterns,
+    question marker position, and ZVS 2018 compliance.
+    """
+    try:
+        from ..learning.grammar_editor import GrammarEditor
+        editor = GrammarEditor()
+
+        sentence = request.get("sentence", "")
+        if not sentence:
+            raise HTTPException(status_code=400, detail="Sentence is required")
+
+        result = editor.validate_sentence_structure(sentence)
+
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Structure validation failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Translation Disambiguation Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/translation/disambiguate")
+async def disambiguate_translation(request: dict):
+    """Disambiguate polysemous words using dictionary + word_usage context.
+
+    Returns ranked candidates with confidence scores and evidence sources.
+    """
+    try:
+        from ..learning.translation import TranslationEngine
+        engine = TranslationEngine()
+
+        word = request.get("word", "")
+        context = request.get("context")
+        direction = request.get("direction", "zo-en")
+
+        if not word:
+            raise HTTPException(status_code=400, detail="Word is required")
+
+        result = engine._disambiguate_polysemy(word, context=context, direction=direction)
+
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Disambiguation failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Progress / Streak Endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/progress/streak/{user_id}")
+async def get_user_streak(user_id: str, streak_type: str = "daily"):
+    """Get learning streak for a user.
+
+    Returns current streak, longest streak, and activity status.
+    """
+    try:
+        from ..learning.progress import ProgressTracker
+        tracker = ProgressTracker(user_id=user_id)
+
+        result = tracker.get_streak(user_id=user_id, streak_type=streak_type)
+
+        return result
+    except Exception as e:
+        logger.error("Get streak failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/progress/error-categorize")
+async def categorize_error(request: dict):
+    """Categorize the type of error in a correction.
+
+    Checks for ZVS forbidden forms, SOV/negation/question patterns,
+    tone sandhi violations, and compound decomposition errors.
+    """
+    try:
+        from ..learning.progress import ProgressTracker
+
+        original = request.get("original", "")
+        corrected = request.get("corrected", "")
+
+        if not original or not corrected:
+            raise HTTPException(status_code=400, detail="Both original and corrected are required")
+
+        result = ProgressTracker.categorize_correction(original, corrected)
+
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error categorization failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/progress/error-breakdown/{user_id}")
+async def get_error_breakdown(user_id: str):
+    """Get error breakdown by category for a user.
+
+    Aggregates from user_reviews table and categorizes each correction.
+    """
+    try:
+        from ..learning.progress import ProgressTracker
+        tracker = ProgressTracker(user_id=user_id)
+
+        result = tracker.get_error_breakdown(user_id=user_id)
+
+        return result
+    except Exception as e:
+        logger.error("Get error breakdown failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))

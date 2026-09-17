@@ -958,6 +958,51 @@ def create_user_reviews_table(mgr: DatabaseManager) -> dict[str, Any]:
         return {"created": [], "skipped": [], "errors": [f"user_reviews: {exc}"]}
 
 
+USER_STREAKS_DDL = """
+CREATE TABLE IF NOT EXISTS user_streaks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    streak_type TEXT NOT NULL,
+    current_streak INTEGER NOT NULL DEFAULT 0,
+    longest_streak INTEGER NOT NULL DEFAULT 0,
+    last_activity_date TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(user_id, streak_type)
+)
+"""
+
+USER_STREAKS_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_user_streaks_user_type ON user_streaks(user_id, streak_type)",
+    "CREATE INDEX IF NOT EXISTS idx_user_streaks_last_activity ON user_streaks(last_activity_date)",
+]
+
+
+def create_user_streaks_table(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create the user_streaks table for tracking learning streaks.
+
+    Returns:
+        Dict with 'created', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+
+    if "user_streaks" in existing_tables:
+        return {"created": [], "skipped": ["user_streaks (already exists)"], "errors": []}
+
+    try:
+        with mgr.engine.connect() as conn:
+            conn.execute(text(USER_STREAKS_DDL))
+            for idx_sql in USER_STREAKS_INDEXES:
+                conn.execute(text(idx_sql))
+            conn.commit()
+        return {"created": ["user_streaks"], "skipped": [], "errors": []}
+    except Exception as exc:
+        return {"created": [], "skipped": [], "errors": [f"user_streaks: {exc}"]}
+
+
 def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
     """Run all constraint and index migrations including Foundation tables.
 
@@ -980,6 +1025,7 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "cost_tracking_indexes": cost_tracking_indexes,
         "sm2_columns": add_sm2_columns_to_vocabulary(mgr),
         "user_reviews_table": create_user_reviews_table(mgr),
+        "user_streaks_table": create_user_streaks_table(mgr),
     }
 
 
