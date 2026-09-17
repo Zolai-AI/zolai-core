@@ -44,8 +44,8 @@ class ProgressTracker:
         try:
             # Check if word has review data
             cur.execute(
-                """SELECT * FROM training_exercises
-                   WHERE vocab_word = ? AND user_id = ?
+                """SELECT * FROM vocabulary
+                   WHERE headword = ? AND user_id = ?
                    ORDER BY updated_at DESC LIMIT 1""",
                 (word, self.user_id),
             )
@@ -111,8 +111,8 @@ class ProgressTracker:
         try:
             # Get current review data
             cur.execute(
-                """SELECT * FROM training_exercises
-                   WHERE vocab_word = ? AND user_id = ?
+                """SELECT * FROM vocabulary
+                   WHERE headword = ? AND user_id = ?
                    ORDER BY updated_at DESC LIMIT 1""",
                 (word, self.user_id),
             )
@@ -154,13 +154,13 @@ class ProgressTracker:
                     """UPDATE training_exercises
                        SET ease_factor = ?, interval = ?, repetitions = ?,
                            next_review = ?, updated_at = datetime('now')
-                       WHERE vocab_word = ? AND user_id = ?""",
+                       WHERE headword = ? AND user_id = ?""",
                     (ease_factor, interval, repetitions, next_review.isoformat(), word, self.user_id),
                 )
             else:
                 cur.execute(
                     """INSERT INTO training_exercises
-                       (vocab_word, user_id, ease_factor, interval, repetitions, next_review)
+                       (headword, user_id, ease_factor, interval, repetitions, next_review)
                        VALUES (?, ?, ?, ?, ?, ?)""",
                     (word, self.user_id, ease_factor, interval, repetitions, next_review.isoformat()),
                 )
@@ -193,12 +193,12 @@ class ProgressTracker:
 
         try:
             # Count total vocab
-            cur.execute("SELECT COUNT(*) FROM vocab")
+            cur.execute("SELECT COUNT(*) FROM vocabulary")
             total = cur.fetchone()[0]
 
             # Count words with good review (ease_factor > 2.0, repetitions > 2)
             cur.execute(
-                """SELECT COUNT(DISTINCT vocab_word) FROM training_exercises
+                """SELECT COUNT(DISTINCT headword) FROM vocabulary
                    WHERE user_id = ? AND ease_factor > 2.0 AND repetitions > 2""",
                 (self.user_id,),
             )
@@ -263,7 +263,7 @@ class ProgressTracker:
 
         try:
             # Get words for quiz
-            query = "SELECT word, zolai, english, frequency FROM vocab"
+            query = "SELECT headword, english, frequency FROM vocabularyulary"
             params = []
 
             if level:
@@ -337,8 +337,8 @@ class ProgressTracker:
 
         try:
             cur.execute(
-                """SELECT vocab_word, ease_factor, interval, repetitions, next_review
-                   FROM training_exercises
+                """SELECT headword, ease_factor, interval, repetitions, next_review
+                   FROM vocabulary
                    WHERE user_id = ? AND next_review <= datetime('now')
                    ORDER BY next_review ASC
                    LIMIT ?""",

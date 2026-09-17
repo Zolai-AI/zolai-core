@@ -4,7 +4,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
@@ -24,12 +24,6 @@ from ..dictionary.manager import DictionaryManager
 from ..trainer.dataset import DatasetBuilder
 
 logger = logging.getLogger(__name__)
-
-
-class ChatMessage(BaseModel):
-    """A single chat message."""
-    role: str
-    content: str
 
 
 def build_prompt(messages: list[ChatMessage], system_prompt: str) -> str:
