@@ -66,7 +66,7 @@ class ProgressTracker:
             cur.execute(
                 """SELECT * FROM vocabulary
                    WHERE headword = ?
-                   ORDER BY updated_at DESC LIMIT 1""",
+                   LIMIT 1""",
                 (word,),
             )
             row = cur.fetchone()
@@ -138,7 +138,7 @@ class ProgressTracker:
                 cur.execute(
                     """SELECT * FROM vocabulary
                        WHERE headword = ?
-                       ORDER BY updated_at DESC LIMIT 1""",
+                       LIMIT 1""",
                     (word,),
                 )
                 row = cur.fetchone()
@@ -352,8 +352,8 @@ class ProgressTracker:
                 cur.execute(
                     """SELECT headword as word, frequency
                        FROM vocabulary
-                       WHERE repetitions > 0
-                       ORDER BY updated_at DESC LIMIT 50""",
+                       WHERE frequency > 0
+                       ORDER BY id DESC LIMIT 50""",
                 )
                 recent = cur.fetchall()
                 has_review_history = len(recent) > 0
@@ -454,11 +454,11 @@ class ProgressTracker:
             try:
                 cur.execute(
                     """SELECT COUNT(DISTINCT headword) FROM vocabulary
-                       WHERE ease_factor > 2.0 AND repetitions > 2""",
+                       WHERE frequency > 100""",
                 )
                 known = cur.fetchone()[0]
             except Exception:
-                # SM-2 columns not yet added
+                # Columns not yet added
                 known = 0
 
             # Calculate level using thresholds
@@ -515,10 +515,6 @@ class ProgressTracker:
             # Get words for quiz
             query = "SELECT headword, english, frequency FROM vocabulary"
             params = []
-
-            if level:
-                query += " WHERE level = ?"
-                params.append(level)
 
             query += " ORDER BY RANDOM() LIMIT ?"
             params.append(count * 2)  # Get extra for variety
@@ -589,7 +585,7 @@ class ProgressTracker:
             cur.execute(
                 """SELECT headword
                    FROM vocabulary
-                   ORDER BY updated_at DESC
+                   ORDER BY id DESC
                    LIMIT ?""",
                 (limit,),
             )

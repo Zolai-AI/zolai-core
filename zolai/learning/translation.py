@@ -247,15 +247,15 @@ class TranslationEngine:
             # Try exact match first
             if direction == "zo-en":
                 cur.execute(
-                    """SELECT zolai, english, pos
+                    """SELECT zo, english, frequency
                        FROM phrases
-                       WHERE zolai = ?
+                       WHERE zo = ?
                        LIMIT 1""",
                     (text.lower(),),
                 )
             else:
                 cur.execute(
-                    """SELECT zolai, english, pos
+                    """SELECT zo, english, frequency
                        FROM phrases
                        WHERE english = ?
                        LIMIT 1""",
@@ -265,17 +265,17 @@ class TranslationEngine:
             row = cur.fetchone()
             if row:
                 return {
-                    "translation": row["english"] if direction == "zo-en" else row["zolai"],
+                    "translation": row["english"] if direction == "zo-en" else row["zo"],
                     "confidence": 0.88,
                     "sources": ["phrases"],
-                    "category": row["pos"],
+                    "frequency": row["frequency"],
                 }
 
             # Fallback: partial match
             cur.execute(
-                """SELECT zolai, english, pos
+                """SELECT zo, english, frequency
                    FROM phrases
-                   WHERE zolai LIKE ? OR english LIKE ?
+                   WHERE zo LIKE ? OR english LIKE ?
                    LIMIT 5""",
                 (f"%{text}%", f"%{text}%"),
             )
@@ -284,10 +284,10 @@ class TranslationEngine:
             if rows:
                 best = rows[0]
                 return {
-                    "translation": best["english"] if direction == "zo-en" else best["zolai"],
+                    "translation": best["english"] if direction == "zo-en" else best["zo"],
                     "confidence": 0.75,
                     "sources": ["phrases_partial"],
-                    "category": best["pos"],
+                    "frequency": best["frequency"],
                 }
 
             return None
@@ -432,9 +432,9 @@ class TranslationEngine:
 
         try:
             cur.execute(
-                """SELECT zolai, english, pos
+                """SELECT zo, english, frequency
                    FROM phrases
-                   WHERE zolai LIKE ? OR english LIKE ?
+                   WHERE zo LIKE ? OR english LIKE ?
                    LIMIT 5""",
                 (f"%{text}%", f"%{text}%"),
             )
@@ -444,10 +444,10 @@ class TranslationEngine:
                 # Return best match
                 best = rows[0]
                 return {
-                    "translation": best["english"] if direction == "zo-en" else best["zolai"],
+                    "translation": best["english"] if direction == "zo-en" else best["zo"],
                     "confidence": 0.85,
                     "sources": ["phrases"],
-                    "category": best["pos"],
+                    "frequency": best["frequency"],
                 }
 
             return None
