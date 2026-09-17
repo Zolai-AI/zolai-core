@@ -103,20 +103,20 @@ class CorpusAnalyzer:
         texts: list[str] = []
         try:
             cur.execute(
-                "SELECT zolai_text FROM bible_verses WHERE zolai_text IS NOT NULL LIMIT ?",
+                "SELECT zo_tdb77 FROM bible_verses WHERE zo_tdb77 IS NOT NULL LIMIT ?",
                 (limit,),
             )
             for row in cur.fetchall():
-                if row["zolai_text"]:
-                    texts.append(row["zolai_text"])
+                if row["zo_tdb77"]:
+                    texts.append(row["zo_tdb77"])
 
             cur.execute(
-                "SELECT zolai FROM translations WHERE zolai IS NOT NULL LIMIT ?",
+                "SELECT source FROM translations WHERE source IS NOT NULL LIMIT ?",
                 (limit,),
             )
             for row in cur.fetchall():
-                if row["zolai"]:
-                    texts.append(row["zolai"])
+                if row["source"]:
+                    texts.append(row["source"])
         except Exception as e:
             log.debug("Failed to load corpus text: %s", e)
         finally:
@@ -147,10 +147,10 @@ class CorpusAnalyzer:
         collocations: list[Collocation] = []
         try:
             cur.execute(
-                """SELECT word1, word2, pmi, frequency
+                """SELECT word1, word2, pmiproxy, frequency
                    FROM word_collocations
-                   WHERE frequency >= ? AND pmi >= ?
-                   ORDER BY pmi DESC
+                   WHERE frequency >= ? AND pmiproxy >= ?
+                   ORDER BY pmiproxy DESC
                    LIMIT 200""",
                 (min_freq, min_pmi),
             )
@@ -159,7 +159,7 @@ class CorpusAnalyzer:
                     Collocation(
                         word1=row["word1"],
                         word2=row["word2"],
-                        pmi=float(row["pmi"]),
+                        pmi=float(row["pmiproxy"]),
                         freq=int(row["frequency"]),
                     )
                 )
@@ -188,17 +188,17 @@ class CorpusAnalyzer:
         freq: Counter[str] = Counter()
         try:
             # Bible verses
-            cur.execute("SELECT zolai_text FROM bible_verses WHERE zolai_text IS NOT NULL LIMIT 5000")
+            cur.execute("SELECT zo_tdb77 FROM bible_verses WHERE zo_tdb77 IS NOT NULL LIMIT 5000")
             for row in cur.fetchall():
-                for word in row["zolai_text"].lower().split():
+                for word in row["zo_tdb77"].lower().split():
                     clean = word.strip(".,;:!?\"'()[]{}")
                     if clean:
                         freq[clean] += 1
 
             # Translations
-            cur.execute("SELECT zolai FROM translations WHERE zolai IS NOT NULL LIMIT 5000")
+            cur.execute("SELECT source FROM translations WHERE source IS NOT NULL LIMIT 5000")
             for row in cur.fetchall():
-                for word in row["zolai"].lower().split():
+                for word in row["source"].lower().split():
                     clean = word.strip(".,;:!?\"'()[]{}")
                     if clean:
                         freq[clean] += 1
@@ -284,15 +284,15 @@ class CorpusAnalyzer:
         words: set[str] = set()
         try:
             cur.execute(
-                """SELECT word, SUM(freq) as total_freq
+                """SELECT zolai_word, COUNT(*) as total_freq
                    FROM word_alignments
-                   GROUP BY word
+                   GROUP BY zolai_word
                    ORDER BY total_freq DESC
                    LIMIT 200"""
             )
             for row in cur.fetchall():
-                if row["word"]:
-                    words.add(row["word"].lower())
+                if row["zolai_word"]:
+                    words.add(row["zolai_word"].lower())
         except Exception:
             # Fallback: use known roots as Bible word proxy
             from zolai.morphology import _KNOWN_ROOTS
