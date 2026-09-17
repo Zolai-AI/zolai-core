@@ -150,3 +150,36 @@
 - zolai-core: All phases committed to `main`
 - Database: Migrated to include foundation tables
 - Docker: Production-ready configuration
+---
+
+## 2026-09-17 (Session — Desktop Bundling + Gemini WebAPI Integration)
+
+### Desktop Bundling
+- Created `zolai/api/desktop_app.py` — Slim FastAPI entrypoint for Tauri sidecar (no ML deps)
+- Created `zolai/llm/gemini/cookies.py` — Browser cookie integration for Gemini WebAPI
+- Created `zolai/plugins/__init__.py` — Plugin system with auto-discovery
+- Created `zolai/plugins/gemini_plugin.py` — Gemini WebAPI plugin with cookie + API key auth
+- Updated `pyproject.toml` — Added `desktop`, `webapi`, `server` optional dependency groups
+- Created `scripts/desktop/build_sidecar.sh` — PyInstaller build script for desktop binary
+- Created `server.py` — Minimal standalone server entrypoint
+
+### Tauri Integration
+- Updated `src-tauri/tauri.conf.json` — Added externalBin for sidecar, resources config
+- Updated `src-tauri/Cargo.toml` — Added tauri-plugin-shell, reqwest, tokio, log, libc
+- Created `src-tauri/src/sidecar.rs` — SidecarManager with start/stop/health_check
+- Updated `src-tauri/src/main.rs` — Auto-starts sidecar on app launch, registers api_status/api_start/api_stop commands
+
+### Architecture
+- Desktop mode: PyInstaller-bundled Python API binary as Tauri sidecar
+- Server mode: Minimal `python server.py` entrypoint
+- Plugin system: Abstract base class + auto-discovery via pkgutil
+- Gemini WebAPI: Browser cookie extraction + API key fallback
+- Sidecar lifecycle: Start on launch, health check polling, graceful shutdown on close
+
+### Git Commits
+- zolai-core: `239cb8c` feat(desktop): add Tauri sidecar integration, plugin system, and server mode
+- zolai-core: `efc9263` chore(desktop): remove unused imports in desktop_app.py
+- zolai-tauri: `c08c383` feat(desktop): add Python API sidecar manager and plugin support
+- zolai-tauri: `efb2474` fix(desktop): cleanup sidecar unused import and null stdio
+
+**Desktop Bundling: ✅ COMPLETE**
