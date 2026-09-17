@@ -183,3 +183,65 @@
 - zolai-tauri: `efb2474` fix(desktop): cleanup sidecar unused import and null stdio
 
 **Desktop Bundling: ✅ COMPLETE**
+
+---
+
+## 2026-09-17 (Session — Multi-Provider LLM + Learning Engine)
+
+### Multi-Provider LLM Abstraction
+- Created `zolai/llm/providers/` package with 6 providers:
+  - `ollama.py` — Local Ollama HTTP client (no API key needed)
+  - `gemini.py` — Gemini API (API key + WebAPI)
+  - `openai.py` — OpenAI SDK wrapper
+  - `openrouter.py` — OpenRouter via OpenAI-compatible endpoint
+  - `webapi.py` — Gemini WebAPI (cookie-based)
+  - `base.py` — Abstract LLMProvider class
+- `ProviderRegistry` with priority-based selection
+- `FallbackChain` for automatic provider failover with rule-based fallback
+
+### Standalone Mode
+- Created `zolai/llm/fallback.py` — FallbackChain with rule-based degradation
+- Created `zolai/offline/rule_engine.py` — Rule-based translation using SQLite dictionary data
+- App works fully offline with Ollama + rule engine fallback
+
+### Learning Engine
+- Created `zolai/learning/` package with 6 modules:
+  - `data_manager.py` — Import/export JSONL/CSV datasets
+  - `grammar_editor.py` — Grammar rule CRUD (aligned with actual DB schema)
+  - `dictionary_manager.py` — Dictionary CRUD with attestation check
+  - `translation.py` — EN↔ZO translation with dictionary-first lookup
+  - `progress.py` — Spaced repetition, CEFR level tracking (aligned with actual DB schema)
+  - `trainer.py` — User corrections → improved context prompts (RAG-first)
+
+### Configuration
+- Created `zolai/core/llm_providers.yaml` — Provider defaults with priority list
+- Created `zolai/core/settings.py` — User settings management (data/settings.json)
+
+### API Integration
+- Added `/providers` endpoint (list available providers)
+- Added `/settings` GET/POST endpoints
+- Added `/learning/grammar`, `/learning/dictionary`, `/learning/translation` endpoints
+- Updated `desktop_app.py` to use ProviderRegistry
+
+### Tauri Updates
+- Updated `tauri.conf.json` — Mobile targets (iOS, Android)
+- Created `frontend/src/lib/providers.ts` — Provider selection logic
+- Created `frontend/src/lib/settings.ts` — Settings management
+- Created `frontend/src/components/learning/` — Learning UI components:
+  - `learning-panel.tsx` — Main learning container
+  - `grammar-editor.tsx` — Grammar rule editor
+  - `dictionary-manager.tsx` — Dictionary management
+  - `translation-trainer.tsx` — Translation practice
+  - `progress-dashboard.tsx` — Progress tracking
+
+### Bug Fixes
+- Fixed `grammar_editor.py` schema mismatch (pattern_type → function, removed non-existent columns)
+- Fixed `progress.py` table references (vocab → vocabulary, aligned columns)
+- Fixed `server.py` duplicate ChatMessage class and missing Any import
+
+### Git Commits
+- zolai-core: `3f83705` feat(llm): add multi-provider abstraction with 6 providers and fallback chain
+- zolai-core: `305cb7c` fix(learning): align grammar_editor and progress with actual DB schema
+- zolai-tauri: `11eb5b8` feat(tauri): add mobile targets and learning UI components
+
+**Multi-Provider + Learning Engine: ✅ COMPLETE**
