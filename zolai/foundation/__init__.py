@@ -1,4 +1,5 @@
-"""Zolai Foundation — Core analysis, evidence, consensus, verification, and regression.
+"""Zolai Foundation — Core analysis, evidence, consensus, verification, regression,
+and professional linguistic analysis (corpus, morphology, phonology).
 
 Public API:
 - FoundationAnalyzer: orchestrate tokenizer, syllable, POS, morphology
@@ -8,6 +9,9 @@ Public API:
 - GeminiVerifier, EvidenceGatingVerifier: LLM-backed verification
 - ConsensusResult, run_consensus: consensus decision making
 - RegressionSuite, RegressionReport: regression testing
+- CorpusAnalyzer: corpus-level n-gram, collocation, register analysis
+- EnhancedMorphologyAnalyzer: agglutinative decomposition with ZVS validation
+- PhonologicalAnalyzer: syllable validation, tone sandhi, phonotactics
 """
 from __future__ import annotations
 
@@ -21,6 +25,23 @@ from .analysis import (
     TokenAnalysis,
     WordAnalysis,
     get_foundation_analyzer,
+)
+from .corpus import (
+    CorpusAnalysis,
+    CorpusAnalyzer,
+    Collocation,
+    get_corpus_analyzer,
+)
+from .morphology import (
+    EnhancedMorphologyAnalyzer,
+    MorphemeAnalysis,
+    get_enhanced_morphology,
+)
+from .phonology import (
+    PhonologicalAnalysis,
+    PhonologicalAnalyzer,
+    SyllableStructure,
+    get_phonological_analyzer,
 )
 from .consensus import (
     ConsensusResult,
@@ -72,6 +93,20 @@ __all__ = [
     "MorphologyInfo",
     "POSInfo",
     "get_foundation_analyzer",
+    # Corpus
+    "CorpusAnalyzer",
+    "CorpusAnalysis",
+    "Collocation",
+    "get_corpus_analyzer",
+    # Enhanced Morphology
+    "EnhancedMorphologyAnalyzer",
+    "MorphemeAnalysis",
+    "get_enhanced_morphology",
+    # Phonology
+    "PhonologicalAnalyzer",
+    "PhonologicalAnalysis",
+    "SyllableStructure",
+    "get_phonological_analyzer",
     # Evidence
     "Candidate",
     "Evidence",
