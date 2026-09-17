@@ -347,17 +347,21 @@ class ProgressTracker:
         try:
             # Get user's recent performance — SM-2 columns may not exist yet
             recent = []
+            has_review_history = False
             try:
                 cur.execute(
                     """SELECT headword as word, frequency
                        FROM vocabulary
+                       WHERE repetitions > 0
                        ORDER BY updated_at DESC LIMIT 50""",
                 )
                 recent = cur.fetchall()
+                has_review_history = len(recent) > 0
             except Exception:
+                # SM-2 columns not yet added; no review history available
                 pass
 
-            if not recent:
+            if not has_review_history:
                 return {
                     "difficulty": "beginner",
                     "frequency_tier": "high",
