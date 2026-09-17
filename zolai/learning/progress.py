@@ -349,16 +349,25 @@ class ProgressTracker:
             recent = []
             has_review_history = False
             try:
-                cur.execute(
-                    """SELECT headword as word, frequency
-                       FROM vocabulary
-                       WHERE frequency > 0
-                       ORDER BY id DESC LIMIT 50""",
-                )
-                recent = cur.fetchall()
-                has_review_history = len(recent) > 0
+                # Check if SM-2 columns exist on vocabulary table
+                cur.execute("PRAGMA table_info(vocabulary)")
+                columns = {row[1] for row in cur.fetchall()}
+                if "ease_factor" not in columns:
+                    # SM-2 columns not yet added — no review history
+                    pass
+                else:
+                    # Check user-specific review history from user_reviews table
+                    cur.execute(
+                        """SELECT word, quality as review_quality
+                           FROM user_reviews
+                           WHERE user_id = ?
+                           ORDER BY reviewed_at DESC LIMIT 50""",
+                        (user_id or self.user_id,),
+                    )
+                    recent = cur.fetchall()
+                    has_review_history = len(recent) > 0
             except Exception:
-                # SM-2 columns not yet added; no review history available
+                # Tables/columns not yet added; no review history available
                 pass
 
             if not has_review_history:

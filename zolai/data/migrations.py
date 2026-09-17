@@ -858,6 +858,106 @@ def apply_foundation_cost_tracking_indexes(mgr: DatabaseManager) -> dict[str, An
     return {"applied": applied, "skipped": skipped, "errors": errors}
 
 
+# ---------------------------------------------------------------------------
+# SM-2 Spaced Repetition columns for vocabulary table
+# ---------------------------------------------------------------------------
+
+SM2_COLUMNS = [
+    ("ease_factor", "REAL DEFAULT 2.5"),
+    ("interval", "INTEGER DEFAULT 0"),
+    ("repetitions", "INTEGER DEFAULT 0"),
+    ("next_review", "TEXT"),
+]
+
+
+def add_sm2_columns_to_vocabulary(mgr: DatabaseManager) -> dict[str, Any]:
+    """Add SM-2 spaced repetition columns to the vocabulary table.
+
+    Columns added:
+      - ease_factor REAL DEFAULT 2.5
+      - interval INTEGER DEFAULT 0
+      - repetitions INTEGER DEFAULT 0
+      - next_review TEXT
+
+    Returns:
+        Dict with 'added', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    added = []
+    skipped = []
+    errors = []
+
+    try:
+        inspector = sa_inspect(mgr.engine)
+        existing_cols = {c["name"] for c in inspector.get_columns("vocabulary")}
+    except Exception as exc:
+        return {"added": [], "skipped": [], "errors": [f"inspect vocabulary: {exc}"]}
+
+    with mgr.engine.connect() as conn:
+        for col_name, col_def in SM2_COLUMNS:
+            if col_name in existing_cols:
+                skipped.append(f"vocabulary.{col_name} (already exists)")
+                continue
+            try:
+                conn.execute(text(f"ALTER TABLE vocabulary ADD COLUMN {col_name} {col_def}"))
+                conn.commit()
+                added.append(f"vocabulary.{col_name}")
+            except Exception as exc:
+                errors.append(f"vocabulary.{col_name}: {exc}")
+
+    return {"added": added, "skipped": skipped, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
+# user_reviews table for per-user spaced repetition history
+# ---------------------------------------------------------------------------
+
+USER_REVIEWS_DDL = """
+CREATE TABLE IF NOT EXISTS user_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    word TEXT NOT NULL,
+    quality INTEGER NOT NULL,
+    reviewed_at TEXT NOT NULL,
+    next_review TEXT NOT NULL,
+    ease_factor REAL NOT NULL,
+    interval INTEGER NOT NULL,
+    repetitions INTEGER NOT NULL
+)
+"""
+
+USER_REVIEWS_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_user_reviews_user_word ON user_reviews(user_id, word)",
+    "CREATE INDEX IF NOT EXISTS idx_user_reviews_reviewed_at ON user_reviews(reviewed_at)",
+]
+
+
+def create_user_reviews_table(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create the user_reviews table for per-user SM-2 history.
+
+    Returns:
+        Dict with 'created', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+
+    if "user_reviews" in existing_tables:
+        return {"created": [], "skipped": ["user_reviews (already exists)"], "errors": []}
+
+    try:
+        with mgr.engine.connect() as conn:
+            conn.execute(text(USER_REVIEWS_DDL))
+            for idx_sql in USER_REVIEWS_INDEXES:
+                conn.execute(text(idx_sql))
+            conn.commit()
+        return {"created": ["user_reviews"], "skipped": [], "errors": []}
+    except Exception as exc:
+        return {"created": [], "skipped": [], "errors": [f"user_reviews: {exc}"]}
+
+
 def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
     """Run all constraint and index migrations including Foundation tables.
 
@@ -878,6 +978,8 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "foundation_indexes": foundation_index_results,
         "cost_tracking_table": cost_tracking_table,
         "cost_tracking_indexes": cost_tracking_indexes,
+        "sm2_columns": add_sm2_columns_to_vocabulary(mgr),
+        "user_reviews_table": create_user_reviews_table(mgr),
     }
 
 
