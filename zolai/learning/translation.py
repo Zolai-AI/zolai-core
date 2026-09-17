@@ -288,3 +288,77 @@ class TranslationEngine:
             return {"success": False, "error": str(e)}
         finally:
             conn.close()
+
+
+    def translate_batch(
+        self,
+        texts: list[str],
+    ) -> list[dict[str, Any]]:
+        """Translate multiple texts in batch.
+
+        Args:
+            texts: List of texts to translate.
+
+        Returns:
+            List of translation results.
+        """
+        results = []
+        for text in texts:
+            result = self.translate(text)
+            results.append({
+                "input": text,
+                "result": result,
+            })
+        return results
+
+    def get_translation_stats(self) -> dict[str, Any]:
+        """Get translation statistics.
+
+        Returns:
+            Dict with translation statistics.
+        """
+        conn = self._get_connection()
+        cur = conn.cursor()
+
+        try:
+            # Count translations
+            cur.execute("SELECT COUNT(*) FROM translations")
+            total_translations = cur.fetchone()[0]
+
+            # Count corrections
+            cur.execute("""
+                SELECT COUNT(*) FROM data_audit_log 
+                WHERE table_name = 'translations' AND field = 'correction'
+            """)
+            total_corrections = cur.fetchone()[0]
+
+            # Count dictionary entries
+            cur.execute("SELECT COUNT(*) FROM dictionary")
+            dictionary_entries = cur.fetchone()[0]
+
+            # Count Bible verses
+            cur.execute("SELECT COUNT(*) FROM bible_verses")
+            bible_verses = cur.fetchone()[0]
+
+            return {
+                "total_translations": total_translations,
+                "total_corrections": total_corrections,
+                "dictionary_entries": dictionary_entries,
+                "bible_verses": bible_verses,
+                "correction_rate": (
+                    total_corrections / total_translations 
+                    if total_translations > 0 else 0
+                ),
+            }
+
+        except Exception as e:
+            logger.debug("Get translation stats failed: %s", e)
+            return {
+                "total_translations": 0,
+                "total_corrections": 0,
+                "dictionary_entries": 0,
+                "bible_verses": 0,
+                "correction_rate": 0,
+            }
+        finally:
+            conn.close()

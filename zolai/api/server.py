@@ -1129,34 +1129,43 @@ def create_app() -> FastAPI:
 
     @app.get("/learning/grammar")
     async def list_grammar_patterns(
-        pattern_type: str | None = None,
+        function: str | None = None,
         query: str | None = None,
         limit: int = 50,
     ):
         """List grammar patterns."""
         from ..learning.grammar_editor import GrammarEditor
         editor = GrammarEditor()
-        patterns = editor.search_patterns(query=query, pattern_type=pattern_type, limit=limit)
+        patterns = editor.search_patterns(query=query, function=function, limit=limit)
         return {"patterns": patterns, "count": len(patterns)}
 
     @app.post("/learning/grammar")
     async def add_grammar_pattern(
         pattern: str,
-        pattern_type: str,
+        function: str,
         description: str = "",
-        example: str = "",
-        zolai_example: str = "",
+        examples: str = "",
     ):
         """Add a new grammar pattern."""
         from ..learning.grammar_editor import GrammarEditor
         editor = GrammarEditor()
         result = editor.add_pattern(
             pattern=pattern,
-            pattern_type=pattern_type,
+            function=function,
             description=description,
-            example=example,
-            zolai_example=zolai_example,
+            examples=examples,
         )
+        return result
+
+    @app.post("/learning/grammar/validate")
+    async def validate_grammar_pattern(
+        pattern: str,
+        function: str = "",
+    ):
+        """Validate a grammar pattern."""
+        from ..learning.grammar_editor import GrammarEditor
+        editor = GrammarEditor()
+        result = editor.validate_pattern(pattern=pattern, function=function)
         return result
 
     @app.get("/learning/dictionary")
@@ -1221,6 +1230,72 @@ def create_app() -> FastAPI:
         tracker = ProgressTracker(user_id=user_id)
         quiz = tracker.generate_quiz(quiz_type=quiz_type, count=count, level=level)
         return {"quiz": quiz, "count": len(quiz)}
+
+    @app.get("/learning/statistics")
+    async def get_learning_statistics():
+        """Get learning statistics."""
+        from ..learning.progress import ProgressTracker
+        from ..learning.translation import TranslationEngine
+        tracker = ProgressTracker()
+        translation_engine = TranslationEngine()
+        return {
+            "progress": tracker.get_statistics(),
+            "translation": translation_engine.get_translation_stats(),
+        }
+
+    @app.post("/learning/translate/batch")
+    async def translate_batch(
+        texts: list[str],
+    ):
+        """Translate multiple texts in batch."""
+        from ..learning.translation import TranslationEngine
+        engine = TranslationEngine()
+        results = engine.translate_batch(texts=texts)
+        return {"results": results, "count": len(results)}
+
+    @app.get("/learning/search")
+    async def search_learning_resources(
+        query: str,
+        limit: int = 10,
+    ):
+        """Search all learning resources (vocabulary, grammar, Bible)."""
+        from ..learning.online_search import get_online_search
+        search = get_online_search()
+        results = search.search_all(query=query, limit=limit)
+        return results
+
+    @app.get("/learning/search/vocabulary")
+    async def search_vocabulary(
+        query: str,
+        limit: int = 10,
+    ):
+        """Search vocabulary online."""
+        from ..learning.online_search import get_online_search
+        search = get_online_search()
+        results = search.search_vocabulary(word=query, limit=limit)
+        return {"results": results, "count": len(results)}
+
+    @app.get("/learning/search/grammar")
+    async def search_grammar_patterns(
+        query: str,
+        limit: int = 10,
+    ):
+        """Search grammar patterns online."""
+        from ..learning.online_search import get_online_search
+        search = get_online_search()
+        results = search.search_grammar(pattern=query, limit=limit)
+        return {"results": results, "count": len(results)}
+
+    @app.get("/learning/search/bible")
+    async def search_bible_verses(
+        query: str,
+        limit: int = 10,
+    ):
+        """Search Bible verses online."""
+        from ..learning.online_search import get_online_search
+        search = get_online_search()
+        results = search.search_bible(query=query, limit=limit)
+        return {"results": results, "count": len(results)}
 
     # === Static File Serving (last route - catch-all) ===
     @app.get("/{path:path}")

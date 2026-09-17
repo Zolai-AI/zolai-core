@@ -210,3 +210,54 @@ class GrammarEditor:
             "errors": errors,
             "corrected_text": corrected,
         }
+
+
+    def validate_pattern(self, pattern: str, function: str = "") -> dict[str, Any]:
+        """Validate a grammar pattern.
+
+        Args:
+            pattern: The pattern to validate (e.g., "S + O + V").
+            function: Function type for context-specific validation.
+
+        Returns:
+            Dict with validation results.
+        """
+        errors = []
+        warnings = []
+
+        # Check basic pattern structure
+        if not pattern or not pattern.strip():
+            errors.append("Pattern cannot be empty")
+            return {"valid": False, "errors": errors, "warnings": warnings}
+
+        # Check for common Zolai grammar markers
+        markers = {
+            "sov": ["S", "O", "V"],
+            "ergative": ["in", "ERG"],
+            "negation": ["kei", "lo"],
+            "question": ["hiam"],
+            "future": ["ding"],
+        }
+
+        if function in markers:
+            required = markers[function]
+            found = [m for m in required if m.upper() in pattern.upper()]
+            if not found:
+                warnings.append(f"Pattern for {function} should contain: {', '.join(required)}")
+
+        # Check for ZVS compliance in any Zolai text
+        zvs_result = self._validate_zvs(pattern)
+        if not zvs_result["is_compliant"]:
+            errors.extend([f"ZVS violation: {e['forbidden']} → {e['correct']}" 
+                          for e in zvs_result["errors"]])
+
+        # Check pattern length
+        if len(pattern) > 500:
+            warnings.append("Pattern is very long, consider simplifying")
+
+        return {
+            "valid": len(errors) == 0,
+            "errors": errors,
+            "warnings": warnings,
+            "corrected_text": zvs_result.get("corrected_text", pattern),
+        }
