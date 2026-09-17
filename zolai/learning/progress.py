@@ -350,3 +350,79 @@ class ProgressTracker:
             return []
         finally:
             conn.close()
+
+
+    def get_statistics(self) -> dict[str, Any]:
+        """Get learning statistics.
+
+        Returns:
+            Dict with learning statistics.
+        """
+        conn = self._get_connection()
+        cur = conn.cursor()
+
+        try:
+            # Total vocabulary
+            cur.execute("SELECT COUNT(*) FROM vocabulary")
+            total_vocab = cur.fetchone()[0]
+
+            # Total grammar patterns
+            cur.execute("SELECT COUNT(*) FROM grammar_patterns")
+            total_grammar = cur.fetchone()[0]
+
+            # Total translations
+            cur.execute("SELECT COUNT(*) FROM translations")
+            total_translations = cur.fetchone()[0]
+
+            # Total exercises
+            cur.execute("SELECT COUNT(*) FROM training_exercises")
+            total_exercises = cur.fetchone()[0]
+
+            # Total corrections
+            cur.execute("""
+                SELECT COUNT(*) FROM data_audit_log 
+                WHERE table_name = 'translations' AND field = 'correction'
+            """)
+            total_corrections = cur.fetchone()[0]
+
+            # Words by frequency
+            cur.execute("""
+                SELECT 
+                    CASE 
+                        WHEN frequency >= 1000 THEN 'high'
+                        WHEN frequency >= 100 THEN 'medium'
+                        WHEN frequency >= 10 THEN 'low'
+                        ELSE 'rare'
+                    END as freq_group,
+                    COUNT(*) as count
+                FROM vocabulary
+                GROUP BY freq_group
+            """)
+            freq_distribution = {row[0]: row[1] for row in cur.fetchall()}
+
+            return {
+                "total_vocab": total_vocab,
+                "total_grammar": total_grammar,
+                "total_translations": total_translations,
+                "total_exercises": total_exercises,
+                "total_corrections": total_corrections,
+                "freq_distribution": freq_distribution,
+                "completion_rate": (
+                    total_exercises / total_vocab 
+                    if total_vocab > 0 else 0
+                ),
+            }
+
+        except Exception as e:
+            logger.debug("Get statistics failed: %s", e)
+            return {
+                "total_vocab": 0,
+                "total_grammar": 0,
+                "total_translations": 0,
+                "total_exercises": 0,
+                "total_corrections": 0,
+                "freq_distribution": {},
+                "completion_rate": 0,
+            }
+        finally:
+            conn.close()

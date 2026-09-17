@@ -5,6 +5,7 @@ from .context_validator import ContextValidator, get_context_validator
 from .data_manager import DataManager
 from .dictionary_manager import DictionaryManager
 from .grammar_editor import GrammarEditor
+from .online_search import OnlineSearch, get_online_search
 from .progress import ProgressTracker
 from .sentence_builder import SentenceBuilder, get_sentence_builder
 from .trainer import CorrectionTrainer
@@ -18,6 +19,8 @@ __all__ = [
     "DataManager",
     "DictionaryManager",
     "GrammarEditor",
+    "OnlineSearch",
+    "get_online_search",
     "ProgressTracker",
     "SentenceBuilder",
     "get_sentence_builder",
