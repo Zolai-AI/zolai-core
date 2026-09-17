@@ -1,0 +1,82 @@
+# LLM Provider Configuration for Zolai
+# Priority order: lower number = higher priority
+
+providers:
+  ollama:
+    priority: 1
+    endpoint: "http://localhost:11434"
+    models:
+      - "qwen3-coder:480b-cloud"
+      - "llama3.1:8b"
+      - "mistral:7b"
+    description: "Local Ollama instance"
+    requires_api_key: false
+
+  gemini:
+    priority: 2
+    api_key_env: "GEMINI_API_KEY"
+    models:
+      - "gemini-2.5-flash"
+      - "gemini-2.5-pro"
+      - "gemini-2.0-flash"
+    description: "Google Gemini API"
+    requires_api_key: true
+
+  openrouter:
+    priority: 3
+    api_key_env: "OPENROUTER_API_KEY"
+    endpoint: "https://openrouter.ai/api/v1"
+    models:
+      - "meta-llama/llama-3.1-8b-instruct:free"
+      - "meta-llama/llama-3.1-70b-instruct:free"
+      - "google/gemma-2-9b-it:free"
+      - "mistralai/mistral-7b-instruct:free"
+    description: "OpenRouter (free models available)"
+    requires_api_key: true
+
+  openai:
+    priority: 4
+    api_key_env: "OPENAI_API_KEY"
+    models:
+      - "gpt-4o"
+      - "gpt-4o-mini"
+      - "gpt-4-turbo"
+    description: "OpenAI API"
+    requires_api_key: true
+
+  webapi:
+    priority: 5
+    cookie_based: true
+    models:
+      - "gemini-2.5-flash"
+      - "gemini-2.5-pro"
+    description: "Gemini WebAPI (cookie-based)"
+    requires_api_key: false
+
+  rule_based:
+    priority: 999
+    models: []
+    description: "Rule-based fallback (no AI)"
+    requires_api_key: false
+
+# Default settings
+defaults:
+  preferred_provider: "ollama"
+  fallback_enabled: true
+  timeout_seconds: 120
+  max_retries: 3
+
+# ZVS 2018 compliance
+zvs_2018:
+  enabled: true
+  auto_correct: true
+  forbidden_forms:
+    pathian: pasian
+    ram: gam
+    fapa: tapa
+    bawipa: topa
+    siangpahrang: kumpipa
+    cu: tua
+    cun: tua
+    suah: suahtakna
+    nunnak: nuntakna

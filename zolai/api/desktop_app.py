@@ -173,6 +173,78 @@ def create_desktop_app() -> FastAPI:
         except Exception as e:
             return {"plugins": [], "error": str(e)}
 
+    # --- Provider endpoints ---
+
+    @app.get("/providers")
+    async def list_providers():
+        """List available LLM providers."""
+        from ..llm.providers.base import get_provider_registry
+        registry = get_provider_registry()
+        providers = registry.list_providers()
+        return {
+            "providers": [
+                {
+                    "name": p.name,
+                    "priority": p.priority,
+                    "available": p.is_available,
+                    "models": p.models,
+                    "description": p.description,
+                }
+                for p in providers
+            ]
+        }
+
+    # --- Settings endpoints ---
+
+    @app.get("/settings")
+    async def get_settings():
+        """Get all application settings."""
+        from ..core.settings import get_settings_manager
+        manager = get_settings_manager()
+        return manager.get_all()
+
+    @app.post("/settings")
+    async def update_settings(updates: dict):
+        """Update application settings."""
+        from ..core.settings import get_settings_manager
+        manager = get_settings_manager()
+        manager.update(updates)
+        return {"success": True, "settings": manager.get_all()}
+
+    # --- Learning endpoints ---
+
+    @app.get("/learning/grammar")
+    async def list_grammar_patterns(pattern_type: str = None, limit: int = 50):
+        """List grammar patterns."""
+        from ..learning.grammar_editor import GrammarEditor
+        editor = GrammarEditor()
+        patterns = editor.search_patterns(pattern_type=pattern_type, limit=limit)
+        return {"patterns": patterns, "count": len(patterns)}
+
+    @app.get("/learning/dictionary")
+    async def search_dictionary(query: str, limit: int = 20):
+        """Search dictionary for learning."""
+        from ..learning.dictionary_manager import DictionaryManager
+        manager = DictionaryManager()
+        results = manager.search(query=query, limit=limit)
+        return {"results": results, "count": len(results)}
+
+    @app.post("/learning/translate")
+    async def translate_text(text: str, direction: str = "auto"):
+        """Translate text between English and Zolai."""
+        from ..learning.translation import TranslationEngine
+        engine = TranslationEngine()
+        result = engine.translate(text=text, direction=direction)
+        return result
+
+    @app.get("/learning/progress")
+    async def get_progress(user_id: str = "default"):
+        """Get learning progress."""
+        from ..learning.progress import ProgressTracker
+        tracker = ProgressTracker(user_id=user_id)
+        cefr = tracker.get_cefr_level()
+        return {"cefr": cefr}
+
     return app
 
 

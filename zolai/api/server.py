@@ -1062,6 +1062,172 @@ def create_app() -> FastAPI:
         return {"error": "Not found"}
 
 
+    # === Provider Endpoints ===
+
+    @app.get("/providers")
+    async def list_providers():
+        """List available LLM providers."""
+        from ..llm.providers.base import get_provider_registry
+        registry = get_provider_registry()
+        providers = registry.list_providers()
+        return {
+            "providers": [
+                {
+                    "name": p.name,
+                    "priority": p.priority,
+                    "available": p.is_available,
+                    "models": p.models,
+                    "description": p.description,
+                }
+                for p in providers
+            ]
+        }
+
+    @app.get("/providers/{provider_name}")
+    async def get_provider(provider_name: str):
+        """Get provider details."""
+        from ..llm.providers.base import get_provider_registry
+        registry = get_provider_registry()
+        provider = registry.get_provider(provider_name)
+        if not provider:
+            raise HTTPException(status_code=404, detail=f"Provider '{provider_name}' not found")
+        info = provider.get_info()
+        return {
+            "name": info.name,
+            "priority": info.priority,
+            "available": info.is_available,
+            "models": info.models,
+            "description": info.description,
+        }
+
+    # === Settings Endpoints ===
+
+    @app.get("/settings")
+    async def get_settings():
+        """Get all application settings."""
+        from ..core.settings import get_settings_manager
+        manager = get_settings_manager()
+        return manager.get_all()
+
+    @app.post("/settings")
+    async def update_settings(updates: dict[str, Any]):
+        """Update application settings."""
+        from ..core.settings import get_settings_manager
+        manager = get_settings_manager()
+        manager.update(updates)
+        return {"success": True, "settings": manager.get_all()}
+
+    @app.get("/settings/provider")
+    async def get_provider_settings():
+        """Get provider-related settings."""
+        from ..core.settings import get_settings_manager
+        manager = get_settings_manager()
+        return manager.get_provider_settings()
+
+    @app.get("/settings/learning")
+    async def get_learning_settings():
+        """Get learning-related settings."""
+        from ..core.settings import get_settings_manager
+        manager = get_settings_manager()
+        return manager.get_learning_settings()
+
+    # === Learning Endpoints ===
+
+    @app.get("/learning/grammar")
+    async def list_grammar_patterns(
+        pattern_type: str | None = None,
+        query: str | None = None,
+        limit: int = 50,
+    ):
+        """List grammar patterns."""
+        from ..learning.grammar_editor import GrammarEditor
+        editor = GrammarEditor()
+        patterns = editor.search_patterns(query=query, pattern_type=pattern_type, limit=limit)
+        return {"patterns": patterns, "count": len(patterns)}
+
+    @app.post("/learning/grammar")
+    async def add_grammar_pattern(
+        pattern: str,
+        pattern_type: str,
+        description: str = "",
+        example: str = "",
+        zolai_example: str = "",
+    ):
+        """Add a new grammar pattern."""
+        from ..learning.grammar_editor import GrammarEditor
+        editor = GrammarEditor()
+        result = editor.add_pattern(
+            pattern=pattern,
+            pattern_type=pattern_type,
+            description=description,
+            example=example,
+            zolai_example=zolai_example,
+        )
+        return result
+
+    @app.get("/learning/dictionary")
+    async def search_learning_dictionary(
+        query: str,
+        direction: str = "both",
+        limit: int = 20,
+    ):
+        """Search dictionary for learning."""
+        from ..learning.dictionary_manager import DictionaryManager
+        manager = DictionaryManager()
+        results = manager.search(query=query, direction=direction, limit=limit)
+        return {"results": results, "count": len(results)}
+
+    @app.post("/learning/dictionary")
+    async def add_dictionary_entry(
+        zolai: str,
+        english: str,
+        myanmar: str = "",
+        pos: str = "",
+    ):
+        """Add a new dictionary entry."""
+        from ..learning.dictionary_manager import DictionaryManager
+        manager = DictionaryManager()
+        result = manager.add_entry(zolai=zolai, english=english, myanmar=myanmar, pos=pos)
+        return result
+
+    @app.post("/learning/translate")
+    async def translate_text(
+        text: str,
+        direction: str = "auto",
+        context: str | None = None,
+    ):
+        """Translate text between English and Zolai."""
+        from ..learning.translation import TranslationEngine
+        engine = TranslationEngine()
+        result = engine.translate(text=text, direction=direction, context=context)
+        return result
+
+    @app.get("/learning/progress")
+    async def get_progress(user_id: str = "default"):
+        """Get learning progress."""
+        from ..learning.progress import ProgressTracker
+        tracker = ProgressTracker(user_id=user_id)
+        cefr = tracker.get_cefr_level()
+        due = tracker.get_due_reviews()
+        return {
+            "cefr": cefr,
+            "due_reviews": due,
+            "due_count": len(due),
+        }
+
+    @app.post("/learning/quiz")
+    async def generate_quiz(
+        quiz_type: str = "vocabulary",
+        count: int = 10,
+        level: str | None = None,
+        user_id: str = "default",
+    ):
+        """Generate a quiz."""
+        from ..learning.progress import ProgressTracker
+        tracker = ProgressTracker(user_id=user_id)
+        quiz = tracker.generate_quiz(quiz_type=quiz_type, count=count, level=level)
+        return {"quiz": quiz, "count": len(quiz)}
+
     # === Static File Serving (last route - catch-all) ===
     @app.get("/{path:path}")
     async def serve_static(path: str):
