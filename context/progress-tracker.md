@@ -245,3 +245,39 @@
 - zolai-tauri: `11eb5b8` feat(tauri): add mobile targets and learning UI components
 
 **Multi-Provider + Learning Engine: ✅ COMPLETE**
+
+---
+
+## 2026-09-17 (Session — Enhanced Learning Engine + Online Search)
+
+### Learning Engine Enhancements
+- Enhanced `GrammarEditor` with `validate_pattern` method for pattern validation
+- Enhanced `TranslationEngine` with `translate_batch` and `get_translation_stats` methods
+- Enhanced `ProgressTracker` with `get_statistics` method for learning analytics
+- Fixed provider auto-registration on import
+
+### Online Search Module
+- Created `zolai/learning/online_search.py` — `OnlineSearch` class with:
+  - `search_vocabulary()` — Search vocabulary in database
+  - `search_grammar()` — Search grammar patterns in database
+  - `search_bible()` — Search Bible verses for context
+  - `search_all()` — Search all resources simultaneously
+  - Caching for performance
+
+### API Endpoints Added
+- `POST /learning/grammar/validate` — Validate grammar patterns
+- `GET /learning/statistics` — Get learning statistics
+- `POST /learning/translate/batch` — Batch translation
+- `GET /learning/search` — Search all learning resources
+- `GET /learning/search/vocabulary` — Search vocabulary
+- `GET /learning/search/grammar` — Search grammar patterns
+- `GET /learning/search/bible` — Search Bible verses
+
+### Bug Fixes
+- Fixed `translate_batch` method signature (removed max_results parameter)
+- Fixed server.py endpoints to use correct parameter names
+
+### Git Commits
+- `8b7b00e` feat(learning): enhance learning engine with online search, batch translation, and statistics
+
+**Enhanced Learning Engine: ✅ COMPLETE**
