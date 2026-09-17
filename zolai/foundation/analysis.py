@@ -21,6 +21,11 @@ from zolai.pos_tagger import ZolaiPOSTagger, get_pos_tagger
 from zolai.syllable import Boundary, ZolaiSyllabifier, segment_with_boundaries
 from zolai.tokenizer.zolai_tokenizer import ZolaiTokenizer
 
+# Lazy imports for new analyzers (avoid circular imports)
+_CorpusAnalyzer = None  # type: ignore[assignment]
+_EnhancedMorphologyAnalyzer = None  # type: ignore[assignment]
+_PhonologicalAnalyzer = None  # type: ignore[assignment]
+
 log = logging.getLogger(__name__)
 
 
@@ -136,6 +141,9 @@ class FoundationAnalyzer:
         self._tokenizer: Optional[ZolaiTokenizer] = None
         self._pos_tagger: Optional[ZolaiPOSTagger] = None
         self._morphology: Optional[ZolaiMorphology] = None
+        self._corpus_analyzer = None
+        self._enhanced_morph = None
+        self._phonological_analyzer = None
 
     # ── Engine accessors (lazy) ──────────────────────────────────────────────
     @property
@@ -163,6 +171,30 @@ class FoundationAnalyzer:
         if self._morphology is None:
             self._morphology = get_morphology()
         return self._morphology
+
+    @property
+    def corpus_analyzer(self):
+        """Lazy-init corpus analyzer."""
+        if self._corpus_analyzer is None:
+            from .corpus import get_corpus_analyzer
+            self._corpus_analyzer = get_corpus_analyzer()
+        return self._corpus_analyzer
+
+    @property
+    def enhanced_morphology(self):
+        """Lazy-init enhanced morphology analyzer."""
+        if self._enhanced_morph is None:
+            from .morphology import get_enhanced_morphology
+            self._enhanced_morph = get_enhanced_morphology()
+        return self._enhanced_morph
+
+    @property
+    def phonological_analyzer(self):
+        """Lazy-init phonological analyzer."""
+        if self._phonological_analyzer is None:
+            from .phonology import get_phonological_analyzer
+            self._phonological_analyzer = get_phonological_analyzer()
+        return self._phonological_analyzer
 
     # ── Core analysis methods ────────────────────────────────────────────────
     def analyze_word(self, word: str) -> WordAnalysis:
@@ -358,6 +390,40 @@ class FoundationAnalyzer:
             register=register,
             cohesion_score=cohesion_score,
         )
+
+    # ── New linguistic analysis methods ───────────────────────────────────
+    def analyze_corpus(self, text: str):
+        """Run corpus-level analysis on input text.
+
+        Args:
+            text: Input text.
+
+        Returns:
+            CorpusAnalysis with ngrams, collocations, freq, register.
+        """
+        return self.corpus_analyzer.analyze(text)
+
+    def analyze_phonology(self, word: str):
+        """Run phonological analysis on a word.
+
+        Args:
+            word: Zolai word.
+
+        Returns:
+            PhonologicalAnalysis with syllable structures, tone patterns, etc.
+        """
+        return self.phonological_analyzer.analyze(word)
+
+    def analyze_morphology_enhanced(self, word: str):
+        """Run enhanced morphological analysis on a word.
+
+        Args:
+            word: Zolai word.
+
+        Returns:
+            MorphemeAnalysis with directional, aspect, particle detection.
+        """
+        return self.enhanced_morphology.decompose(word)
 
     # ── Helpers ──────────────────────────────────────────────────────────────
     def _check_zvs_word(self, word: str, morph: MorphologyInfo) -> tuple[bool, tuple[str, ...]]:

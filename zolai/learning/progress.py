@@ -1,4 +1,4 @@
-"""Spaced repetition and progress tracking."""
+"""Spaced repetition and progress tracking with CEFR-aligned adaptive difficulty."""
 
 from __future__ import annotations
 
@@ -13,13 +13,33 @@ from ..config import config
 logger = logging.getLogger(__name__)
 
 
+# ── CEFR level thresholds ───────────────────────────────────────────────────
+_CEFR_THRESHOLDS: dict[str, float] = {
+    "A1": 0.0,
+    "A2": 0.1,
+    "B1": 0.2,
+    "B2": 0.35,
+    "C1": 0.5,
+    "C2": 0.7,
+}
+
+# ── Frequency tiers ─────────────────────────────────────────────────────────
+_FREQ_TIERS: dict[str, int] = {
+    "high": 1000,
+    "medium": 100,
+    "low": 10,
+}
+
+
 class ProgressTracker:
-    """Track learning progress with SM-2 spaced repetition.
+    """Track learning progress with SM-2 spaced repetition and adaptive difficulty.
 
     Features:
     - SM-2 algorithm for scheduling reviews
     - CEFR level tracking (A1-C2)
-    - Quiz generation from vocab table
+    - Morphology-aware difficulty adjustment
+    - Tone-sensitive ease tuning
+    - Adaptive quiz difficulty based on word frequency, morphology, error rate
     """
 
     def __init__(self, user_id: str = "default") -> None:
@@ -182,8 +202,232 @@ class ProgressTracker:
         finally:
             conn.close()
 
+    # ── Morphology-aware difficulty ────────────────────────────────────────
+    def _compute_morphology_complexity(self, word: str) -> float:
+        """Compute morphology complexity score (0.0 - 1.0).
+
+        Factors:
+        - Agglutination depth (prefix + stem + suffix layers)
+        - Compound depth (number of component roots)
+        - Tone count (tone-dependent words are harder)
+
+        Args:
+            word: Zolai word.
+
+        Returns:
+            Complexity score (0.0 = simple, 1.0 = very complex).
+        """
+        try:
+            from ..foundation.morphology import get_enhanced_morphology
+            morph = get_enhanced_morphology()
+            analysis = morph.decompose(word)
+
+            score = 0.0
+
+            # Agglutination: more segments = more complex
+            n_segments = len(analysis.segments)
+            if n_segments >= 4:
+                score += 0.4
+            elif n_segments >= 3:
+                score += 0.3
+            elif n_segments >= 2:
+                score += 0.15
+
+            # Compound depth
+            if analysis.compound_parts:
+                compound_depth = len(analysis.compound_parts)
+                score += min(0.3, compound_depth * 0.1)
+
+            # Directional prefix adds complexity
+            if analysis.directional:
+                score += 0.1
+
+            # Aspect suffix adds complexity
+            if analysis.aspect:
+                score += 0.1
+
+            # Tone-dependent words (check morphology module)
+            from zolai.morphology import _TONE_NOTES
+            if word in _TONE_NOTES or analysis.stem in _TONE_NOTES:
+                score += 0.1
+
+            return min(1.0, score)
+        except Exception:
+            return 0.3  # Default moderate complexity
+
+    def _apply_sm2_tuning(
+        self,
+        ease: float,
+        morphology_score: float,
+        tone_sensitive: bool = False,
+    ) -> float:
+        """Tune SM-2 ease factor based on morphology and tone sensitivity.
+
+        Adjustments:
+        - +0.1 for tone-sensitive words (harder to master)
+        - +0.15 for complex morphology (agglutinated/compound)
+        - Clamp to [1.3, 3.0]
+
+        Args:
+            ease: Current ease factor.
+            morphology_score: Complexity score from _compute_morphology_complexity.
+            tone_sensitive: Whether the word is tone-dependent.
+
+        Returns:
+            Adjusted ease factor.
+        """
+        adjusted = ease
+
+        if tone_sensitive:
+            adjusted += 0.1
+
+        if morphology_score > 0.5:
+            adjusted += 0.15
+        elif morphology_score > 0.3:
+            adjusted += 0.08
+
+        return max(1.3, min(3.0, adjusted))
+
+    def _get_cefr_level_morphology(self, word: str) -> str:
+        """Get CEFR level considering morphology complexity.
+
+        Mapping:
+        - A1: Common roots (pasian, gam, mi, ne)
+        - A2: Simple compounds (vantung, leitung)
+        - B1: Directional verbs (hongpai, vatui)
+        - B2: Full agglutination (nuntakna, suahtakna)
+        - C1: Complex compounds with tone sandhi
+        - C2: Literary/archaic forms
+
+        Args:
+            word: Zolai word.
+
+        Returns:
+            CEFR level string (A1-C2).
+        """
+        complexity = self._compute_morphology_complexity(word)
+
+        if complexity < 0.1:
+            return "A1"
+        elif complexity < 0.25:
+            return "A2"
+        elif complexity < 0.4:
+            return "B1"
+        elif complexity < 0.6:
+            return "B2"
+        elif complexity < 0.8:
+            return "C1"
+        return "C2"
+
+    def get_adaptive_difficulty(self, user_id: str | None = None) -> dict[str, Any]:
+        """Compute adaptive quiz difficulty based on user's learning profile.
+
+        Factors:
+        - Word frequency tier (high/medium/low/rare)
+        - Morphology complexity of recent words
+        - Tone sensitivity of recent words
+        - Historical error rate
+
+        Args:
+            user_id: User ID (defaults to self.user_id).
+
+        Returns:
+            Dict with difficulty settings and recommendations.
+        """
+        uid = user_id or self.user_id
+        conn = self._get_connection()
+        cur = conn.cursor()
+
+        try:
+            # Get user's recent performance
+            cur.execute(
+                """SELECT word, quality, ease_factor, repetitions
+                   FROM vocabulary
+                   WHERE user_id = ?
+                   ORDER BY updated_at DESC LIMIT 50""",
+                (uid,),
+            )
+            recent = cur.fetchall()
+
+            if not recent:
+                return {
+                    "difficulty": "beginner",
+                    "frequency_tier": "high",
+                    "morphology_threshold": 0.2,
+                    "include_tone_questions": False,
+                    "recommended_count": 10,
+                    "reason": "No history — starting with high-frequency simple words",
+                }
+
+            # Compute error rate
+            error_count = sum(1 for r in recent if r["quality"] < 3)
+            error_rate = error_count / len(recent) if recent else 0
+
+            # Compute average ease
+            avg_ease = sum(r["ease_factor"] for r in recent) / len(recent)
+
+            # Compute average complexity
+            avg_complexity = sum(
+                self._compute_morphology_complexity(r["word"]) for r in recent
+            ) / len(recent)
+
+            # Determine difficulty level
+            if error_rate > 0.4 or avg_ease < 1.8:
+                difficulty = "beginner"
+                freq_tier = "high"
+                morph_threshold = 0.2
+                include_tone = False
+                count = 8
+                reason = "High error rate — focusing on high-frequency simple words"
+            elif error_rate > 0.25 or avg_ease < 2.2:
+                difficulty = "intermediate"
+                freq_tier = "medium"
+                morph_threshold = 0.4
+                include_tone = True
+                count = 10
+                reason = "Moderate error rate — introducing medium-frequency and compound words"
+            elif error_rate > 0.1 or avg_complexity > 0.4:
+                difficulty = "advanced"
+                freq_tier = "low"
+                morph_threshold = 0.6
+                include_tone = True
+                count = 12
+                reason = "Low error rate — including low-frequency and agglutinated words"
+            else:
+                difficulty = "expert"
+                freq_tier = "rare"
+                morph_threshold = 0.8
+                include_tone = True
+                count = 15
+                reason = "Excellent performance — challenging with rare words and complex morphology"
+
+            return {
+                "difficulty": difficulty,
+                "frequency_tier": freq_tier,
+                "morphology_threshold": morph_threshold,
+                "include_tone_questions": include_tone,
+                "recommended_count": count,
+                "error_rate": round(error_rate, 3),
+                "avg_ease": round(avg_ease, 2),
+                "avg_complexity": round(avg_complexity, 3),
+                "reason": reason,
+            }
+
+        except Exception as e:
+            logger.debug("Get adaptive difficulty failed: %s", e)
+            return {
+                "difficulty": "beginner",
+                "frequency_tier": "high",
+                "morphology_threshold": 0.2,
+                "include_tone_questions": False,
+                "recommended_count": 10,
+                "reason": "Error in computation — defaulting to beginner",
+            }
+        finally:
+            conn.close()
+
     def get_cefr_level(self) -> dict[str, Any]:
-        """Get user's CEFR level based on vocabulary掌握.
+        """Get user's CEFR level based on vocabulary mastery.
 
         Returns:
             Dict with level, words_known, words_total, progress.
@@ -204,24 +448,17 @@ class ProgressTracker:
             )
             known = cur.fetchone()[0]
 
-            # Calculate level
+            # Calculate level using thresholds
             if total == 0:
                 level = "A1"
                 progress = 0.0
             else:
                 ratio = known / total
-                if ratio < 0.1:
-                    level = "A1"
-                elif ratio < 0.2:
-                    level = "A2"
-                elif ratio < 0.35:
-                    level = "B1"
-                elif ratio < 0.5:
-                    level = "B2"
-                elif ratio < 0.7:
-                    level = "C1"
-                else:
-                    level = "C2"
+                level = "A1"
+                for l, threshold in sorted(_CEFR_THRESHOLDS.items(), key=lambda x: x[1], reverse=True):
+                    if ratio >= threshold:
+                        level = l
+                        break
                 progress = ratio
 
             return {

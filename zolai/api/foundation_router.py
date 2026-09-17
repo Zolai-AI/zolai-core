@@ -1,11 +1,13 @@
-"""Foundation Review Queue API — REST endpoints for review queue management.
+"""Foundation Review Queue API — REST endpoints for review queue management and linguistic analysis.
 
 Provides endpoints for:
-- Listing and filtering review queue items
-- Viewing detail with candidate value, evidence, and consensus
-- Approving, rejecting, and assigning items
-- Bulk operations
+- Review queue management (list, detail, approve, reject, assign, bulk)
 - Pipeline statistics and cost summary
+- Corpus analysis (n-gram, collocation, register)
+- Phonological analysis (syllable validation, tone sandhi, phonotactics)
+- Enhanced translation (3-tier confidence, morphology-aware)
+- Morphological decomposition
+- Adaptive difficulty computation
 """
 
 from __future__ import annotations
@@ -558,4 +560,181 @@ async def get_cost_summary(
         }
     except Exception as e:
         logger.error("Failed to get cost summary: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Linguistic Analysis Endpoints
+# ---------------------------------------------------------------------------
+
+@router.post("/analyze/corpus")
+async def analyze_corpus(request: dict):
+    """Run corpus-level analysis on input text.
+
+    Returns n-grams, collocations, frequency distribution, and register detection.
+    """
+    try:
+        from ..foundation.corpus import get_corpus_analyzer
+        analyzer = get_corpus_analyzer()
+
+        text = request.get("text", "")
+        ngram_size = request.get("ngram_size", 2)
+        top_k = request.get("top_k", 100)
+
+        if not text:
+            raise HTTPException(status_code=400, detail="Text is required")
+
+        result = analyzer.analyze(text)
+
+        return {
+            "ngrams": {str(k): v for k, v in result.ngrams.items()},
+            "collocations": [
+                {"word1": c.word1, "word2": c.word2, "pmi": c.pmi, "freq": c.freq}
+                for c in result.collocations
+            ],
+            "freq_distribution": result.freq_distribution,
+            "register": result.register,
+            "total_words_analyzed": result.total_words_analyzed,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Corpus analysis failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/analyze/phonology")
+async def analyze_phonology(request: dict):
+    """Run phonological analysis on a Zolai word.
+
+    Returns syllable structures, tone patterns, sandhi results, phonotactic validity, stress pattern.
+    """
+    try:
+        from ..foundation.phonology import get_phonological_analyzer
+        analyzer = get_phonological_analyzer()
+
+        word = request.get("word", "")
+        apply_sandhi = request.get("apply_sandhi", True)
+
+        if not word:
+            raise HTTPException(status_code=400, detail="Word is required")
+
+        result = analyzer.analyze(word)
+
+        return {
+            "syllable_structures": [
+                {
+                    "syllable": s.syllable,
+                    "onset": s.onset,
+                    "nucleus": s.nucleus,
+                    "coda": s.coda,
+                    "tone": s.tone,
+                    "valid": s.valid,
+                }
+                for s in result.syllable_structures
+            ],
+            "tone_patterns": list(result.tone_patterns),
+            "sandhi_applied": [list(pair) for pair in result.sandhi_applied],
+            "phonotactic_valid": result.phonotactic_valid,
+            "stress_pattern": list(result.stress_pattern),
+            "violations": list(result.violations),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Phonological analysis failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/analyze/morphology")
+async def analyze_morphology(request: dict):
+    """Run enhanced morphological analysis on a Zolai word.
+
+    Returns morpheme decomposition with directional, aspect, particle detection and ZVS validation.
+    """
+    try:
+        from ..foundation.morphology import get_enhanced_morphology
+        analyzer = get_enhanced_morphology()
+
+        word = request.get("word", "")
+        if not word:
+            raise HTTPException(status_code=400, detail="Word is required")
+
+        result = analyzer.decompose(word)
+
+        return {
+            "segments": list(result.segments),
+            "directional": result.directional,
+            "stem": result.stem,
+            "aspect": result.aspect,
+            "particle": result.particle,
+            "is_valid": result.is_valid,
+            "violations": list(result.violations),
+            "compound_parts": list(result.compound_parts),
+            "prefix": result.prefix,
+            "suffix": result.suffix,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Morphological analysis failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/translate/enhanced")
+async def translate_enhanced(request: dict):
+    """Translate with 3-tier confidence scoring and evidence chain.
+
+    Returns translation with confidence tier, evidence sources, and morphology breakdown.
+    """
+    try:
+        from ..learning.translation import TranslationEngine
+        engine = TranslationEngine()
+
+        text = request.get("text", "")
+        direction = request.get("direction", "auto")
+        context = request.get("context")
+
+        if not text:
+            raise HTTPException(status_code=400, detail="Text is required")
+
+        result = engine.translate(text, direction=direction, context=context)
+
+        return {
+            "translation": result.get("translation", ""),
+            "confidence": result.get("confidence", 0),
+            "tier": result.get("tier", "none"),
+            "sources": result.get("sources", []),
+            "evidence_chain": result.get("evidence_chain", []),
+            "zolai": result.get("zolai"),
+            "english": result.get("english"),
+            "pos": result.get("pos"),
+            "note": result.get("note"),
+            "morphology_breakdown": result.get("morphology_breakdown"),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Enhanced translation failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/progress/adaptive-difficulty")
+async def get_adaptive_difficulty(request: dict):
+    """Compute adaptive quiz difficulty based on user's learning profile.
+
+    Returns difficulty settings considering word frequency, morphology complexity,
+    tone sensitivity, and historical error rate.
+    """
+    try:
+        from ..learning.progress import ProgressTracker
+
+        user_id = request.get("user_id", "default")
+        tracker = ProgressTracker(user_id=user_id)
+
+        result = tracker.get_adaptive_difficulty(user_id=user_id)
+
+        return result
+    except Exception as e:
+        logger.error("Adaptive difficulty computation failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))

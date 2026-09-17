@@ -1,20 +1,35 @@
-"""EN↔ZO translation with dictionary-first lookup."""
+"""EN↔ZO translation with dictionary-first lookup, 3-tier confidence, and morphology awareness."""
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from typing import Any
+from functools import lru_cache
 
 from ..config import config
 
 logger = logging.getLogger(__name__)
 
 
+# ── Evidence tier confidence scores ──────────────────────────────────────────
+_TIER_CONFIDENCE: dict[str, float] = {
+    "dictionary": 0.95,
+    "bible": 0.85,
+    "corpus": 0.70,
+    "alignment": 0.80,
+    "phrase": 0.88,
+    "morphology": 0.60,
+}
+
+
 class TranslationEngine:
     """Translate between English and Zolai.
 
-    Uses dictionary-first lookup, phrase matching, and stores corrections.
+    Uses dictionary-first lookup, phrase matching, word alignment,
+    and stores corrections. Returns 3-tier confidence scores with
+    evidence sources and morphology-aware translation for unknown words.
     """
 
     def __init__(self) -> None:
@@ -32,7 +47,7 @@ class TranslationEngine:
         direction: str = "auto",
         context: str | None = None,
     ) -> dict[str, Any]:
-        """Translate text.
+        """Translate text with 3-tier confidence scoring.
 
         Args:
             text: Text to translate.
@@ -40,38 +55,301 @@ class TranslationEngine:
             context: Optional context (e.g., "bible", "daily").
 
         Returns:
-            Dict with translation, confidence, sources.
+            Dict with translation, confidence, sources, tier, evidence_chain.
         """
         text = text.strip()
         if not text:
-            return {"translation": "", "confidence": 0, "sources": []}
+            return {"translation": "", "confidence": 0, "sources": [], "tier": "none", "evidence_chain": []}
 
         # Auto-detect direction
         if direction == "auto":
             direction = self._detect_direction(text)
 
-        # Try dictionary lookup first
+        evidence_chain: list[dict[str, Any]] = []
+
+        # Try dictionary lookup first (tier 1: highest confidence)
         result = self._dictionary_lookup(text, direction)
         if result and result["confidence"] > 0.8:
+            tier = self._get_evidence_tier("dictionary")
+            result["tier"] = tier
+            result["confidence"] = self._compute_confidence(tier, [result])
+            result["evidence_chain"] = [{"source": "dictionary", "confidence": result["confidence"]}]
             return result
 
-        # Try phrase matching
-        phrase_result = self._phrase_match(text, direction)
+        # Try phrase matching (tier 1.5: high confidence)
+        phrase_result = self._phrase_match_enhanced(text, direction)
         if phrase_result and phrase_result["confidence"] > 0.7:
+            tier = self._get_evidence_tier("phrase")
+            phrase_result["tier"] = tier
+            phrase_result["confidence"] = self._compute_confidence(tier, [phrase_result])
+            phrase_result["evidence_chain"] = [{"source": "phrases", "confidence": phrase_result["confidence"]}]
+            evidence_chain.append({"source": "phrases", "confidence": phrase_result["confidence"]})
             return phrase_result
 
-        # Try Bible search for context
+        # Try word alignment (tier 2: bible evidence)
+        alignment_result = self._lookup_word_alignment(text, direction)
+        if alignment_result and alignment_result["confidence"] > 0.6:
+            tier = self._get_evidence_tier("alignment")
+            alignment_result["tier"] = tier
+            alignment_result["confidence"] = self._compute_confidence(tier, [alignment_result])
+            alignment_result["evidence_chain"] = [{"source": "word_alignment", "confidence": alignment_result["confidence"]}]
+            evidence_chain.append({"source": "word_alignment", "confidence": alignment_result["confidence"]})
+            return alignment_result
+
+        # Try Bible search for context (tier 2: bible evidence)
         bible_result = self._bible_search(text, direction)
         if bible_result and bible_result["confidence"] > 0.6:
+            tier = self._get_evidence_tier("bible")
+            bible_result["tier"] = tier
+            bible_result["confidence"] = self._compute_confidence(tier, [bible_result])
+            bible_result["evidence_chain"] = [{"source": "bible", "confidence": bible_result["confidence"]}]
+            evidence_chain.append({"source": "bible", "confidence": bible_result["confidence"]})
             return bible_result
 
+        # Try morphology-aware translation for unknown words (tier 3: corpus)
+        morph_result = self.translate_morphology_aware(text, direction)
+        if morph_result and morph_result["confidence"] > 0.3:
+            tier = self._get_evidence_tier("corpus")
+            morph_result["tier"] = tier
+            morph_result["confidence"] = self._compute_confidence(tier, [morph_result])
+            morph_result["evidence_chain"] = [{"source": "morphology", "confidence": morph_result["confidence"]}]
+            return morph_result
+
         # Return best result or empty
-        return result or phrase_result or bible_result or {
+        best = result or phrase_result or alignment_result or bible_result or morph_result
+        if best:
+            best["tier"] = best.get("tier", "none")
+            best["evidence_chain"] = best.get("evidence_chain", [])
+            return best
+
+        return {
             "translation": "",
             "confidence": 0,
             "sources": [],
+            "tier": "none",
             "note": "No translation found",
+            "evidence_chain": [],
         }
+
+    # ── Evidence tier helpers ──────────────────────────────────────────────
+    def _get_evidence_tier(self, source: str) -> str:
+        """Map source to evidence tier.
+
+        Args:
+            source: Source type ("dictionary", "bible", "corpus", etc.)
+
+        Returns:
+            Tier label.
+        """
+        tier_map = {
+            "dictionary": "dictionary",
+            "bible": "bible",
+            "corpus": "corpus",
+            "alignment": "bible",
+            "phrase": "dictionary",
+            "morphology": "corpus",
+        }
+        return tier_map.get(source, "corpus")
+
+    def _compute_confidence(self, tier: str, matches: list[dict[str, Any]]) -> float:
+        """Compute confidence score based on evidence tier and match quality.
+
+        Args:
+            tier: Evidence tier label.
+            matches: List of match results.
+
+        Returns:
+            Confidence score (0.0 - 1.0).
+        """
+        base = _TIER_CONFIDENCE.get(tier, 0.5)
+
+        # Adjust based on number of supporting matches
+        if len(matches) > 1:
+            base = min(1.0, base + 0.05 * (len(matches) - 1))
+
+        return round(base, 3)
+
+    # ── Word alignment lookup ─────────────────────────────────────────────
+    def _lookup_word_alignment(
+        self,
+        word: str,
+        direction: str,
+    ) -> dict[str, Any] | None:
+        """Lookup word-level alignment from word_alignments table.
+
+        Uses the 385K+ word alignment records for precise word-level translation.
+
+        Args:
+            word: Single word to look up.
+            direction: Translation direction.
+
+        Returns:
+            Dict with translation, confidence, sources, or None.
+        """
+        conn = self._get_connection()
+        cur = conn.cursor()
+
+        try:
+            if direction == "zo-en":
+                cur.execute(
+                    """SELECT word, aligned_word, frequency, source
+                       FROM word_alignments
+                       WHERE word = ? AND aligned_lang = 'en'
+                       ORDER BY frequency DESC LIMIT 3""",
+                    (word.lower(),),
+                )
+            else:
+                cur.execute(
+                    """SELECT word, aligned_word, frequency, source
+                       FROM word_alignments
+                       WHERE aligned_word = ? AND aligned_lang = 'zo'
+                       ORDER BY frequency DESC LIMIT 3""",
+                    (word.lower(),),
+                )
+
+            rows = cur.fetchall()
+            if rows:
+                best = rows[0]
+                return {
+                    "translation": best["aligned_word"],
+                    "confidence": 0.80,
+                    "sources": ["word_alignment"],
+                    "zolai": best["word"] if direction == "zo-en" else best["aligned_word"],
+                    "english": best["aligned_word"] if direction == "zo-en" else best["word"],
+                    "frequency": best["frequency"],
+                }
+
+            return None
+        except Exception as e:
+            logger.debug("Word alignment lookup failed: %s", e)
+            return None
+        finally:
+            conn.close()
+
+    # ── Enhanced phrase matching ──────────────────────────────────────────
+    def _phrase_match_enhanced(
+        self,
+        text: str,
+        direction: str,
+    ) -> dict[str, Any] | None:
+        """Enhanced phrase matching with exact match priority and partial fallback.
+
+        Args:
+            text: Text to match.
+            direction: Translation direction.
+
+        Returns:
+            Dict with translation, confidence, sources, or None.
+        """
+        conn = self._get_connection()
+        cur = conn.cursor()
+
+        try:
+            # Try exact match first
+            if direction == "zo-en":
+                cur.execute(
+                    """SELECT zolai, english, category
+                       FROM phrases
+                       WHERE zolai = ?
+                       LIMIT 1""",
+                    (text.lower(),),
+                )
+            else:
+                cur.execute(
+                    """SELECT zolai, english, category
+                       FROM phrases
+                       WHERE english = ?
+                       LIMIT 1""",
+                    (text.lower(),),
+                )
+
+            row = cur.fetchone()
+            if row:
+                return {
+                    "translation": row["english"] if direction == "zo-en" else row["zolai"],
+                    "confidence": 0.88,
+                    "sources": ["phrases"],
+                    "category": row["category"],
+                }
+
+            # Fallback: partial match
+            cur.execute(
+                """SELECT zolai, english, category
+                   FROM phrases
+                   WHERE zolai LIKE ? OR english LIKE ?
+                   LIMIT 5""",
+                (f"%{text}%", f"%{text}%"),
+            )
+            rows = cur.fetchall()
+
+            if rows:
+                best = rows[0]
+                return {
+                    "translation": best["english"] if direction == "zo-en" else best["zolai"],
+                    "confidence": 0.75,
+                    "sources": ["phrases_partial"],
+                    "category": best["category"],
+                }
+
+            return None
+        except Exception as e:
+            logger.debug("Enhanced phrase match failed: %s", e)
+            return None
+        finally:
+            conn.close()
+
+    # ── Morphology-aware translation ──────────────────────────────────────
+    def translate_morphology_aware(
+        self,
+        word: str,
+        direction: str = "zo-en",
+    ) -> dict[str, Any] | None:
+        """Translate unknown words by decomposing into known morphemes.
+
+        Uses enhanced morphology analyzer to break down agglutinated words
+        and compose translations from known root meanings.
+
+        Args:
+            word: Unknown word to decompose.
+            direction: Translation direction.
+
+        Returns:
+            Dict with partial translation, confidence, morphology breakdown.
+        """
+        try:
+            from ..foundation.morphology import get_enhanced_morphology
+            morph = get_enhanced_morphology()
+            analysis = morph.decompose(word)
+
+            if not analysis.segments:
+                return None
+
+            # Try to compose translation from morpheme meanings
+            from zolai.morphology import _KNOWN_ROOTS
+            parts_meaning: list[str] = []
+            for seg in analysis.segments:
+                if seg in _KNOWN_ROOTS:
+                    parts_meaning.append(_KNOWN_ROOTS[seg].get("meaning", seg))
+                else:
+                    parts_meaning.append(seg)
+
+            if parts_meaning:
+                composed = " + ".join(parts_meaning)
+                return {
+                    "translation": composed,
+                    "confidence": 0.55,
+                    "sources": ["morphology"],
+                    "morphology_breakdown": list(analysis.segments),
+                    "is_partial": True,
+                    "directional": analysis.directional,
+                    "aspect": analysis.aspect,
+                    "particle": analysis.particle,
+                }
+
+            return None
+        except Exception as e:
+            logger.debug("Morphology-aware translation failed: %s", e)
+            return None
 
     def _detect_direction(self, text: str) -> str:
         """Auto-detect translation direction."""
