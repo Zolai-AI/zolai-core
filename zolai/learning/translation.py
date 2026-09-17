@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 from typing import Any
-from functools import lru_cache
 
 from ..config import config
 
@@ -92,7 +90,9 @@ class TranslationEngine:
             tier = self._get_evidence_tier("alignment")
             alignment_result["tier"] = tier
             alignment_result["confidence"] = self._compute_confidence(tier, [alignment_result])
-            alignment_result["evidence_chain"] = [{"source": "word_alignment", "confidence": alignment_result["confidence"]}]
+            alignment_result["evidence_chain"] = [
+                {"source": "word_alignment", "confidence": alignment_result["confidence"]}
+            ]
             evidence_chain.append({"source": "word_alignment", "confidence": alignment_result["confidence"]})
             return alignment_result
 
@@ -605,7 +605,7 @@ class TranslationEngine:
 
             # Count corrections
             cur.execute("""
-                SELECT COUNT(*) FROM data_audit_log 
+                SELECT COUNT(*) FROM data_audit_log
                 WHERE table_name = 'translations' AND field = 'correction'
             """)
             total_corrections = cur.fetchone()[0]
@@ -624,7 +624,7 @@ class TranslationEngine:
                 "dictionary_entries": dictionary_entries,
                 "bible_verses": bible_verses,
                 "correction_rate": (
-                    total_corrections / total_translations 
+                    total_corrections / total_translations
                     if total_translations > 0 else 0
                 ),
             }

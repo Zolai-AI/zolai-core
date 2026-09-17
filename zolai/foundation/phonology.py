@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 import sqlite3
 from dataclasses import dataclass, field
-from functools import lru_cache
 from typing import Optional
 
 from ..config import config

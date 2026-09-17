@@ -578,8 +578,8 @@ async def analyze_corpus(request: dict):
         analyzer = get_corpus_analyzer()
 
         text = request.get("text", "")
-        ngram_size = request.get("ngram_size", 2)
-        top_k = request.get("top_k", 100)
+        _ngram_size = request.get("ngram_size", 2)
+        _top_k = request.get("top_k", 100)
 
         if not text:
             raise HTTPException(status_code=400, detail="Text is required")
@@ -614,7 +614,7 @@ async def analyze_phonology(request: dict):
         analyzer = get_phonological_analyzer()
 
         word = request.get("word", "")
-        apply_sandhi = request.get("apply_sandhi", True)
+        _apply_sandhi = request.get("apply_sandhi", True)
 
         if not word:
             raise HTTPException(status_code=400, detail="Word is required")

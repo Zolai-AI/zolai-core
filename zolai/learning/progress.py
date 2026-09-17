@@ -196,7 +196,7 @@ class ProgressTracker:
                 "quality": quality,
             }
 
-        except Exception as e:
+        except Exception:
             conn.rollback()
             raise
         finally:
@@ -455,9 +455,9 @@ class ProgressTracker:
             else:
                 ratio = known / total
                 level = "A1"
-                for l, threshold in sorted(_CEFR_THRESHOLDS.items(), key=lambda x: x[1], reverse=True):
+                for level_label, threshold in sorted(_CEFR_THRESHOLDS.items(), key=lambda x: x[1], reverse=True):
                     if ratio >= threshold:
-                        level = l
+                        level = level_label
                         break
                 progress = ratio
 
@@ -617,15 +617,15 @@ class ProgressTracker:
 
             # Total corrections
             cur.execute("""
-                SELECT COUNT(*) FROM data_audit_log 
+                SELECT COUNT(*) FROM data_audit_log
                 WHERE table_name = 'translations' AND field = 'correction'
             """)
             total_corrections = cur.fetchone()[0]
 
             # Words by frequency
             cur.execute("""
-                SELECT 
-                    CASE 
+                SELECT
+                    CASE
                         WHEN frequency >= 1000 THEN 'high'
                         WHEN frequency >= 100 THEN 'medium'
                         WHEN frequency >= 10 THEN 'low'
@@ -645,7 +645,7 @@ class ProgressTracker:
                 "total_corrections": total_corrections,
                 "freq_distribution": freq_distribution,
                 "completion_rate": (
-                    total_exercises / total_vocab 
+                    total_exercises / total_vocab
                     if total_vocab > 0 else 0
                 ),
             }
