@@ -29,44 +29,30 @@ class GrammarEditor:
     def add_pattern(
         self,
         pattern: str,
-        pattern_type: str,
+        function: str,
         description: str = "",
-        example: str = "",
-        zolai_example: str = "",
-        created_by: str = "grammar_editor",
+        examples: str = "",
     ) -> dict[str, Any]:
         """Add a new grammar pattern.
 
         Args:
             pattern: The grammar pattern (e.g., "S + O + V").
-            pattern_type: Type (e.g., "sov", "negation", "question").
+            function: Function type (e.g., "sov", "negation", "question").
             description: Description of the pattern.
-            example: English example.
-            zolai_example: Zolai example.
-            created_by: Who created this pattern.
+            examples: Example sentences (JSON or text).
 
         Returns:
             Dict with success status and pattern ID.
         """
-        # Validate ZVS 2018 compliance for Zolai example
-        if zolai_example:
-            validation = self._validate_zvs(zolai_example)
-            if not validation["is_compliant"]:
-                return {
-                    "success": False,
-                    "error": "ZVS 2018 non-compliant",
-                    "violations": validation["errors"],
-                }
-
         conn = self._get_connection()
         cur = conn.cursor()
 
         try:
             cur.execute(
                 """INSERT INTO grammar_patterns
-                   (pattern, pattern_type, description, example, zolai_example, created_by)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (pattern, pattern_type, description, example, zolai_example, created_by),
+                   (pattern, function, description, examples)
+                   VALUES (?, ?, ?, ?)""",
+                (pattern, function, description, examples),
             )
             conn.commit()
 
@@ -74,7 +60,7 @@ class GrammarEditor:
                 "success": True,
                 "id": cur.lastrowid,
                 "pattern": pattern,
-                "pattern_type": pattern_type,
+                "function": function,
             }
 
         except Exception as e:
@@ -102,7 +88,7 @@ class GrammarEditor:
 
         try:
             # Build update query
-            allowed_fields = {"pattern", "pattern_type", "description", "example", "zolai_example"}
+            allowed_fields = {"pattern", "function", "description", "examples"}
             updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
 
             if not updates:
