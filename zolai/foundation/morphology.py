@@ -239,12 +239,6 @@ class EnhancedMorphologyAnalyzer:
                 violations.append(
                     f"Forbidden morpheme '{lower}' → use '{correct}'"
                 )
-            # Check partial matches in compounds
-            for forbidden, correct in _ZVS_FORBIDDEN_MORPHEMES.items():
-                if forbidden in lower and lower != forbidden:
-                    violations.append(
-                        f"Forbidden substring '{forbidden}' in morpheme '{lower}'"
-                    )
         return violations
 
     def _validate_compound(self, word: str) -> tuple[bool, tuple[str, ...]]:

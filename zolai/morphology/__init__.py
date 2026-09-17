@@ -29,27 +29,6 @@ from typing import Optional
 # Reference: data/reference/grammar/lesson_02_Tone_Sandhi_Tedim_Zomi_Toponyms.md
 
 _TONE_NOTES: dict[str, str] = {
-    "khem": "T1=lie/deceive, T3=thin/weak (after illness)",
-    "nam": "T1=smell, T3=odoriferous",
-    "zu": "T1=alcohol/distillate, T4=rain (with guah-)",
-    "ta": "T1=completive/realized, T3=beginning",
-    "ci": "T1=say/speak",
-    "ne": "T1=eat/drink",
-    "pai": "T1=go/move",
-    "om": "T1=exist/stay",
-}
-
-log = logging.getLogger(__name__)
-
-_DATA_DIR = Path(__file__).parent.parent.parent.parent / "data"
-
-# ── Zolai Tone System (4 tones like Chinese) ──────────────────────────────────
-# T1 = High, T2 = High Falling (sandhi only), T3 = Low, T4 = Creaky
-# Written Zolai does NOT mark tones. Same spelling can have different meanings.
-# Tone sandhi rules change tones in compound words.
-# Reference: data/reference/grammar/lesson_02_Tone_Sandhi_Tedim_Zomi_Toponyms.md
-#            zolai-wiki/grammar/tone_system.md
-_TONE_NOTES: dict[str, str] = {
     "khem": "T1=lie/deceive, T3=thin/weak",
     "nam": "T1=smell, T3=odoriferous",
     "zu": "T1=alcohol/distillate, T4=rain (with guah-)",
@@ -60,7 +39,13 @@ _TONE_NOTES: dict[str, str] = {
     "siang": "T1=call/summon, T3=clean/holy (in compounds)",
     "ci": "T1=say/speak",
     "ne": "T1=eat/drink",
+    "pai": "T1=go/move",
+    "om": "T1=exist/stay",
 }
+
+log = logging.getLogger(__name__)
+
+_DATA_DIR = Path(__file__).parent.parent.parent.parent / "data"
 
 # ── Prefixes (person agreement / valency) ─────────────────────────────────────
 _PREFIXES: dict[str, dict[str, str]] = {
