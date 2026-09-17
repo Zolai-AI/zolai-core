@@ -12,6 +12,8 @@ Public API:
 - CorpusAnalyzer: corpus-level n-gram, collocation, register analysis
 - EnhancedMorphologyAnalyzer: agglutinative decomposition with ZVS validation
 - PhonologicalAnalyzer: syllable validation, tone sandhi, phonotactics
+- FoundationETL: Raw → Staging → Canonical data pipeline
+- VerificationRunner: adaptive-threshold pipeline health checks
 """
 from __future__ import annotations
 
@@ -81,6 +83,15 @@ from .verifiers import (
     GeminiVerifier,
     ModelRouter,
 )
+from .etl import (
+    FoundationETL,
+    get_foundation_etl,
+)
+from .verification_runner import (
+    VerificationReport,
+    VerificationRunner,
+    get_verification_runner,
+)
 
 __all__ = [
     # Analysis
@@ -141,6 +152,13 @@ __all__ = [
     "GrammarRegressionTest",
     "SyllableRegressionTest",
     "ToneRegressionTest",
+    # ETL Pipeline
+    "FoundationETL",
+    "get_foundation_etl",
+    # Verification Runner
+    "VerificationRunner",
+    "VerificationReport",
+    "get_verification_runner",
 ]
 
 __version__ = "0.1.0"

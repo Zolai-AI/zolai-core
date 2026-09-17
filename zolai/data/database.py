@@ -83,16 +83,30 @@ class DatabaseManager:
     def metadata(self) -> MetaData:
         if self._metadata is None:
             self._metadata = MetaData()
-            Base.metadata.reflect(bind=self.engine)
-            self._metadata = Base.metadata
+            # Reflect into a fresh MetaData, NOT the global Base.metadata,
+            # to avoid contaminating ORM tables with FTS virtual tables
+            # (which produce NullType columns that break create_all DDL).
+            self._metadata.reflect(bind=self.engine)
         return self._metadata
 
     # ------------------------------------------------------------------
     # Schema management
     # ------------------------------------------------------------------
     def init_db(self) -> None:
-        """Create all tables (idempotent)."""
-        Base.metadata.create_all(self.engine)
+        """Create all ORM-defined tables (idempotent).
+
+        Uses only the ORM-declared tables from models.py, not any reflected
+        tables (e.g. FTS virtual tables) that may have leaked into Base.metadata
+        via a prior reflect() call.
+        """
+        # Collect only ORM-declared table names to avoid creating reflected
+        # FTS virtual tables that produce NullType DDL errors.
+        orm_tables = [
+            t for t in Base.metadata.sorted_tables
+            if not t.name.startswith("wiki_content_fts")
+        ]
+        if orm_tables:
+            Base.metadata.create_all(self.engine, tables=orm_tables)
         self._ensure_columns()
         logger.info("Database initialized: %s", self._db_url)
 

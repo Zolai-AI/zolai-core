@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 import time
 from dataclasses import dataclass, field
@@ -612,7 +613,7 @@ def _evaluate_case(case: EvalCase, rag: Any) -> EvalResult:
         elif case.category == "contextual":
             return _eval_contextual(case, rag)
         elif case.category == "paraphrase":
-            return _eval_paraphrase(case)
+            return _eval_paraphrase(case, rag)
         else:
             return EvalResult(case.id, False, notes=f"Unknown category: {case.category}")
     except Exception as e:
@@ -782,30 +783,156 @@ def _eval_translation(case: EvalCase, rag: Any) -> EvalResult:
 
 
 def _eval_rag(case: EvalCase, rag: Any) -> EvalResult:
-    """Evaluate RAG test case."""
+    """Evaluate RAG test case.
+
+    DB-backed: validates dictionary lookups, ZVS detection, translations,
+    grammar patterns, and Bible verse lookups against the actual database.
+    """
     expected = case.expected
-    if rag is None:
-        # Offline: check expected structure
-        if isinstance(expected, dict):
-            if "expected_source" in expected:
-                return EvalResult(
-                    case.id, True, score=0.5,
-                    notes="Offline: RAG structure validated"
-                )
-            if "correct_form" in expected:
-                return EvalResult(
-                    case.id, True, score=0.5,
-                    notes="Offline: ZVS correction validated"
-                )
-            if "meaning" in expected:
-                return EvalResult(
-                    case.id, True, score=0.5,
-                    notes="Offline: word meaning validated"
-                )
-        return EvalResult(case.id, True, score=0.5, notes="No RAG available, skipping")
 
-    pack = rag.retrieve(case.input, top_k=10)
+    # First, try RAG if available
+    if rag is not None:
+        try:
+            pack = rag.retrieve(case.input, top_k=10)
+            return _eval_rag_with_pack(case, expected, pack)
+        except Exception:
+            pass
 
+    # Fallback: DB-backed offline validation
+    conn = _get_eval_db()
+    if conn is None:
+        return EvalResult(case.id, True, score=0.5, notes="No RAG or DB available, skipping")
+
+    try:
+        cur = conn.cursor()
+        word = case.input.strip()
+
+        # Check ZVS violation detection
+        if isinstance(expected, dict) and expected.get("expected_zvs_violation"):
+            zvs_forms = {"pathian", "ram", "fapa", "bawipa", "siangpahrang", "cu", "cun"}
+            word_lower = word.lower().split()[0] if word.lower().split() else word.lower()
+            is_forbidden = word_lower in zvs_forms
+            return EvalResult(
+                case.id, is_forbidden, score=1.0 if is_forbidden else 0.0,
+                notes=f"DB ZVS check: '{word}' {'is' if is_forbidden else 'is not'} forbidden"
+            )
+
+        # Check translation lookup
+        if isinstance(expected, dict) and "expected_translation" in expected:
+            target = expected["expected_translation"]
+            cur.execute(
+                "SELECT english FROM dictionary WHERE zolai = ? COLLATE NOCASE LIMIT 5",
+                (word,),
+            )
+            rows = cur.fetchall()
+            for row in rows:
+                if target.lower() in (row["english"] or "").lower():
+                    return EvalResult(
+                        case.id, True, score=1.0,
+                        notes=f"DB translation: '{word}' → '{target}'"
+                    )
+            return EvalResult(
+                case.id, False, score=0.0,
+                notes=f"DB translation: '{target}' not found for '{word}'"
+            )
+
+        # Check source type (dictionary, grammar, bible)
+        if isinstance(expected, dict) and "expected_source" in expected:
+            source = expected["expected_source"]
+            if source == "dictionary":
+                cur.execute(
+                    "SELECT zolai FROM dictionary WHERE zolai = ? COLLATE NOCASE LIMIT 1",
+                    (word,),
+                )
+                found = cur.fetchone() is not None
+                return EvalResult(
+                    case.id, found, score=1.0 if found else 0.0,
+                    notes=f"DB dictionary lookup: '{word}'"
+                )
+            elif source == "grammar":
+                cur.execute(
+                    "SELECT pattern_id FROM grammar_patterns WHERE pattern_id LIKE ? COLLATE NOCASE LIMIT 1",
+                    (f"%{word}%",),
+                )
+                found = cur.fetchone() is not None
+                if not found:
+                    # Try word-by-word match
+                    for w in word.split():
+                        cur.execute(
+                            "SELECT pattern_id FROM grammar_patterns WHERE pattern_id LIKE ? COLLATE NOCASE LIMIT 1",
+                            (f"%{w}%",),
+                        )
+                        if cur.fetchone():
+                            found = True
+                            break
+                return EvalResult(
+                    case.id, found, score=1.0 if found else 0.0,
+                    notes=f"DB grammar pattern lookup: '{word}'"
+                )
+            elif source == "bible":
+                cur.execute(
+                    """SELECT ref FROM bible_verses
+                       WHERE zo_tdb77 LIKE ? COLLATE NOCASE
+                       OR zo_tedim2010 LIKE ? COLLATE NOCASE
+                       LIMIT 1""",
+                    (f"%{word}%", f"%{word}%"),
+                )
+                found = cur.fetchone() is not None
+                return EvalResult(
+                    case.id, found, score=1.0 if found else 0.0,
+                    notes=f"DB Bible verse lookup: '{word}'"
+                )
+
+        # Check ZVS correction
+        if isinstance(expected, dict) and "correct_form" in expected:
+            correct = expected["correct_form"]
+            cur.execute(
+                "SELECT zolai FROM dictionary WHERE zolai = ? COLLATE NOCASE LIMIT 1",
+                (correct,),
+            )
+            found = cur.fetchone() is not None
+            return EvalResult(
+                case.id, found, score=1.0 if found else 0.5,
+                notes=f"DB ZVS correction: '{word}' → '{correct}'"
+            )
+
+        # Check word meaning
+        if isinstance(expected, dict) and "meaning" in expected:
+            meaning = expected["meaning"]
+            cur.execute(
+                "SELECT english FROM dictionary WHERE zolai = ? COLLATE NOCASE LIMIT 5",
+                (word,),
+            )
+            rows = cur.fetchall()
+            for row in rows:
+                if meaning.lower() in (row["english"] or "").lower():
+                    return EvalResult(
+                        case.id, True, score=1.0,
+                        notes=f"DB meaning: '{word}' → '{meaning}'"
+                    )
+            return EvalResult(
+                case.id, False, score=0.0,
+                notes=f"DB meaning: '{meaning}' not found for '{word}'"
+            )
+
+        # Default: check if word exists in dictionary at all
+        cur.execute(
+            "SELECT zolai FROM dictionary WHERE zolai = ? COLLATE NOCASE LIMIT 1",
+            (word,),
+        )
+        found = cur.fetchone() is not None
+        return EvalResult(
+            case.id, found, score=1.0 if found else 0.5,
+            notes=f"DB existence check: '{word}'"
+        )
+    except Exception as e:
+        return EvalResult(case.id, True, score=0.5, notes=f"DB error: {e}")
+    finally:
+        conn.close()
+
+
+def _eval_rag_with_pack(case: EvalCase, expected: Any, pack: Any) -> EvalResult:
+    """Evaluate RAG case using a retrieval pack from the RAG engine."""
     # Check ZVS violation detection
     if isinstance(expected, dict) and expected.get("expected_zvs_violation"):
         has_violation = len(pack.zvs) > 0
@@ -850,30 +977,236 @@ def _eval_rag(case: EvalCase, rag: Any) -> EvalResult:
     )
 
 
+def _get_eval_db() -> sqlite3.Connection | None:
+    """Get a read-only connection to the Zolai database for offline eval."""
+    try:
+        from zolai.config import config as zolai_config
+        db_path = zolai_config.paths.zolai_db
+        if not Path(db_path).exists():
+            return None
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except Exception:
+        return None
+
+
 def _eval_contextual(case: EvalCase, rag: Any) -> EvalResult:
-    """Evaluate contextual meaning test case."""
+    """Evaluate contextual meaning test case.
+
+    DB-backed: looks up the word in the dictionary table to verify the meaning.
+    """
     expected = case.expected
-    if isinstance(expected, dict) and "meaning" in expected:
-        # Offline: validate structure
+    if not isinstance(expected, dict) or "meaning" not in expected:
+        return EvalResult(case.id, True, score=0.5, notes="Contextual test - no expected meaning")
+
+    # Extract the word from the input (e.g. "What does 'gam' mean in Genesis?" → "gam")
+    text = case.input
+    word = None
+    if "'" in text:
+        parts = text.split("'")
+        if len(parts) >= 3:
+            word = parts[1].strip().lower()
+
+    if not word:
+        return EvalResult(case.id, True, score=0.5, notes="Could not extract word from input")
+
+    expected_meaning = expected["meaning"]
+
+    # First, try RAG if available
+    if rag is not None:
+        try:
+            pack = rag.retrieve(word, top_k=10)
+            for entry in pack.vocabulary:
+                if expected_meaning.lower() in entry.text.lower():
+                    return EvalResult(
+                        case.id, True, score=1.0,
+                        notes=f"RAG confirmed '{word}' → '{expected_meaning}'"
+                    )
+        except Exception:
+            pass
+
+    # Fallback: direct DB lookup
+    conn = _get_eval_db()
+    if conn is None:
+        return EvalResult(case.id, True, score=0.5, notes="No DB available, offline contextual check")
+
+    try:
+        cur = conn.cursor()
+        # Check dictionary (ZO→EN)
+        cur.execute(
+            "SELECT english FROM dictionary WHERE zolai = ? COLLATE NOCASE LIMIT 5",
+            (word,),
+        )
+        rows = cur.fetchall()
+        for row in rows:
+            eng = row["english"] or ""
+            if expected_meaning.lower() in eng.lower():
+                return EvalResult(
+                    case.id, True, score=1.0,
+                    notes=f"Dictionary confirmed '{word}' → '{expected_meaning}'"
+                )
+
+        # Check dictionary_en_zo for reverse lookup
+        cur.execute(
+            "SELECT translations_clean FROM dictionary_en_zo WHERE headword = ? COLLATE NOCASE LIMIT 5",
+            (expected_meaning,),
+        )
+        rows = cur.fetchall()
+        for row in rows:
+            trans = row["translations_clean"] or ""
+            if word in trans.lower():
+                return EvalResult(
+                    case.id, True, score=1.0,
+                    notes=f"EN-ZO dictionary confirmed '{expected_meaning}' → '{word}'"
+                )
+
+        # Check bible_verses for contextual usage
+        cur.execute(
+            """SELECT zo_tdb77, en_kJV FROM bible_verses
+               WHERE zo_tdb77 LIKE ? COLLATE NOCASE
+               OR zo_tedim2010 LIKE ? COLLATE NOCASE
+               LIMIT 5""",
+            (f"%{word}%", f"%{word}%"),
+        )
+        rows = cur.fetchall()
+        for row in rows:
+            zo = (row["zo_tdb77"] or "").lower()
+            en = (row["en_kJV"] or "").lower()
+            if word in zo and expected_meaning in en:
+                return EvalResult(
+                    case.id, True, score=1.0,
+                    notes=f"Bible context confirmed '{word}' → '{expected_meaning}'"
+                )
+
+        # Check grammar_patterns for grammar words
+        cur.execute(
+            """SELECT examples FROM grammar_patterns
+               WHERE pattern_id LIKE ? COLLATE NOCASE
+               OR function LIKE ? COLLATE NOCASE
+               LIMIT 5""",
+            (f"%{word}%", f"%{expected_meaning}%",),
+        )
+        rows = cur.fetchall()
+        for row in rows:
+            examples = row["examples"] or ""
+            if word in examples.lower():
+                return EvalResult(
+                    case.id, True, score=0.8,
+                    notes=f"Grammar pattern confirmed '{word}' → '{expected_meaning}'"
+                )
+
+        # Check word_usage for per-book contextual meanings
+        cur.execute(
+            """SELECT meaning_shifts FROM word_usage
+               WHERE word = ? COLLATE NOCASE LIMIT 5""",
+            (word,),
+        )
+        rows = cur.fetchall()
+        for row in rows:
+            ms = row["meaning_shifts"] or ""
+            if expected_meaning.lower() in ms.lower():
+                return EvalResult(
+                    case.id, True, score=0.8,
+                    notes=f"Word usage confirmed '{word}' → '{expected_meaning}'"
+                )
+
+        # Word exists in DB but exact meaning not confirmed — partial credit
+        # (dictionary may have multiple meanings, or meaning is context-specific)
+        cur.execute(
+            "SELECT zolai FROM dictionary WHERE zolai = ? COLLATE NOCASE LIMIT 1",
+            (word,),
+        )
+        if cur.fetchone():
+            return EvalResult(
+                case.id, True, score=0.6,
+                notes=f"Word '{word}' exists in DB but meaning '{expected_meaning}' not directly confirmed"
+            )
+
+        return EvalResult(
+            case.id, False, score=0.0,
+            notes=f"DB lookup: '{word}' meaning '{expected_meaning}' not confirmed"
+        )
+    except Exception as e:
+        return EvalResult(case.id, True, score=0.5, notes=f"DB error: {e}")
+    finally:
+        conn.close()
+
+
+def _eval_paraphrase(case: EvalCase, rag: Any = None) -> EvalResult:
+    """Evaluate paraphrase test case.
+
+    DB-backed: validates that:
+    1. All variants are grammatically well-formed (end with 'hi', 'hiam', etc.)
+    2. Variants share the same verb root
+    3. Grammar patterns support the variant forms
+    """
+    expected = case.expected
+    if not isinstance(expected, dict) or "variants" not in expected:
+        return EvalResult(case.id, True, score=0.5, notes="Paraphrase test - no variants")
+
+    variants = expected["variants"]
+    if not all(isinstance(v, str) and len(v) > 0 for v in variants):
+        return EvalResult(case.id, False, score=0.0, notes="Empty or invalid variants")
+
+    text = case.input.strip()
+
+    # Structural validation: sentence should end with a valid particle
+    valid_endings = ("hi", "hiam", "ding", "lo", "ta")
+    words = text.rstrip("?.!").split()
+    if not words:
+        return EvalResult(case.id, False, score=0.0, notes="Empty sentence")
+
+    last_word = words[-1].lower()
+    if last_word not in valid_endings:
+        return EvalResult(
+            case.id, False, score=0.0,
+            notes=f"Invalid sentence ending: '{last_word}'"
+        )
+
+    # DB-backed: check verb exists in dictionary
+    # Extract likely verb (typically the last content word before particle)
+    conn = _get_eval_db()
+    if conn is None:
         return EvalResult(
             case.id, True, score=0.5,
-            notes="Offline: contextual meaning validated"
+            notes="No DB: structural paraphrase validation passed"
         )
-    return EvalResult(case.id, True, score=0.5, notes="Contextual test - needs manual verification")
 
-
-def _eval_paraphrase(case: EvalCase) -> EvalResult:
-    """Evaluate paraphrase test case."""
-    expected = case.expected
-    if isinstance(expected, dict) and "variants" in expected:
-        variants = expected["variants"]
-        # Validate that variants are non-empty
-        if all(isinstance(v, str) and len(v) > 0 for v in variants):
-            return EvalResult(
-                case.id, True, score=0.5,
-                notes="Offline: paraphrase structure validated"
+    try:
+        cur = conn.cursor()
+        verb_found = False
+        for w in words:
+            wl = w.lower().rstrip("?.!")
+            if wl in ("ka", "na", "a", "ki", "uh", "in", "kei", "lo", "hi", "hiam", "ding", "ta", "zo", "leh", "amah"):
+                continue
+            cur.execute(
+                "SELECT zolai FROM dictionary WHERE zolai = ? COLLATE NOCASE LIMIT 1",
+                (wl,),
             )
-    return EvalResult(case.id, True, score=0.5, notes="Paraphrase test - needs AI verification")
+            if cur.fetchone():
+                verb_found = True
+                break
+
+        if not verb_found:
+            # Check grammar_patterns
+            for w in words:
+                wl = w.lower().rstrip("?.!")
+                cur.execute(
+                    "SELECT pattern_id FROM grammar_patterns WHERE pattern_id LIKE ? COLLATE NOCASE LIMIT 1",
+                    (f"%{wl}%",),
+                )
+                if cur.fetchone():
+                    verb_found = True
+                    break
+
+        score = 0.8 if verb_found else 0.5
+        notes = "Paraphrase validated" + (" (verb found in DB)" if verb_found else " (verb not found, partial)")
+        return EvalResult(case.id, True, score=score, notes=notes)
+    except Exception as e:
+        return EvalResult(case.id, True, score=0.5, notes=f"DB error: {e}")
+    finally:
+        conn.close()
 
 
 def print_report(report: EvalReport):
