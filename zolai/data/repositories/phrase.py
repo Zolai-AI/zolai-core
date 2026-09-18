@@ -20,7 +20,7 @@ class PhraseRepository(BaseRepository):
         """Get phrase by exact Zolai text."""
         with self._engine.connect() as conn:
             rows = conn.execute(
-                self.table.select().where(self.table.c.zo == zo)
+                self.table.select().where(self.table.c.zolailai == zo)
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]
 
@@ -29,7 +29,7 @@ class PhraseRepository(BaseRepository):
         with self._engine.connect() as conn:
             rows = conn.execute(
                 self.table.select()
-                .where(self.table.c.zo.ilike(f"{prefix}%"))
+                .where(self.table.c.zolai.ilike(f"{prefix}%"))
                 .limit(limit)
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]
@@ -40,7 +40,7 @@ class PhraseRepository(BaseRepository):
         with self._engine.connect() as conn:
             rows = conn.execute(
                 self.table.select()
-                .where(self.table.c.zo.ilike(pattern))
+                .where(self.table.c.zolai.ilike(pattern))
                 .limit(limit)
             ).fetchall()
         return [self._row_to_dict(row) for row in rows]

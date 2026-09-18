@@ -591,10 +591,27 @@ class FoundationBatchesRepository(BaseRepository):
             ).first()
         return self._row_to_dict(row) if row else None
 
-    def create_batch(self, batch_type: str, user: str = "system") -> int:
-        """Create a new pending batch."""
+    def create_batch(
+        self,
+        batch_type: str,
+        metadata: dict | str | None = None,
+        user: str = "system",
+    ) -> int:
+        """Create a new pending batch.
+
+        ``metadata`` may be a dict (stored in stats) or a legacy user string.
+        """
+        if isinstance(metadata, str):
+            user = metadata
+            metadata = None
+        stats = "{}" if not metadata else __import__("json").dumps(metadata, ensure_ascii=False)
         return self.create(
-            {"batch_type": batch_type, "status": "pending", "stats": "{}", "started_at": self._get_timestamp()},
+            {
+                "batch_type": batch_type,
+                "status": "pending",
+                "stats": stats,
+                "started_at": self._get_timestamp(),
+            },
             user=user,
         )
 

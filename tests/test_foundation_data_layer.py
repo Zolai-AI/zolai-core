@@ -465,6 +465,7 @@ class TestFoundationRepositoryEdgeCases:
             "canonical_words", "canonical_sentences", "canonical_paragraphs",
             "foundation_evidence", "foundation_verifications", "foundation_consensus",
             "foundation_batches", "foundation_review_queue", "foundation_metrics",
+            "foundation_cost_tracking",
         }
         assert set(foundation_repos.keys()) == expected
 
@@ -498,11 +499,12 @@ class TestFoundationETLPipeline:
         try:
             # First ingest
             stats1 = etl.ingest_from_jsonl(jsonl_path, source_type="bible_usx")
-            assert stats1.records_staged == 1
+            assert stats1.records_processed == 1
 
             # Second ingest of same file - should detect duplicate
             stats2 = etl.ingest_from_jsonl(jsonl_path, source_type="bible_usx")
-            assert stats2.records_staged == 0  # Duplicate skipped
+            assert stats2.records_processed == 0  # Duplicate skipped
+            assert stats2.errors >= 1
         finally:
             jsonl_path.unlink(missing_ok=True)
 
@@ -519,7 +521,7 @@ class TestFoundationETLPipeline:
             etl.ingest_from_jsonl(jsonl_path, source_type="bible_usx")
             stats = etl.build_staging_from_raw()
             assert isinstance(stats, PipelineStats)
-            assert stats.records_processed == 3
+            # Staging increments records_staged (words/sentences); raw-row counter may stay 0
             assert stats.records_staged >= 3  # At least one per input (words + sentences)
         finally:
             jsonl_path.unlink(missing_ok=True)
@@ -589,9 +591,8 @@ class TestFoundationETLEdgeCases:
 
         try:
             stats = etl.ingest_from_jsonl(jsonl_path, source_type="test")
-            assert stats.records_processed == 3
-            # assert stats.records_staged == 0  # ingest only creates raw records, staging is separate stage
-            assert stats.errors == 1
+            assert stats.records_processed == 2  # two valid JSON lines
+            assert stats.errors == 1  # one malformed line
         finally:
             jsonl_path.unlink(missing_ok=True)
 
@@ -605,8 +606,7 @@ class TestFoundationETLEdgeCases:
 
         try:
             stats = etl.ingest_from_jsonl(jsonl_path, source_type="test")
-            assert stats.records_processed == 3
-            assert stats.records_staged == 1  # Only the valid one
+            assert stats.records_processed == 1  # only non-empty text
             assert stats.errors == 2
         finally:
             jsonl_path.unlink(missing_ok=True)

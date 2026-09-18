@@ -596,13 +596,25 @@ def apply_constraints(mgr: DatabaseManager) -> dict[str, Any]:
 
                 # Apply constraint
                 if mgr._db_url.startswith("sqlite"):
-                    # SQLite: constraints are added via ALTER TABLE or at creation
+                    # SQLite: UNIQUE via index; CHECK not alterable on existing tables
                     if constraint_sql.startswith("UNIQUE"):
                         cols = constraint_sql.replace("UNIQUE(", "").replace(")", "")
+                        # Schema drift: phrases live DB uses zolai; ORM init_db uses zo
+                        if table_name == "phrases":
+                            col_rows = conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
+                            colnames = {r[1] for r in col_rows}
+                            parts = [c.strip() for c in cols.split(",")]
+                            resolved = []
+                            for c in parts:
+                                if c == "zo" and "zo" not in colnames and "zolai" in colnames:
+                                    resolved.append("zolai")
+                                elif c == "zolai" and "zolai" not in colnames and "zo" in colnames:
+                                    resolved.append("zo")
+                                else:
+                                    resolved.append(c)
+                            cols = ", ".join(resolved)
                         alter_sql = f"CREATE UNIQUE INDEX IF NOT EXISTS {constraint_name} ON {table_name}({cols})"
-                    if constraint_sql.startswith("CHECK"):
-                        # SQLite doesn't support ALTER TABLE ADD CHECK easily
-                        # Would need to recreate table - skip for now
+                    elif constraint_sql.startswith("CHECK"):
                         skipped.append(
                             f"{table_name}.{constraint_name} "
                             "(CHECK not supported on existing SQLite tables)"
@@ -654,6 +666,23 @@ def apply_indexes(mgr: DatabaseManager) -> dict[str, Any]:
                     skipped.append(f"{table_name}.{idx_name} (already exists)")
                     continue
 
+                # Skip indexes whose columns are absent (ORM vs live-DB drift)
+                if mgr._db_url.startswith("sqlite") and " ON " in index_sql:
+                    try:
+                        cols_part = index_sql.split(" ON ", 1)[1]
+                        # e.g. table(col1, col2)
+                        inside = cols_part[cols_part.find("(")+1:cols_part.rfind(")")]
+                        want = {c.strip() for c in inside.split(",") if c.strip()}
+                        have = {r[1] for r in conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()}
+                        missing = want - have
+                        if missing:
+                            skipped.append(
+                                f"{table_name}.{idx_name} (missing columns: {sorted(missing)})"
+                            )
+                            continue
+                    except Exception:
+                        pass
+
                 conn.execute(text(index_sql))
                 conn.commit()
                 applied.append(f"{table_name}.{idx_name}")
@@ -704,6 +733,20 @@ def apply_foundation_constraints(mgr: DatabaseManager) -> dict[str, Any]:
                     # SQLite: constraints are added via ALTER TABLE or at creation
                     if constraint_sql.startswith("UNIQUE"):
                         cols = constraint_sql.replace("UNIQUE(", "").replace(")", "")
+                        # Schema drift: phrases live DB uses zolai; ORM init_db uses zo
+                        if table_name == "phrases":
+                            col_rows = conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
+                            colnames = {r[1] for r in col_rows}
+                            parts = [c.strip() for c in cols.split(",")]
+                            resolved = []
+                            for c in parts:
+                                if c == "zo" and "zo" not in colnames and "zolai" in colnames:
+                                    resolved.append("zolai")
+                                elif c == "zolai" and "zolai" not in colnames and "zo" in colnames:
+                                    resolved.append("zo")
+                                else:
+                                    resolved.append(c)
+                            cols = ", ".join(resolved)
                         alter_sql = f"CREATE UNIQUE INDEX IF NOT EXISTS {constraint_name} ON {table_name}({cols})"
                     elif constraint_sql.startswith("CHECK"):
                         # SQLite doesn't support ALTER TABLE ADD CHECK easily

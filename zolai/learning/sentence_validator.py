@@ -53,7 +53,7 @@ class SentenceValidator:
 
     def _load_(self):
         """Load  corpus for modern Zolai validation."""
-        corpus_dir = DATA_DIR / "online" / "-corpus"
+        corpus_dir = DATA_DIR / "online" / "zolai-web-corpus"
         if not corpus_dir.exists():
             return
         for txt_file in corpus_dir.glob("zomi_clean_p*.txt"):
@@ -80,8 +80,15 @@ class SentenceValidator:
         in_bible = normalized in self.bible_sentences
         in_corpus = normalized in self.corpus_sentences
 
-        partial_bible = any(b in normalized for b in self.bible_sentences if len(b) > 10)
-        partial_corpus = any(c in normalized for c in self.corpus_sentences if len(c) > 10)
+        # Query may be a verse fragment; check if normalized text appears inside attested sentences
+        partial_bible = any(
+            normalized in b for b in self.bible_sentences
+            if len(normalized) > 10 and len(b) > len(normalized)
+        )
+        partial_corpus = any(
+            normalized in c for c in self.corpus_sentences
+            if len(normalized) > 10 and len(c) > len(normalized)
+        )
 
         words = re.findall(r"\b[a-zA-Z'-]+\b", sentence.lower())
         bible_words_found = [w for w in words if w in self.bible_words]

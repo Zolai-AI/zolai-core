@@ -7,7 +7,7 @@ vector export for DB storage.
 Usage:
     from zolai.embeddings import ZolaiWordEmbeddings
     emb = ZolaiWordEmbeddings()
-    emb.train("data/online//clean/zomi_clean_p1.txt", "data/embeddings/")
+    emb.train("data/online/zolai-web-corpus/zomi_clean_p1.txt", "data/embeddings/")
     emb.load("data/embeddings/zolai_sg_300.bin")
     vec = emb.get_vector("pasian")
     similar = emb.get_similar("pasian", k=5)

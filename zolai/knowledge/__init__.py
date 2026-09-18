@@ -19,7 +19,8 @@ from .ngram import (
     suggest_corrections,
 )
 from .pdf import extract_pdf_text, iter_ocr_markdown
-from .rag_contract import Evidence, EvidencePack, ZolaiRAG, retrieve as rag_retrieve
+from .rag_contract import Evidence, EvidencePack, ZolaiRAG
+from .rag_contract import retrieve as rag_retrieve
 from .retrieve import format_context, load_index, retrieve
 
 __all__ = [

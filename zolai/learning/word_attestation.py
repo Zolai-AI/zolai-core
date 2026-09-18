@@ -64,7 +64,7 @@ class WordAttestation:
             self.corpus_words.update(w for w in words if len(w) >= 2)
 
     def _load_corpus(self) -> None:
-        corpus_dir = DATA_DIR / "online" / "-corpus"
+        corpus_dir = DATA_DIR / "online" / "zolai-web-corpus"
         if not corpus_dir.exists():
             return
         for txt_file in corpus_dir.glob("zomi_clean_p*.txt"):
@@ -77,7 +77,7 @@ class WordAttestation:
                 continue
 
     def _load_(self) -> None:
-        _path = DATA_DIR / "online" / "-zolai-dictionary" / "words.json"
+        _path = DATA_DIR / "online" / "zolai-extra-dictionary" / "words.json"
         if not _path.exists():
             return
         try:

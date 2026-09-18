@@ -12,11 +12,11 @@ from __future__ import annotations
 import re
 from typing import Iterable, Literal
 
+from ..data.database import get_manager
 from .exceptions import ExceptionRegistry
 from .report import Report, Violation
 from .rules import Ruleset
 from .rules_data import DEFAULT_EXCEPTIONS
-from ..data.database import get_manager
 
 __all__ = [
     "ExceptionRegistry",
@@ -126,7 +126,7 @@ def validate(
         A :class:`Report` with any violations found.
     """
     registry = exceptions if exceptions is not None else DEFAULT_EXCEPTIONS
-    
+
     # Pass Bible words to the registry for historical token verification
     if not registry.bible_words:
         registry.bible_words = get_bible_words()

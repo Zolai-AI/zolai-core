@@ -19,13 +19,13 @@ from .database import DatabaseManager, get_manager
 from ..config import config
 
 # Map of table_name → (jsonl_relative_path_under_data_dir, json_columns)
-迁移_MAP: dict[str, tuple[str, set[str]]] = {
+MIGRATION_MAP: dict[str, tuple[str, set[str]]] = {
     "dictionary": ("dictionary/processed/dict_zo_en_master_v1.jsonl", {"english"}),
     "dictionary_en_zo": ("dictionary/processed/dict_canonical_clean.jsonl", {"translations", "pos"}),
     "bible_verses": ("bible/parallel_corpus_v1.jsonl", set()),
     "grammar_patterns": ("bible/grammar_patterns_v2.jsonl", {"examples"}),
     "phrases": ("bible/phrases_v1.jsonl", {"examples"}),
-    "vocab": ("bible/vocab_index_full.jsonl", {"books", "examples"}),
+    "vocabulary": ("bible/vocab_index_full.jsonl", {"books", "examples"}),
     "translations": ("bible/translation_pairs_v1.jsonl", set()),
     "word_usage": ("bible/context/word_usage_profiles.jsonl", {"meaning_shifts", "co_occurring_words"}),
     "provenance": ("provenance.json", set()),
@@ -79,7 +79,7 @@ def _transform_record(table_name: str, rec: dict[str, Any]) -> dict[str, Any]:
     if table_name == "phrases":
         # examples is a list of dicts in JSONL, store as JSON text
         return {
-            "zo": rec.get("zo", ""),
+            "zolai": rec.get("zolai") or rec.get("zo", ""),
             "english": rec.get("english", ""),
             "frequency": int(rec.get("frequency", 0)),
             "examples": json.dumps(rec.get("examples", []), ensure_ascii=False),
@@ -104,7 +104,7 @@ def _transform_record(table_name: str, rec: dict[str, Any]) -> dict[str, Any]:
             "source": source,
         }
 
-    if table_name == "vocab":
+    if table_name == "vocabulary":
         # books/examples are lists in JSONL, store as JSON text
         return {
             "headword": rec.get("headword", ""),
@@ -114,7 +114,25 @@ def _transform_record(table_name: str, rec: dict[str, Any]) -> dict[str, Any]:
             "examples": json.dumps(rec.get("examples", []), ensure_ascii=False),
         }
 
-    # dictionary, translations, word_usage, provenance: pass through
+    if table_name == "word_usage":
+        # Profiles are word-level (not per-book). ORM requires book NOT NULL —
+        # store aggregate under book="" and keep distribution JSON in co_occurring_words.
+        return {
+            "word": rec.get("word", ""),
+            "book": "",
+            "total_freq": int(rec.get("total_freq", 0)),
+            "meaning_shifts": json.dumps(rec.get("meaning_shifts", []), ensure_ascii=False),
+            "co_occurring_words": json.dumps(
+                {
+                    "books_found": rec.get("books_found"),
+                    "per_book_distribution": rec.get("per_book_distribution", []),
+                    "all_translations": rec.get("all_translations", []),
+                },
+                ensure_ascii=False,
+            ),
+        }
+
+    # dictionary, translations, provenance: pass through
     # (insert_many handles JSON cols for dict/english and word_usage)
     return rec
 
@@ -149,6 +167,12 @@ def _read_provenance(path: Path) -> list[dict[str, Any]]:
             "row_count": f.get("row_count", 0),
             "source": f.get("source", ""),
             "generator_script": f.get("generator_script", ""),
+            "version": f.get("version", "1.0"),
+            "status": f.get("status", "active"),
+            "updated_at": f.get("updated_at", ""),
+            "change_log": json.dumps(f.get("change_log", []), ensure_ascii=False)
+            if not isinstance(f.get("change_log"), str)
+            else f.get("change_log", "[]"),
         }
         result.append(rec)
     return result
@@ -201,7 +225,7 @@ def migrate_jsonl_to_db(
     results: dict[str, int] = {}
 
     t0 = time.time()
-    for table_name, (rel_path, _json_cols) in 迁移_MAP.items():
+    for table_name, (rel_path, _json_cols) in MIGRATION_MAP.items():
         fpath = data_path / rel_path
         if not fpath.exists():
             print(f"  SKIP {table_name}: {fpath} not found")

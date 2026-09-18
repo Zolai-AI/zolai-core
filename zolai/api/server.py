@@ -16,14 +16,14 @@ from pydantic import BaseModel
 
 from ..analyzer.corpus import CorpusAnalyzer
 from ..api.desktop_router import router as desktop_router
-from ..api.jsonl_router import router as jsonl_router
 from ..api.foundation_router import router as foundation_router
-from ..ui.routes import router as ui_router
+from ..api.jsonl_router import router as jsonl_router
 from ..cleaner.pipeline import CleanPipeline
 from ..config import config
 from ..crawler.engine import CrawlEngine
 from ..dictionary.manager import DictionaryManager
 from ..trainer.dataset import DatasetBuilder
+from ..ui.routes import router as ui_router
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +221,25 @@ class ChatStreamRequest(BaseModel):
     model: str = DEFAULT_MODEL
     temperature: float = 0.7
     system_prompt: str = ZOLAI_SYSTEM_PROMPT
+
+class KnowledgeSearchRequest(BaseModel):
+    query: str
+    top_k: int = 5
+    threshold: float = 0.7
+    source_type: str | None = None  # filter: "wiki", "pdf"
+
+
+class KnowledgeSearchResponse(BaseModel):
+    query: str
+    results: list[dict]
+    context: str  # formatted RAG context for injection
+
+class ZolaiChatRequest(BaseModel):
+    message: str
+    session_id: str = "default"
+    model: str = DEFAULT_MODEL
+
+
 
 
 class ModelInfo(BaseModel):
@@ -555,28 +574,29 @@ def create_app() -> FastAPI:
     async def dictionary_delete(word: str, deleted_by: str = "api_user", reason: str = "api_delete"):
         """
         Soft delete a dictionary entry with full audit trail.
-        
+
         Args:
             word: The word to delete
             deleted_by: Identifier of who/what initiated the delete (observer)
             reason: Reason for deletion
-        
+
         Returns:
             Full audit trail of what was deleted across all tables
         """
         import sqlite3
         from datetime import datetime, timezone
+
         from ..config import config
-        
+
         db_path = config.paths.zolai_db
         conn = sqlite3.connect(str(db_path))
         cur = conn.cursor()
-        
+
         now = datetime.now(timezone.utc).isoformat()
         deleted_by_id = f"{deleted_by}@{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-        
+
         results = {"word": word, "deleted_by": deleted_by, "deleted_at": now, "tables_affected": []}
-        
+
         # Tables to soft delete from (with their primary key column)
         tables_to_delete = [
             ("dictionary", "zolai"),
@@ -584,53 +604,53 @@ def create_app() -> FastAPI:
             ("dictionary_import", "zolai"),
             ("dictionary_en_zo_import", "english"),
         ]
-        
+
         for table, pk_col in tables_to_delete:
             # First, check if record exists and get its data for audit
             pk_name = "zolai" if "dictionary" in table and "en_zo" not in table else "english"
             cur.execute(f'SELECT * FROM "{table}" WHERE "{pk_name}" = ?', (word,))
             existing = cur.fetchone()
-            
+
             if existing:
                 # Get column names
                 cur.execute(f'PRAGMA table_info("{table}")')
-                cols = [col[1] for col in cur.fetchall()]
-                
+                [col[1] for col in cur.fetchall()]
+
                 # Log to data_audit_log before deletion
                 cur.execute(
                     """INSERT INTO data_audit_log (table_name, row_id, field, old_value, new_value, changed_at, reason)
                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     (table, 0, "is_deleted", "0", "1", now, f"{reason} by {deleted_by}")
                 )
-                
+
                 # Also log the deleted_by info
                 cur.execute(
                     """INSERT INTO data_audit_log (table_name, row_id, field, old_value, new_value, changed_at, reason)
                        VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     (table, 0, "deleted_by", "", deleted_by_id, now, f"{reason} by {deleted_by}")
                 )
-                
+
                 # Soft delete
                 cur.execute(
                     f'UPDATE "{table}" SET is_deleted = 1, deleted_at = ? WHERE "{pk_col}" = ?',
                     (now, word)
                 )
                 rows_affected = cur.rowcount
-                
+
                 if rows_affected > 0:
                     results["tables_affected"].append({
                         "table": table,
                         "rows_affected": rows_affected,
                         "primary_key": word
                     })
-        
+
         conn.commit()
         conn.close()
-        
+
         total_affected = sum(t["rows_affected"] for t in results["tables_affected"])
         results["success"] = total_affected > 0
         results["total_rows_affected"] = total_affected
-        
+
         return results
 
     @app.get("/dictionary/search/all")
@@ -720,16 +740,6 @@ def create_app() -> FastAPI:
 
     # --- Knowledge Brain (RAG) ---
 
-    class KnowledgeSearchRequest(BaseModel):
-        query: str
-        top_k: int = 5
-        threshold: float = 0.7
-        source_type: str | None = None  # filter: "wiki", "pdf"
-
-    class KnowledgeSearchResponse(BaseModel):
-        query: str
-        results: list[dict]
-        context: str  # formatted RAG context for injection
 
     @app.post("/knowledge/search", response_model=KnowledgeSearchResponse)
     async def knowledge_search(req: KnowledgeSearchRequest):
@@ -766,10 +776,6 @@ def create_app() -> FastAPI:
 
     # === Zolai Bilingual Chat ===
 
-    class ZolaiChatRequest(BaseModel):
-        message: str
-        session_id: str = "default"
-        model: str = DEFAULT_MODEL
 
     class ZolaiChatResponse(BaseModel):
         zolai_response: str
@@ -926,7 +932,7 @@ def create_app() -> FastAPI:
             # Step 4: Validate response
             from .answer_validator import AnswerValidator
             validator = AnswerValidator(db_path)
-            validation = await validator.validate(text)
+            await validator.validate(text)
 
             # Apply ZVS corrections if needed
             from .zvs_checker import check_zvs_compliance
