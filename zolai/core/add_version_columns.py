@@ -4,6 +4,7 @@ Add version tracking columns to existing tables for JSONL import pipeline.
 import sqlite3
 
 from zolai.config import config
+
 DB_PATH = str(config.paths.zolai_db)
 
 # Tables that will receive JSONL imports
