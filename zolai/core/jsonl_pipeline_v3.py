@@ -19,8 +19,10 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 # ─── Configuration ────────────────────────────────────────────────────────
 
-DATA_ROOT = Path("/home/peter/Documents/Projects/zolai-ai/data")
-DB_PATH = DATA_ROOT / "zolai.db"
+from zolai.config import config
+
+DATA_ROOT = config.paths.data
+DB_PATH = config.paths.zolai_db
 
 CANONICAL_JSONL_FILES = {
     # Bible
@@ -101,9 +103,10 @@ class JSONLPipeline:
     """Dynamic pipeline with schema evolution support."""
 
     def __init__(self, db_path: Path = DB_PATH, data_root: Path = DATA_ROOT):
-        self.db_path = db_path
-        self.data_root = data_root
-        self.engine = create_engine(f"sqlite:///{db_path}", echo=False)
+        self.db_path = Path(db_path)
+        self.data_root = Path(data_root)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.engine = create_engine(f"sqlite:///{self.db_path}", echo=False)
         self.Session = sessionmaker(bind=self.engine)
         Base.metadata.create_all(self.engine, tables=[JSONLImportLog.__table__])
 

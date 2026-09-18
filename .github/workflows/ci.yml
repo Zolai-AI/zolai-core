@@ -26,10 +26,12 @@ jobs:
         run: ruff check zolai/
 
       - name: Test
+        env:
+          # Default config uses repo.parent/data; pin to workspace data/ in CI
+          ZOLAI_DATA_ROOT: ${{ github.workspace }}/data
         run: |
-          mkdir -p data
-          # data/ is gitignored; create empty sqlite so collection imports that open the default path do not fail
-          python -c "import sqlite3; sqlite3.connect('data/zolai.db').close()"
+          mkdir -p "$ZOLAI_DATA_ROOT"
+          python -c "import sqlite3, os; sqlite3.connect(os.path.join(os.environ['ZOLAI_DATA_ROOT'], 'zolai.db')).close()"
           pytest tests/ -q
 
       - name: Eval offline regression gate
