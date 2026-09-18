@@ -143,7 +143,8 @@ async def list_tables():
     from sqlalchemy import create_engine, text
     from sqlalchemy import inspect as sa_inspect
 
-    engine = create_engine("sqlite:////home/peter/Documents/Projects/zolai-ai/data/zolai.db")
+    from zolai.config import config
+    engine = create_engine(f"sqlite:///{config.paths.zolai_db}")
     inspector = sa_inspect(engine)
 
     tables = inspector.get_table_names()

@@ -19,8 +19,10 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 # ─── Configuration ────────────────────────────────────────────────────────
 
-DATA_ROOT = Path("/home/peter/Documents/Projects/zolai-ai/data")
-DB_PATH = DATA_ROOT / "zolai.db"
+from zolai.config import config
+
+DATA_ROOT = config.paths.data
+DB_PATH = config.paths.zolai_db
 
 # Canonical JSONL files to import (relative to DATA_ROOT)
 CANONICAL_JSONL_FILES = {
@@ -104,6 +106,7 @@ class JSONLPipeline:
     def __init__(self, db_path: Path = DB_PATH, data_root: Path = DATA_ROOT):
         self.db_path = db_path
         self.data_root = data_root
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.engine = create_engine(f"sqlite:///{db_path}", echo=False)
         self.Session = sessionmaker(bind=self.engine)
         Base.metadata.create_all(self.engine, tables=[JSONLImportLog.__table__])
