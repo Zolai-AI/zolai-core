@@ -60,11 +60,12 @@ jobs:
         continue-on-error: true
         run: pytest tests/test_zvs_integration.py -v
 
-      - name: Checkout zolai-wiki (sibling content for ZVS gate)
+      - name: Checkout zolai-wiki (content for ZVS gate)
+        continue-on-error: true
         uses: actions/checkout@v4
         with:
           repository: Zolai-AI/zolai-wiki
-          path: ../zolai-wiki
+          path: zolai-wiki
           ref: main
 
       - name: ZVS scan (regression gate)
