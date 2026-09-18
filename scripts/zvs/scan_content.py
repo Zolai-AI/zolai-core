@@ -65,7 +65,8 @@ from zolai.config import config
 
 # Use Foundation's config for paths instead of hardcoded paths
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_WIKI = REPO_ROOT.parent / "zolai-wiki"
+_WIKI_CANDIDATES = (REPO_ROOT / "zolai-wiki", REPO_ROOT.parent / "zolai-wiki")
+DEFAULT_WIKI = next((p for p in _WIKI_CANDIDATES if p.exists()), _WIKI_CANDIDATES[0])
 DEFAULT_CORPUS = REPO_ROOT.parent / "data" / "corpus"
 DEFAULT_DICT = REPO_ROOT.parent / "data" / "dictionary" / "processed"
 REPORT_DIR = REPO_ROOT / "report"
