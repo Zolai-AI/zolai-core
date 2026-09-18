@@ -227,15 +227,15 @@ class TranslationEngine:
             if context:
                 try:
                     cur.execute(
-                        """SELECT book, frequency
+                        """SELECT book, total_freq
                            FROM word_usage
                            WHERE word = ?
-                           ORDER BY frequency DESC""",
+                           ORDER BY total_freq DESC""",
                         (word.lower(),),
                     )
                     for urow in cur.fetchall():
-                        book_frequencies[urow["book"]] = urow["frequency"]
-                except Exception:
+                        book_frequencies[urow["book"]] = urow["total_freq"]
+                except sqlite3.OperationalError:
                     pass  # word_usage table may not have this word
 
             # Build candidates from all dictionary entries
