@@ -638,7 +638,13 @@ class DatabaseManager:
 
     def match_phrase(self, word: str) -> list[dict[str, Any]]:
         """Find phrases containing a word (case-insensitive LIKE)."""
-        table = Table("phrases", self.metadata, autoload_with=self.engine)
+        # Reflect from the actual DB schema (not declared models) so we only
+        # select columns that exist in the live table.  The phrases model
+        # declares a ``myanmar`` column that is not present in the canonical
+        # ``data/zolai.db``; the global Base.metadata caches the stale column
+        # and causes OperationalError on SELECT.
+        _meta = MetaData()
+        table = Table("phrases", _meta, autoload_with=self.engine)
         pattern = f"%{word}%"
         with self.engine.connect() as conn:
             rows = conn.execute(
