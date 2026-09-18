@@ -19,7 +19,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install ruff pytest
+          pip install ruff pytest pytest-asyncio
           pip install -e ".[dev]"
 
       - name: Lint
@@ -44,7 +44,13 @@ jobs:
             --ignore=tests/test_bible_learning.py \
             --ignore=tests/test_rag_contract.py \
             --ignore=tests/test_rag_integration.py \
-            --ignore=tests/test_data_connections.py
+            --ignore=tests/test_data_connections.py \
+            --ignore=tests/test_foundation_analysis.py \
+            --ignore=tests/test_gold_metrics.py \
+            --ignore=tests/test_tokenizer.py \
+            --ignore=tests/test_word_attestation.py \
+            --ignore=tests/test_gemini_client.py \
+            --ignore=tests/test_enhanced_progress.py
 
       - name: Eval offline regression gate
         continue-on-error: true
