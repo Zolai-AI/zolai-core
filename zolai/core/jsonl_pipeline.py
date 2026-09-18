@@ -17,7 +17,6 @@ from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, t
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 # ─── Configuration ────────────────────────────────────────────────────────
-
 from zolai.config import config
 
 DATA_ROOT = config.paths.data
