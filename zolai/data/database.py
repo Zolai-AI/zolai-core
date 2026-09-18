@@ -101,9 +101,13 @@ class DatabaseManager:
         """
         # Collect only ORM-declared table names to avoid creating reflected
         # FTS virtual tables that produce NullType DDL errors.
+        # Drop any FTS virtual tables that leaked into Base.metadata
+        for name in list(Base.metadata.tables):
+            if "_fts" in name:
+                Base.metadata.remove(Base.metadata.tables[name])
         orm_tables = [
             t for t in Base.metadata.sorted_tables
-            if not t.name.startswith("wiki_content_fts")
+            if "_fts" not in t.name
         ]
         if orm_tables:
             Base.metadata.create_all(self.engine, tables=orm_tables)
@@ -646,10 +650,11 @@ class DatabaseManager:
         _meta = MetaData()
         table = Table("phrases", _meta, autoload_with=self.engine)
         pattern = f"%{word}%"
+        zolai_col = table.c.zolai if "zolai" in table.c else table.c.zo
         with self.engine.connect() as conn:
             rows = conn.execute(
                 table.select().where(
-                    (table.c.zo.ilike(pattern))
+                    (zolai_col.ilike(pattern))
                     | (table.c.english.ilike(pattern))
                 ).limit(50)
             ).fetchall()
@@ -1083,7 +1088,7 @@ class DatabaseManager:
         with open(path, encoding="utf-8") as f:
             for line in f:
                 d = json.loads(line)
-                zo = d.get("zo", "")
+                zo = d.get("zolai", d.get("zo", ""))
                 examples = d.get("examples", [])
                 if (
                     examples
@@ -1105,7 +1110,7 @@ class DatabaseManager:
             ).fetchall()
             for row in rows:
                 row_dict = self._row_to_dict(row, table)
-                zo = row_dict.get("zo", "")
+                zo = row_dict.get("zolai", row_dict.get("zo", ""))
                 if zo in zo_english:
                     row_id = row.id if hasattr(row, "id") else None
                     if row_id is not None:

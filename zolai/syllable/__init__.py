@@ -28,11 +28,11 @@ __license__ = "MIT"
 from .annotation import SyllableAnnotator
 from .integration import SyllableAwarePOS, SyllableEmbeddings, ZolaiTokenizer
 
-# Tokenizer Training (SylBreak4All M8)
-from .tokenizer_training import SyllableTokenizerTrainer
-
 # Full Rule-Based Segmenter (SylBreak4All M3)
 from .segmenter import SyllableSegmenter
+
+# Tokenizer Training (SylBreak4All M8)
+from .tokenizer_training import SyllableTokenizerTrainer
 
 __all__ = [
     "Boundary",

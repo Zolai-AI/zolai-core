@@ -164,21 +164,19 @@ class TestLearningEngine:
 # ---------------------------------------------------------------------------
 
 class TestAccuracyScorer:
-    def test_score_word_no_data(self, tmp_path):
+    def test_score_word_no_data(self):
         from zolai.api.accuracy_scorer import AccuracyScorer
-        with patch("zolai.api.accuracy_scorer.DATA_DIR", tmp_path):
-            scorer = AccuracyScorer()
-            result = scorer.score_word("nonexistent")
-            assert result["confidence"] == "UNCERTAIN"
-            assert result["source_count"] == 0
+        scorer = AccuracyScorer()
+        result = scorer.score_word("nonexistentxyz123")
+        assert result["confidence"] == "UNCERTAIN"
+        assert result["source_count"] == 0
 
-    def test_score_phrase(self, tmp_path):
+    def test_score_phrase(self):
         from zolai.api.accuracy_scorer import AccuracyScorer
-        with patch("zolai.api.accuracy_scorer.DATA_DIR", tmp_path):
-            scorer = AccuracyScorer()
-            result = scorer.score_phrase(["word1", "word2"])
-            assert "overall_confidence" in result
-            assert len(result["word_scores"]) == 2
+        scorer = AccuracyScorer()
+        result = scorer.score_phrase(["word1", "word2"])
+        assert "overall_confidence" in result
+        assert len(result["word_scores"]) == 2
 
 
 # ---------------------------------------------------------------------------

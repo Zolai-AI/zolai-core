@@ -126,19 +126,20 @@ class PhraseEntry(Base):
     """Multi-word phrase entries.
 
     Source: phrases_v1.jsonl
+    Column name aligns with live ``data/zolai.db`` (``zolai``, not ``zo``).
     """
 
     __tablename__ = "phrases"
 
     id: int = Column(Integer, primary_key=True, autoincrement=True)
-    zo: str = Column(String, nullable=False, index=True)
+    zolai: str = Column(String, nullable=False, index=True)
     english: str = Column(String, nullable=False, default="")
     myanmar: str | None = Column(Text, nullable=True)
     frequency: int = Column(Integer, nullable=False, default=0)
     examples: str = Column(Text, nullable=False, default="[]")
 
     def __repr__(self) -> str:
-        return f"<PhraseEntry(zo={self.zo!r})>"
+        return f"<PhraseEntry(zolai={self.zolai!r})>"
 
 
 class VocabularyEntry(Base):

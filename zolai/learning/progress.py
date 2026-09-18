@@ -879,7 +879,7 @@ class ProgressTracker:
         """Categorize the type of error in a correction.
 
         Checks for:
-        - ZVS forbidden forms (pathian→pasian, ram→gam, etc.)
+        - ZVS forbidden forms (see zvs forbidden→preferred map; e.g. deity/land dialectal variants)
         - SOV/negation/question grammar patterns
         - Tone sandhi violations
         - Compound decomposition errors

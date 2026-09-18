@@ -74,7 +74,7 @@ def test_parallel_pairs_exists():
 
 def test__corpus_exists():
     """ corpus files exist."""
-    corpus_dir = DATA_DIR / "online" / "-corpus"
+    corpus_dir = DATA_DIR / "online" / "zolai-web-corpus"
     assert corpus_dir.exists(), f"Missing: {corpus_dir}"
     files = list(corpus_dir.glob("zomi_clean_p*.txt"))
     assert len(files) >= 1, f"No zomi_clean_p*.txt files in {corpus_dir}"
@@ -82,7 +82,7 @@ def test__corpus_exists():
 
 def test__dictionary_exists():
     """ dictionary exists."""
-    path = DATA_DIR / "online" / "-zolai-dictionary" / "words.json"
+    path = DATA_DIR / "online" / "zolai-extra-dictionary" / "words.json"
     assert path.exists(), f"Missing: {path}"
 
 
@@ -116,15 +116,11 @@ def test_sentence_validator_lazy():
 
 
 def test_rag_context_v2_lazy():
-    """ZolaiRAGContextV2 has no data until first query."""
+    """ZolaiRAGContextV2 is DB-backed; build_context returns usable context."""
     rag = ZolaiRAGContextV2()
-    assert rag._loaded is False
-    assert len(rag.dict_zo_en) == 0
-    assert len(rag.bible) == 0
-    # After query, data loads
-    rag.build_context("pasian")
-    assert rag._loaded is True
-    assert len(rag.dict_zo_en) > 0
+    context = rag.build_context("pasian")
+    assert isinstance(context, str)
+    assert len(context) > 0
 
 
 # ── Singleton: sentence_validator ───────────────────────────────────────
@@ -177,7 +173,7 @@ def test_attestation_loads_():
     att = WordAttestation()
     att.attest_word("pasian")  # trigger load
     assert len(att._words) > 0, (
-        f"No  words loaded from {DATA_DIR / 'online' / '-zolai-dictionary'}"
+        f"No  words loaded from {DATA_DIR / 'online' / 'zolai-extra-dictionary'}"
     )
 
 
@@ -235,9 +231,9 @@ def test_rag_v2_builds_context():
 def test_rag_v2_stats():
     """RAG V2 stats return correct keys."""
     rag = ZolaiRAGContextV2()
-    rag.build_context("pasian")  # trigger load
+    rag.build_context("pasian")  # warm DB connections
     stats = rag.get_stats()
-    expected = {"dict_entries", "bible_verses", "parallel_pairs", "grammar_patterns", "extra_pairs", "vocab_entries"}
+    expected = {"dict_entries", "bible_verses", "parallel_pairs", "grammar_patterns", "vocab_entries"}
     assert set(stats.keys()) == expected
     assert stats["dict_entries"] > 0
     assert stats["bible_verses"] > 0

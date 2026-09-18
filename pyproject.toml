@@ -160,6 +160,15 @@ select = ["E", "F", "W", "I"]
 "docs/**" = ["E701", "E702", "E722", "E501", "W291", "W292", "W293", "E402"]
 "config/**" = ["E701", "E702", "E722", "E501", "W291", "W292", "W293", "E402"]
 "run_api.py" = ["E701", "E702", "E722", "E501"]
+# Large literal dictionaries / bilingual gloss tables — keep keys readable; last-wins intentional
+"zolai/syllable/segmenter.py" = ["E501", "F601"]
+# Long user-facing strings and defensive catch-alls in desktop/API glue
+"zolai/api/comprehensive_analyzer.py" = ["E501", "E722"]
+"zolai/api/desktop_router.py" = ["E501", "E722"]
+"zolai/core/jsonl_pipeline.py" = ["E501"]
+"zolai/core/jsonl_pipeline_v2.py" = ["E501"]
+"zolai/core/jsonl_pipeline_v3.py" = ["E501"]
+"zolai/llm/providers/webapi.py" = ["F401"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

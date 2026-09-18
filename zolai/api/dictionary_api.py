@@ -92,7 +92,6 @@ def search(
         raise HTTPException(400, "dir must be zo-en, en-zo, or both")
 
     results: list[dict] = []
-    seen_ids: set[int] = set()
 
     if dir in ("zo-en", "both"):
         zo_results = mgr.lookup_word(q)

@@ -24,7 +24,7 @@ class WebAPIProvider(LLMProvider):
     def _check_availability(self) -> bool:
         """Check if gemini-webapi is available and cookies exist."""
         try:
-            from ..gemini.cookies import get_gemini_cookies, get_gemini_api_key
+            from ..gemini.cookies import get_gemini_api_key, get_gemini_cookies
             return bool(get_gemini_cookies() or get_gemini_api_key())
         except Exception:
             return False
@@ -35,8 +35,9 @@ class WebAPIProvider(LLMProvider):
             return self._client
 
         try:
-            from ..gemini.cookies import get_gemini_client
             import asyncio
+
+            from ..gemini.cookies import get_gemini_client
             # Note: This is a sync wrapper; actual usage should use async
             self._client = get_gemini_client
             return self._client

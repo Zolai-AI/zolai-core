@@ -106,8 +106,9 @@ def create_desktop_app() -> FastAPI:
     @app.get("/api/status")
     async def api_status():
         """Detailed status for the Tauri frontend."""
-        from ..config import config
         import sqlite3
+
+        from ..config import config
 
         db_path = config.paths.zolai_db
         db_exists = db_path.exists()

@@ -276,7 +276,6 @@ async def dict_browse(limit: int = 50, offset: int = 0, q: str = None, clean: bo
 
         # Build WHERE clause for clean filter
         clean_where = ""
-        clean_params = []
         if clean:
             clean_where = "WHERE zolai NOT LIKE '-%' AND zolai NOT LIKE '%-%' AND english NOT GLOB '*[0-9]*' AND myanmar IS NOT NULL AND myanmar != ''"
 
@@ -868,7 +867,7 @@ async def get_ollama_models():
         import httpx
         # Default Ollama URL from config
         ollama_url = getattr(config, 'ollama_url', 'http://localhost:11434')
-        
+
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(f"{ollama_url}/api/tags")
             if response.status_code == 200:

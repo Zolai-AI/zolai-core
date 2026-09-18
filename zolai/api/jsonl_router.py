@@ -51,14 +51,14 @@ class ExportAllRequest(BaseModel):
 async def import_all(request: ImportAllRequest, background_tasks: BackgroundTasks):
     """Import all canonical JSONL files into the database."""
     batch_id = request.batch_id or str(uuid.uuid4())
-    
+
     def run_import():
         try:
             results = _pipeline.import_all(batch_id)
             return {"batch_id": batch_id, "results": results}
         except Exception as e:
             return {"batch_id": batch_id, "error": str(e)}
-    
+
     # Run in background for large imports
     background_tasks.add_task(run_import)
     return {"batch_id": batch_id, "status": "started", "message": "Import started in background"}
@@ -70,7 +70,7 @@ async def import_file(request: ImportFileRequest):
     file_path = Path(request.file_path)
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
-    
+
     try:
         result = _pipeline.import_file(file_path, request.table_name, request.batch_id, request.version)
         return result
@@ -83,13 +83,13 @@ async def import_status(batch_id: str):
     """Check import status by batch ID."""
     logs = _pipeline.get_import_log(100)
     batch_logs = [log for log in logs if log["batch_id"] == batch_id]
-    
+
     if not batch_logs:
         raise HTTPException(status_code=404, detail="Batch not found")
-    
+
     total_rows = sum(log["rows_imported"] for log in batch_logs)
     failed = any(log["status"] == "failed" for log in batch_logs)
-    
+
     return {
         "batch_id": batch_id,
         "tables": len(batch_logs),
@@ -140,18 +140,19 @@ async def export_all(request: ExportAllRequest):
 @router.get("/tables")
 async def list_tables():
     """List all tables that have import logs."""
-    from sqlalchemy import create_engine, text, inspect as sa_inspect
-    
+    from sqlalchemy import create_engine, text
+    from sqlalchemy import inspect as sa_inspect
+
     engine = create_engine("sqlite:////home/peter/Documents/Projects/zolai-ai/data/zolai.db")
     inspector = sa_inspect(engine)
-    
+
     tables = inspector.get_table_names()
     import_tables = [t for t in tables if t.endswith("_import") or t == "jsonl_import_log"]
-    
+
     result = []
     for table in import_tables:
         with engine.connect() as conn:
             count = conn.execute(text(f'SELECT COUNT(*) FROM "{table}"')).scalar()
         result.append({"table": table, "rows": count})
-    
+
     return {"tables": result}

@@ -7,10 +7,10 @@ Works WITH or WITHOUT Gemini:
 - Fallback: Returns database-derived analysis only
 """
 
-import sqlite3
 import logging
+import sqlite3
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from dataclasses import dataclass, asdict
 
 logger = logging.getLogger(__name__)
 

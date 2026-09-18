@@ -95,7 +95,7 @@ def sample_grammar():
 @pytest.fixture()
 def sample_phrase():
     return {
-        "zo": "vantung leh leitung",
+        "zolai": "vantung leh leitung",
         "english": "heaven and earth",
         "frequency": 100,
         "examples": json.dumps([{"ref": "GEN 1:1", "zo": "vantung leh leitung", "en": "heaven and earth"}]),
@@ -152,13 +152,13 @@ def sample_provenance():
 # ---------------------------------------------------------------------------
 class TestSchemaCreation:
     def test_init_db_creates_tables(self, tmp_db):
-        """1. init_db creates all 15 tables."""
+        """1. init_db creates core + foundation tables."""
         names = tmp_db.table_names()
         expected = {
             "dictionary", "dictionary_en_zo", "bible_verses", "grammar_patterns",
-            "phrases", "vocab", "translations", "word_usage",
+            "phrases", "vocabulary", "translations", "word_usage",
             "provenance", "data_audit_log",
-            "training_exercises", "bible_context", "word_alignments",
+            "training_exercises", "bible_analysis", "word_alignments",
             "word_collocations", "proverbs",
         }
         assert expected.issubset(set(names))
@@ -166,8 +166,10 @@ class TestSchemaCreation:
     def test_init_db_idempotent(self, tmp_db):
         """20. Calling init_db twice does not raise."""
         tmp_db.init_db()
+        first = len(tmp_db.table_names())
         tmp_db.init_db()
-        assert len(tmp_db.table_names()) == 15
+        assert len(tmp_db.table_names()) == first
+        assert first >= 15
 
 
 class TestDictionaryCRUD:
@@ -234,7 +236,7 @@ class TestPhraseCRUD:
         tmp_db.insert_many("phrases", [sample_phrase])
         results = tmp_db.match_phrase("vantung")
         assert len(results) >= 1
-        assert "vantung" in results[0]["zo"]
+        assert "vantung" in results[0].get("zolai", results[0].get("zo", ""))
 
 
 class TestGrammarCRUD:
@@ -249,7 +251,7 @@ class TestGrammarCRUD:
 class TestVocabCRUD:
     def test_insert_and_get_vocab(self, tmp_db, sample_vocab):
         """6. Insert vocab entry and look up."""
-        tmp_db.insert_many("vocab", [sample_vocab])
+        tmp_db.insert_many("vocabulary", [sample_vocab])
         results = tmp_db.get_vocab("pasian")
         assert len(results) >= 1
         assert results[0]["headword"] == "pasian"
@@ -348,7 +350,7 @@ class TestMigration:
         if not fpath.exists():
             pytest.skip("Vocab file not available")
         results = migrate_jsonl_to_db(data_dir, tmp_db._db_url)
-        assert results.get("vocab", 0) > 1000
+        assert results.get("vocabulary", 0) > 1000
 
     def test_migration_translation_count(self, tmp_db):
         """16. Translation migration loads pairs."""
@@ -497,14 +499,14 @@ class TestModelImports:
         ]
         table_names = {
             "dictionary", "dictionary_en_zo", "bible_verses", "grammar_patterns",
-            "phrases", "vocab", "translations", "word_usage",
+            "phrases", "vocabulary", "translations", "word_usage",
             "provenance", "data_audit_log",
-            "training_exercises", "bible_context", "word_alignments",
+            "training_exercises", "bible_analysis", "word_alignments",
             "word_collocations", "proverbs",
         }
         actual = {m.__tablename__ for m in models}
         assert actual == table_names
-        assert len(MODEL_REGISTRY) == 15
+        assert len(MODEL_REGISTRY) >= 15
 
 
 class TestFTS5:

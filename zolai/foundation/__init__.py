@@ -28,23 +28,6 @@ from .analysis import (
     WordAnalysis,
     get_foundation_analyzer,
 )
-from .corpus import (
-    CorpusAnalysis,
-    CorpusAnalyzer,
-    Collocation,
-    get_corpus_analyzer,
-)
-from .morphology import (
-    EnhancedMorphologyAnalyzer,
-    MorphemeAnalysis,
-    get_enhanced_morphology,
-)
-from .phonology import (
-    PhonologicalAnalysis,
-    PhonologicalAnalyzer,
-    SyllableStructure,
-    get_phonological_analyzer,
-)
 from .consensus import (
     ConsensusResult,
     adaptive_consensus,
@@ -53,6 +36,16 @@ from .consensus import (
     run_consensus,
     threshold_gate_consensus,
     weighted_evidence_consensus,
+)
+from .corpus import (
+    Collocation,
+    CorpusAnalysis,
+    CorpusAnalyzer,
+    get_corpus_analyzer,
+)
+from .etl import (
+    FoundationETL,
+    get_foundation_etl,
 )
 from .evidence import (
     DEFAULT_VERIFIER,
@@ -68,6 +61,17 @@ from .evidence import (
     create_sentence_candidate,
     create_word_candidate,
 )
+from .morphology import (
+    EnhancedMorphologyAnalyzer,
+    MorphemeAnalysis,
+    get_enhanced_morphology,
+)
+from .phonology import (
+    PhonologicalAnalysis,
+    PhonologicalAnalyzer,
+    SyllableStructure,
+    get_phonological_analyzer,
+)
 from .regression import (
     GrammarRegressionTest,
     RegressionCategoryReport,
@@ -77,20 +81,16 @@ from .regression import (
     ToneRegressionTest,
     ZVSRegressionTest,
 )
+from .verification_runner import (
+    VerificationReport,
+    VerificationRunner,
+    get_verification_runner,
+)
 from .verifiers import (
     EvidenceGateError,
     EvidenceGatingVerifier,
     GeminiVerifier,
     ModelRouter,
-)
-from .etl import (
-    FoundationETL,
-    get_foundation_etl,
-)
-from .verification_runner import (
-    VerificationReport,
-    VerificationRunner,
-    get_verification_runner,
 )
 
 __all__ = [

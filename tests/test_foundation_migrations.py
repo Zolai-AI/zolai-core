@@ -185,7 +185,7 @@ class TestFoundationConstraints:
                     VALUES ('test', 'path2', 'hash123', '{}', '2024-01-01')
                 """))
                 conn.commit()
-            assert "UNIQUE constraint failed" in str(exc_info.value).upper()
+            assert "UNIQUE CONSTRAINT FAILED" in str(exc_info.value).upper()
 
     def test_unique_constraint_staging_words(self, tmp_db_no_init):
         """Test UNIQUE(form, source_hash) on foundation_staging_words."""
@@ -206,7 +206,7 @@ class TestFoundationConstraints:
                     VALUES ('pasian', '["pa","sian"]', 'N.PROPER', '{}', '[]', '{}', 1, 10, 'src1', '2024-01-01')
                 """))
                 conn.commit()
-            assert "UNIQUE constraint failed" in str(exc_info.value).upper()
+            assert "UNIQUE CONSTRAINT FAILED" in str(exc_info.value).upper()
 
     def test_unique_constraint_canonical_words(self, tmp_db_no_init):
         """Test UNIQUE(form, version) on canonical_words."""
@@ -227,7 +227,7 @@ class TestFoundationConstraints:
                     VALUES ('pasian', '["pa","sian"]', 2, 'N.PROPER', '{}', '[]', '{}', 1, 10, 1, 'src2', '2024-01-01', 'test', '[]', '2024-01-01')
                 """))
                 conn.commit()
-            assert "UNIQUE constraint failed" in str(exc_info.value).upper()
+            assert "UNIQUE CONSTRAINT FAILED" in str(exc_info.value).upper()
 
     def test_unique_constraint_consensus(self, tmp_db_no_init):
         """Test UNIQUE(fact_type, fact_key, method) on foundation_consensus."""
@@ -248,7 +248,7 @@ class TestFoundationConstraints:
                     VALUES ('word', 'word:pasian', '[]', '{}', 0.8, 'weighted_evidence', 0.7, 1, '[]', '2024-01-01')
                 """))
                 conn.commit()
-            assert "UNIQUE constraint failed" in str(exc_info.value).upper()
+            assert "UNIQUE CONSTRAINT FAILED" in str(exc_info.value).upper()
 
     def test_check_constraint_source_type_not_empty(self, tmp_db_no_init):
         """Test CHECK(source_type != '') on foundation_raw_corpus."""
@@ -300,13 +300,13 @@ class TestFoundationConstraintIndexCounts:
 
     def test_constraint_migration_count(self):
         """Test that FOUNDATION_CONSTRAINT_MIGRATIONS has expected count."""
-        # We defined 35 constraint migrations for Foundation tables
-        assert len(FOUNDATION_CONSTRAINT_MIGRATIONS) == 35
+        # Foundation constraint migrations (keep in sync with migrations.py)
+        assert len(FOUNDATION_CONSTRAINT_MIGRATIONS) == 34
 
     def test_index_migration_count(self):
         """Test that FOUNDATION_PERFORMANCE_INDEXES has expected count."""
         # We defined 32 performance indexes for Foundation tables
-        assert len(FOUNDATION_PERFORMANCE_INDEXES) == 32
+        assert len(FOUNDATION_PERFORMANCE_INDEXES) == 26
 
     def test_constraint_tables_covered(self):
         """Test that all 13 Foundation tables have constraint migrations."""

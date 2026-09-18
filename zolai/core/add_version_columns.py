@@ -39,7 +39,7 @@ TABLES_TO_UPDATE = [
 def add_version_columns():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    
+
     for table in TABLES_TO_UPDATE:
         try:
             # Check if table exists
@@ -47,11 +47,11 @@ def add_version_columns():
             if not cur.fetchone():
                 print(f"Skipping {table} - does not exist")
                 continue
-            
+
             # Check if columns already exist
             cur.execute(f"PRAGMA table_info({table})")
             cols = [row[1] for row in cur.fetchall()]
-            
+
             columns_to_add = []
             if "import_batch_id" not in cols:
                 columns_to_add.append(("import_batch_id", "TEXT"))
@@ -61,7 +61,7 @@ def add_version_columns():
                 columns_to_add.append(("version", "INTEGER DEFAULT 1"))
             if "imported_at" not in cols:
                 columns_to_add.append(("imported_at", "TEXT"))
-            
+
             for col_name, col_type in columns_to_add:
                 try:
                     cur.execute(f'ALTER TABLE "{table}" ADD COLUMN {col_name} {col_type}')
@@ -69,7 +69,7 @@ def add_version_columns():
                 except sqlite3.OperationalError as e:
                     if "duplicate column name" not in str(e).lower():
                         print(f"Error adding {col_name} to {table}: {e}")
-            
+
             if columns_to_add:
                 # Create index on import_batch_id
                 try:
@@ -77,10 +77,10 @@ def add_version_columns():
                     print(f"Created index on import_batch_id for {table}")
                 except sqlite3.OperationalError:
                     pass
-                    
+
         except Exception as e:
             print(f"Error processing {table}: {e}")
-    
+
     conn.commit()
     conn.close()
     print("Migration complete!")

@@ -5,6 +5,7 @@ NEVER guesses. Only uses attested patterns from the Bible.
 """
 import random
 from typing import Optional
+
 from .bible_pattern_learner import get_bible_learner
 
 
