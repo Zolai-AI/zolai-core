@@ -72,6 +72,8 @@ ALLOWLIST_RELS = {
     "data/repositories/extended.py",  # docstrings (old jsonl shape mirrors)
     "dictionary/manager.py",  # export_jsonl build path only
     "eval/datasets.py",  # eval fixtures
+    "eval/store.py",  # eval JSONL <-> DB interchange (import/export/seed)
+    "eval/cli.py",  # eval interchange flags (--import/--export examples)
     "knowledge/__init__.py",  # docstring only
     "trainer/__init__.py",  # trainer dataset build/export (train/val/test jsonl)
     "knowledge/ingest.py",  # export bundle artifact
