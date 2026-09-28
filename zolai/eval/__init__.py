@@ -8,23 +8,40 @@ dependencies::
     scores = evaluate(sets="smoke")
 
 Model training is intentionally out of scope; this package only measures.
+
+Sets resolve either from the DB (``--set db`` / ``--set db:<name>``, tables
+``eval_sets`` / ``eval_cases``) or from the bundled JSONL interchange files;
+both return the same structure from :func:`load_dataset`.
 """
 
 from __future__ import annotations
 
 from .baseline import below_floor, load_baseline
-from .datasets import SMOKE, load_dataset, resolve_set
+from .datasets import SMOKE, DbRef, load_dataset, resolve_set
 from .metrics import (
     qa_term_recall,
     translation_bleu,
     translation_chrf,
     zvs_compliance_rate,
 )
+from .store import (
+    ensure_schema,
+    export_set_to_jsonl,
+    fetch_cases,
+    import_jsonl_to_set,
+    list_sets,
+)
 
 __all__ = [
     "SMOKE",
+    "DbRef",
     "below_floor",
+    "ensure_schema",
     "evaluate",
+    "export_set_to_jsonl",
+    "fetch_cases",
+    "import_jsonl_to_set",
+    "list_sets",
     "load_baseline",
     "load_dataset",
     "qa_term_recall",
@@ -39,7 +56,8 @@ def evaluate(sets: str = SMOKE, *, base_dir: str | None = None) -> dict[str, flo
     """Evaluate a dataset set and return every available metric.
 
     Args:
-        sets: ``"smoke"`` or a path/base prefix for loaders to resolve.
+        sets: ``"smoke"``, ``"db"``, ``"db:<name>"``, or a path/base prefix
+            for loaders to resolve.
         base_dir: Optional override directory used for the ``smoke`` fixtures.
 
     Returns:
