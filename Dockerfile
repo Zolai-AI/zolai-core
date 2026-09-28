@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 
@@ -7,15 +7,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Python deps (CPU-only torch to keep image small)
-COPY requirements.txt .
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir -r requirements.txt
-
-# Install package
-COPY pyproject.toml .
+# Package metadata first (better layer caching)
+COPY pyproject.toml README.md ./
 COPY zolai/ zolai/
-RUN pip install --no-cache-dir -e .
+
+# Base + ML extras with CPU-only torch (no NVIDIA in containers by default).
+# For GPU images, build with:
+#   RUN pip install --no-cache-dir -e ".[gpu]" --extra-index-url https://download.pytorch.org/whl/cu130
+RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu \
+    -e ".[ml]"
 
 # Copy project (data/ is gitignored — mount at runtime)
 COPY scripts/ scripts/

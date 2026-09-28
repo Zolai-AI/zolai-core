@@ -4,8 +4,25 @@ Python toolkit + RAG Knowledge Brain for Tedim Zolai (ZVS 2018).
 
 ## Quick Start
 
+**Requires Python 3.14+**
+
 ```bash
-pip install -e .
+./scripts/install.sh          # auto-detects NVIDIA GPU vs CPU-only
+```
+
+| Machine | What it installs |
+|---------|------------------|
+| No NVIDIA GPU | CPU-only torch (`+cpu` wheels, ~200MB) + `[ml]` extras |
+| NVIDIA GPU | CUDA torch (`+cu130` wheels) + `[gpu]` training stack |
+| Base only | `./scripts/install.sh --base` — no torch at all |
+
+Manual alternatives:
+
+```bash
+pip install -e .              # base (CPU-light, no torch)
+pip install -e ".[ml]"        # + torch/transformers (CPU or CUDA per index)
+pip install -e ".[gpu]"       # + training stack (NVIDIA required)
+pip install -e ".[dev]"       # + pytest/ruff/mypy
 ```
 
 ```python
