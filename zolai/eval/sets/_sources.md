@@ -1,5 +1,41 @@
 # Eval fixture sources
 
+## DB-first: `eval_sets` / `eval_cases` are authoritative (2026-09-28)
+
+The **runtime source of truth** for every set below is the pair of tables
+`eval_sets` + `eval_cases` in the canonical store (`data/zolai.db`, additive
+DDL created by `zolai/eval/store.py::ensure_schema`). The `.jsonl` files in
+this directory are demoted to **import/export interchange** (kept unchanged as
+CI fixtures); `zolai.eval.datasets.load_dataset` reads either source and
+returns an identical shape, so callers never care where a case came from.
+
+| Set | Cases | Lanes |
+|-----|------:|-------|
+| `smoke` | 36 | zvs 12 + qa 12 + translation 12 |
+| `eval_v1` | 110 | zvs 40 + qa 40 + translation 30 |
+| `benchmark_qa` | 127 | qa 127 (static payloads, not a metric lane) |
+| **total** | **273** | |
+
+```bash
+# (re)load the bundled interchange files into the DB — idempotent
+python scripts/eval/seed_eval_sets.py            # all sets
+python scripts/eval/seed_eval_sets.py --set smoke
+python scripts/eval/seed_eval_sets.py --dry-run  # schema + counts, no writes
+
+# interchange without a script
+python -m zolai.eval.cli --import zolai/eval/sets/smoke_qa.jsonl --as smoke
+python -m zolai.eval.cli --set db:smoke --export report/smoke.jsonl
+
+# run metrics straight from the DB
+python -m zolai.eval.cli --set db:smoke --baseline report/eval-baseline.json --gate
+python -m zolai.eval.cli --set db:eval_v1 --baseline report/eval-baseline.json --gate --json
+```
+
+`--set db` merges every active set; `--set db:<name>` selects one. Payloads are
+stored verbatim, so an import→export round-trip is byte-identical apart from a
+missing final newline. `scripts/ci_prepare_db.py` seeds `smoke` + `eval_v1`
+into the CI DB, so `--set db:smoke` also works on GitHub Actions.
+
 ## `eval_v1` set (KR3.1 — 110 cases, created 2026-09-28)
 
 `eval_v1_zvs.jsonl` (40) + `eval_v1_qa.jsonl` (40) + `eval_v1_translation.jsonl`
