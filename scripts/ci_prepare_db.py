@@ -58,6 +58,13 @@ def main() -> None:
         except Exception:
             pass
 
+    # Eval fixtures (DB-first): eval_sets/eval_cases + smoke/eval_v1 rows so
+    # `zolai-eval --set db:...` works on the CI DB.
+    from zolai.eval.store import ensure_schema, seed_sets
+
+    ensure_schema(db)
+    print(f"eval sets: {seed_sets(('smoke', 'eval_v1'), db_path=db)}")
+
     print(f"CI DB ready at {db}")
 
 
