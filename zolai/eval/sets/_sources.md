@@ -1,4 +1,29 @@
-# Smoke task fixture sources
+# Eval fixture sources
+
+## `eval_v1` set (KR3.1 — 110 cases, created 2026-09-28)
+
+`eval_v1_zvs.jsonl` (40) + `eval_v1_qa.jsonl` (40) + `eval_v1_translation.jsonl`
+(30) = **110 cases**, all derived from the read-only canonical store
+`data/zolai.db` (SELECT-only). No Zolai string was hand-written; every string
+passes `zolai.zvs.validate` and contains no ZVS-2018 forbidden form.
+
+| Lane | Rows | Source tables | Selection method |
+|------|------|---------------|------------------|
+| `eval_v1_zvs` | 40 | `bible_verses.zo_tdb77`, `translations.source` (zo→en), `training_exercises.zolai`, `proverbs.zolai`, `phrases.zolai` | modulo-sampled rows (id % 3/5/11) → structural pre-filter (capitalised start, final `.`/`?`, 15–230 chars, no `{}`/brackets, no forbidden forms) → `zolai.zvs.validate` → 10 short (<70 chars) + 16 medium (70–130) + 14 long (>130), each bucket stride-sampled across the pool so sources and first words are spread |
+| `eval_v1_qa` | 40 | `bible_verses.zo_tdb77`, `training_exercises.zolai`, `translations` (both directions), `proverbs`, `phrases` | extractive triples: `hyp` is a verbatim DB sentence, `answer` is a span inside it (whole-word match, ≤2 uses per answer, unique answers for the who-template), `question` derives from that same sentence by one of two templates attested in `smoke_qa.jsonl`: **(a)** `<Name> in <VP> hi.` → `Kua in <VP> hiam?` (22 rows; agent must be a single token that recurs capitalised mid-clause — a name heuristic — and is not a pronoun/common noun), **(b)** `<NP> a <pred> [ahi] hi.` → `<NP> a bang hi hiam?` (18 rows; NP must be a plain noun phrase, no clause markers) |
+| `eval_v1_translation` | 30 | `translations` (`direction='zo_to_en'` and `'en_to_zo'`) | 1767 + 1768 candidate EN/ZO pairs (id % 7) → ZO side must be a complete ZVS-valid sentence → stride-sampled 15 per direction. Record shape follows `smoke_translation.jsonl`: `source` = English, `hyp` == `ref` = Zolai (the gold self-consistency harness; drop in model outputs to replace `hyp`) |
+
+Integrity checks run on the committed files (and re-asserted by the builder):
+exact row counts (40/40/30), unique `text`/`question`/`hyp`, `answer` ⊂ `hyp`
+as whole words, `hyp == ref`, non-empty fields, `zvs.validate` on every ZVS
+string, question and hyp. CLI on the set (with `report/eval-baseline.json`
+floors): `zvs_compliance_rate=1.0, translation_bleu=1.0, translation_chrf=1.0,
+qa_term_recall=1.0`, gate exit 0.
+
+Open follow-up: KR3.3 still needs human-annotated **gold** sets (these are
+DB-derived fixtures, not speaker-validated gold).
+
+## `smoke` set (task fixtures)
 
 All Zolai strings in the `smoke_translation.jsonl` set are **verbatim** corpus
 strings (or explicitly-marked owner-native canonical forms). No Zolai was
