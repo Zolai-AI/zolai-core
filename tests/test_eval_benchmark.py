@@ -1,20 +1,24 @@
 """Unit tests for the comprehensive evaluation benchmark.
 
-Verifies that the benchmark_qa.jsonl file contains valid, well-structured
-evaluation cases across all required categories.
+Verifies that the ``benchmark_qa`` eval set contains valid, well-structured
+evaluation cases across all required categories. The DB tables
+(``eval_sets`` / ``eval_cases``) are the runtime source of truth; the bundled
+``benchmark_qa.jsonl`` is import/export interchange and is imported on first
+use (self-seeding).
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
-from zolai.eval.datasets import resolve_set
-from zolai.zvs import validate
+from zolai.eval.store import fetch_cases, import_jsonl_to_set
 
 BENCHMARK_PATH = Path(__file__).resolve().parent.parent / "zolai" / "eval" / "sets" / "benchmark_qa.jsonl"
+
+#: Name of the eval set holding the benchmark cases in ``eval_cases``.
+BENCHMARK_SET = "benchmark_qa"
 
 # ZVS 2018 forbidden forms
 FORBIDDEN_FORMS = {
@@ -34,17 +38,14 @@ VALID_CATEGORIES = {"vocabulary", "translation", "grammar", "zvs_compliance", "c
 
 
 def _load_benchmark() -> list[dict]:
-    """Load all records from the benchmark file."""
-    if not BENCHMARK_PATH.exists():
-        pytest.skip(f"Benchmark file not found: {BENCHMARK_PATH}")
-    records = []
-    with open(BENCHMARK_PATH, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            records.append(json.loads(line))
-    return records
+    """Load all benchmark cases from the DB (JSONL imported on first use)."""
+    cases = fetch_cases(BENCHMARK_SET, "qa")
+    if not cases and BENCHMARK_PATH.exists():
+        import_jsonl_to_set(BENCHMARK_PATH, BENCHMARK_SET, "qa")
+        cases = fetch_cases(BENCHMARK_SET, "qa")
+    if not cases:
+        pytest.skip(f"Benchmark set not found in DB or at {BENCHMARK_PATH}")
+    return [case["payload"] for case in cases]
 
 
 def test_benchmark_has_100_plus_cases() -> None:
@@ -78,7 +79,7 @@ def test_vocabulary_cases_correct() -> None:
     records = _load_benchmark()
     vocab_cases = [r for r in records if r["category"] == "vocabulary"]
     assert len(vocab_cases) >= 30, f"Expected >= 30 vocabulary cases, got {len(vocab_cases)}"
-    
+
     # Some words have multiple valid meanings (polysemy)
     known_words = {
         "pasian": {"God"},
@@ -121,7 +122,7 @@ def test_vocabulary_cases_correct() -> None:
         "li": {"four"},
         "nga": {"five"},
     }
-    
+
     for case in vocab_cases:
         word = case["input"]
         expected = case["expected"]
@@ -135,7 +136,7 @@ def test_zvs_cases_correct() -> None:
     records = _load_benchmark()
     zvs_cases = [r for r in records if r["category"] == "zvs_compliance"]
     assert len(zvs_cases) >= 20, f"Expected >= 20 ZVS cases, got {len(zvs_cases)}"
-    
+
     for case in zvs_cases:
         forbidden = case["input"]
         correction = case["expected_correction"]
@@ -148,10 +149,10 @@ def test_grammar_cases_follow_sov() -> None:
     records = _load_benchmark()
     grammar_cases = [r for r in records if r["category"] == "grammar"]
     assert len(grammar_cases) >= 20, f"Expected >= 20 grammar cases, got {len(grammar_cases)}"
-    
+
     # Valid sentence endings in Zolai
     valid_endings = ("hi.", "hiam?", "ding.", "ding?", "hen.")
-    
+
     for case in grammar_cases:
         expected = case["expected"]
         # All Zolai sentences must end with a particle
