@@ -281,3 +281,70 @@
 - `8b7b00e` feat(learning): enhance learning engine with online search, batch translation, and statistics
 
 **Enhanced Learning Engine: ✅ COMPLETE**
+
+---
+
+## 2026-09-29 (Session — Observability + ACID hardening wave)
+
+**Goal:** Prometheus/Grafana monitoring stack + DB ACID hardening, 6 atomic
+commits per `/tmp/opencode/plan-monitoring-acid.md`.
+
+### Commits
+
+| # | SHA | Message |
+|---|-----|---------|
+| — | `86bdff2` | feat(lexicon): add canonical POS + provenance columns (L1.3) *(pre-existing work, committed first)* |
+| — | `44ec6e9` | chore(tests): make the test suite ruff-clean *(pre-existing work)* |
+| 1 | `afae5ad` | feat(db): per-connection ACID pragmas, sqlite pooling, BEGIN IMMEDIATE writer + busy retry |
+| 2 | `9b966d9` | feat(db): monitoring/eval/integrity tables with FK, checks, dedup unique index |
+| 3 | `951c179` | feat(metrics): prometheus instrumentation (http, db, analysis, business, eval) |
+| 4 | `0b2eb4b` | feat(api): metrics REST endpoints — exposition, summary, health, eval, alerts, info, annotations |
+| 5 | `41f50e6` | feat(ops): prometheus + grafana stack, dashboards, alert rules, parity test |
+| 6 | `cae743f` | feat(cli): add `zolai db integrity` subcommand |
+| 7 | *this commit* | docs(monitoring): runbook, metric inventory, deferred-FK rationale |
+
+### What shipped
+
+- **ACID:** `foreign_keys`/`busy_timeout`/`journal_mode=WAL`/`synchronous=NORMAL`
+  on **every** pooled connection (connect-event listener), `QueuePool`
+  10/20/30, `immediate_transaction()` + `write_session()` with busy backoff.
+  `zolai/data/integrity.py`: fast `foreign_key_check`, `startup_guard`
+  (clean → `ON`, violations → `deferred`), `full_integrity_check` (explicit
+  only), runs recorded in `db_integrity_runs`.
+- **Schema (additive only):** `monitoring_annotations`, `eval_runs`
+  (`set_name REFERENCES eval_sets`), `db_integrity_runs`, plus
+  `ux_fraw_content_hash` unique index. Live store: `foreign_key_check` → 0
+  violations, 0 `content_hash` duplicates → safe to enforce.
+- **Instrumentation:** `zolai/monitoring/` — HTTP middleware (route templates
+  only), DB listeners (operation class only), analysis/translation/eval
+  hooks, 300s background sampler, local alert evaluator, annotation/health
+  store. `prometheus-client==0.26.0` pinned.
+- **API:** `/metrics` + 8 `/api/metrics/*` endpoints registered before the
+  catch-all; `/health` gains `uptime_s` (additive).
+- **Stack:** `docker-compose.monitoring.yml` (Prometheus 3.15.0, Grafana
+  13.2.3), `ops/` provisioning (datasource, 3 dashboards, 3 alert rules,
+  contact point `zolai-ops`, notification policies), webhook alert target →
+  `/api/metrics/annotations`.
+- **CLI:** `zolai db integrity [--full] [--json]` (exit 1 on violations).
+- **Docs:** `docs/MONITORING.md` runbook incl. metric inventory, alert parity
+  procedure, and the deferred-constraint rationale + 12-step table-rebuild path.
+
+### Validation
+
+- `ruff check zolai tests` → clean.
+- Full suite: **1329 passed, 7 skipped, 0 failed** (636s).
+- Smoke: `/metrics` serves `zolai_*` families; `/api/metrics/summary` 200;
+  `zolai db integrity` → ok, 0 issues, 90ms, FK policy `on`.
+- Compose: `config --quiet` OK; target **up**; Prometheus rules loaded (3);
+  `promtool check rules` SUCCESS; Grafana 13.2.3 healthy; 3 dashboards in the
+  Zolai folder; 3 provisioned alert rules + `zolai-ops` contact point +
+  severity routes; annotation POST round-trip → id 8.
+- Deviations: 8 commits instead of 6 (2 preliminary + CLI split out).
+
+### Open / follow-ups
+
+- Legacy-table `NOT NULL`/`CHECK`/`FK` constraints still deferred — rebuild
+  path documented in `docs/MONITORING.md` §7, implementation behind a flag.
+- `zolai/pos_tagger` POS-first wave (L1) continues: POS_SPEC, lexicon POS
+  annotation, baseline CRF tagger.
+- Speaker/advisor recruitment (blocked on founder outreach).
