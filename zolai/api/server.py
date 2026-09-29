@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
@@ -18,6 +19,7 @@ from ..analyzer.corpus import CorpusAnalyzer
 from ..api.desktop_router import router as desktop_router
 from ..api.foundation_router import router as foundation_router
 from ..api.jsonl_router import router as jsonl_router
+from ..api.metrics_router import router as metrics_router
 from ..cleaner.pipeline import CleanPipeline
 from ..config import config
 from ..crawler.engine import CrawlEngine
@@ -137,6 +139,7 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     version: str = "1.0.0"
     data_root: str
+    uptime_s: float | None = None
 
 
 class CrawlRequest(BaseModel):
@@ -372,6 +375,10 @@ def create_app() -> FastAPI:
     app.include_router(foundation_router, prefix="/api/v1")
     # UI Routes for review queue
     app.include_router(ui_router)
+    # Metrics REST API — MUST stay registered before the catch-all
+    # `@app.get("/{path:path}")` at the bottom of this factory, otherwise the
+    # catch-all shadows every metrics path.
+    app.include_router(metrics_router)
 
     # --- Static File Serving for Desktop App ---
     from fastapi.responses import FileResponse
@@ -400,9 +407,12 @@ def create_app() -> FastAPI:
 
     @app.get("/health", response_model=HealthResponse)
     async def health():
+        from ..monitoring.store import PROCESS_STARTED_AT
+
         return HealthResponse(
             status="ok",
             data_root=str(config.paths.data),
+            uptime_s=round(time.time() - PROCESS_STARTED_AT, 3),
         )
 
     # --- Crawler ---

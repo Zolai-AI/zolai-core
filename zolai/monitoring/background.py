@@ -192,9 +192,18 @@ def get_sampler() -> MetricsSampler:
         return _SAMPLER
 
 
-def start_sampler() -> MetricsSampler | None:
-    """Start the background sampler once; returns the running instance."""
-    sampler = get_sampler()
+def start_sampler() -> MetricsSampler:
+    """Start the background sampler; returns the running instance.
+
+    A ``threading.Thread`` can only be started once, so a sampler that was
+    previously stopped (app shutdown) is replaced with a fresh thread rather
+    than restarted.
+    """
+    global _SAMPLER
+    with _SAMPLER_LOCK:
+        if _SAMPLER is None or _SAMPLER.ident is not None:
+            _SAMPLER = MetricsSampler()
+        sampler = _SAMPLER
     if not sampler.is_alive():
         sampler.start()
     return sampler

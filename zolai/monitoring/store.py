@@ -95,6 +95,8 @@ def _row_annotation(row: Any) -> dict[str, Any]:
         "tags": tags if isinstance(tags, list) else [],
         "kind": row.kind,
         "created_at": row.created_at,
+        "dashboard_id": row.dashboard_id,
+        "panel_id": row.panel_id,
     }
 
 

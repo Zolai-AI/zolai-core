@@ -56,6 +56,7 @@ __all__ = [
     "HTTP_REQUESTS",
     "LATENCY",
     "ROUTE_WINDOWS",
+    "metric_value",
     "WORDS_TRANSLATED",
     "observe_request",
     "parse_window",
@@ -341,6 +342,22 @@ def window_stats(samples: list[tuple[float, float, int]]) -> dict[str, Any]:
         "max_s": round(max(durations), 6) if durations else 0.0,
         "error_rate": round(errors / len(samples), 6) if samples else 0.0,
     }
+
+
+def metric_value(metric: Any) -> float:
+    """Sum the current samples of a Counter or Gauge across all label sets.
+
+    Reads the public ``collect()`` API (never private ``_value`` handles) and
+    skips ``_created`` timestamp samples.  Not for histograms — those need
+    ``window_stats``/bucket maths instead.
+    """
+    total = 0.0
+    for family in metric.collect():
+        for sample in family.samples:
+            if sample.name.endswith("_created"):
+                continue
+            total += float(sample.value)
+    return total
 
 
 def observe_request(method: str, route: str, status: int, duration: float) -> None:
