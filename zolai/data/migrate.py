@@ -14,9 +14,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .database import DatabaseManager, get_manager
-
 from ..config import config
+from .database import DatabaseManager, get_manager
 
 # Map of table_name → (jsonl_relative_path_under_data_dir, json_columns)
 MIGRATION_MAP: dict[str, tuple[str, set[str]]] = {
