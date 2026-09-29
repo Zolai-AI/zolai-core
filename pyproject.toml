@@ -137,7 +137,7 @@ exclude = [
     "__pycache__",
     ".venv",
     "venv",
-    "data",
+    "/data",
     "runs",
     # One-off scripts with broken syntax (mismatched quotes) — not worth fixing
     "scripts/data_pipeline/combine_training_sources.py",

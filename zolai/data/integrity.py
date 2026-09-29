@@ -31,7 +31,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import inspect as sa_inspect, text
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
