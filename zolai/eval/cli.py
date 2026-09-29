@@ -231,6 +231,51 @@ def _persist_eval_run(
     return True
 
 
+def _publish_eval_metrics(
+    set_name: str,
+    scores: dict[str, float],
+    *,
+    duration_ms: float,
+) -> bool:
+    """Publish Prometheus gauges and a Grafana annotation for this run.
+
+    Best-effort: observability must never change the CLI's exit code.
+    """
+    try:
+        from ..monitoring.metrics import EVAL_LAST_RUN, EVAL_METRIC_VALUE, EVAL_RUNS
+
+        EVAL_RUNS.labels(set_name=set_name).inc()
+        for name, value in sorted(scores.items()):
+            EVAL_METRIC_VALUE.labels(set_name=set_name, metric=str(name)).set(float(value))
+        EVAL_LAST_RUN.set(time.time())
+    except Exception as exc:  # noqa: BLE001 — metrics must never break the CLI
+        logger.debug("eval metric publishing skipped: %s", exc)
+        return False
+
+    try:
+        from ..monitoring.store import create_annotation
+
+        create_annotation(
+            {
+                "title": f"eval:{set_name}",
+                "text": json.dumps(
+                    {
+                        "duration_ms": round(float(duration_ms), 3),
+                        "metrics": {
+                            k: round(float(v), 6) for k, v in sorted(scores.items())
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                "tags": ["eval", set_name],
+                "kind": "eval",
+            }
+        )
+    except Exception as exc:  # noqa: BLE001 — annotation is optional
+        logger.debug("eval annotation skipped: %s", exc)
+    return True
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
@@ -270,6 +315,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             duration_ms=duration_ms,
             gate_passed=not (args.gate and regressed),
         )
+        _publish_eval_metrics(identity[0], scores, duration_ms=duration_ms)
 
     if args.json:
         payload = {"metrics": scores}

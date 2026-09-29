@@ -7,6 +7,8 @@ import sqlite3
 from typing import Any
 
 from ..config import config
+from ..monitoring import record_operation
+from ..monitoring.metrics import WORDS_TRANSLATED
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,7 @@ class TranslationEngine:
         conn.row_factory = sqlite3.Row
         return conn
 
+    @record_operation("translate")
     def translate(
         self,
         text: str,
@@ -58,6 +61,7 @@ class TranslationEngine:
         text = text.strip()
         if not text:
             return {"translation": "", "confidence": 0, "sources": [], "tier": "none", "evidence_chain": []}
+        WORDS_TRANSLATED.labels(direction=direction).inc()
 
         # Auto-detect direction
         if direction == "auto":

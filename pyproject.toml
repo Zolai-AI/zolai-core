@@ -45,6 +45,8 @@ dependencies = [
     "sqlalchemy>=2.0.36",
     "psycopg2-binary>=2.9",
     "orjson>=3.9",
+    # Metrics (Prometheus exposition — pinned, exporter output must be stable)
+    "prometheus-client==0.26.0",
     # Data processing
     "pandas>=2.3.0",
     "numpy>=2.5.3,<3",
