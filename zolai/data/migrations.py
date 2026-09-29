@@ -1306,6 +1306,198 @@ def create_lexicon_pos_indexes(mgr: DatabaseManager) -> dict[str, Any]:
     return {"created": created, "skipped": skipped, "errors": errors}
 
 
+# ---------------------------------------------------------------------------
+# L-ops — monitoring / evaluation / integrity tables
+#
+# Additive only: CREATE TABLE IF NOT EXISTS + CREATE UNIQUE INDEX IF NOT
+# EXISTS.  No legacy table is rebuilt, dropped, or altered in place, and the
+# shared 2.3GB store keeps every existing column (including ``pos``) intact.
+#
+# Reverse (rollback) SQL — safe to run at any time:
+#     DROP INDEX IF EXISTS ux_fraw_content_hash;
+#     DROP TABLE IF EXISTS eval_runs;
+#     DROP TABLE IF EXISTS monitoring_annotations;
+#     DROP TABLE IF EXISTS db_integrity_runs;
+#
+# ``ux_fraw_content_hash`` is the only index added to a pre-existing table.
+# ``foundation_raw_corpus`` stays indexed through the non-unique
+# ``ix_fraw_source_hash``, so dropping the unique index leaves the column
+# queryable.  The migration refuses to create it when duplicate
+# ``content_hash`` values already exist (verified 0 duplicates on the live
+# store) rather than failing a startup migration.
+# ---------------------------------------------------------------------------
+
+MONITORING_ANNOTATIONS_DDL = """
+CREATE TABLE IF NOT EXISTS monitoring_annotations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    time TEXT NOT NULL,
+    title TEXT NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '[]',
+    kind TEXT NOT NULL DEFAULT 'manual'
+        CHECK (kind IN ('deploy', 'eval', 'manual')),
+    dashboard_id INTEGER,
+    panel_id INTEGER,
+    grafana_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+EVAL_RUNS_DDL = """
+CREATE TABLE IF NOT EXISTS eval_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    set_name TEXT NOT NULL REFERENCES eval_sets(set_name),
+    created_at TEXT NOT NULL,
+    case_count INTEGER NOT NULL DEFAULT 0,
+    duration_ms REAL NOT NULL DEFAULT 0,
+    gate_passed INTEGER NOT NULL DEFAULT 1,
+    metrics TEXT NOT NULL DEFAULT '{}',
+    source TEXT NOT NULL DEFAULT 'db'
+)
+"""
+
+DB_INTEGRITY_RUNS_DDL = """
+CREATE TABLE IF NOT EXISTS db_integrity_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    check_type TEXT NOT NULL CHECK (check_type IN ('foreign_key', 'full')),
+    ok INTEGER NOT NULL DEFAULT 1,
+    issues TEXT NOT NULL DEFAULT '[]',
+    checked_at TEXT NOT NULL,
+    duration_ms REAL NOT NULL DEFAULT 0
+)
+"""
+
+MONITORING_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_monitoring_annotations_time "
+    "ON monitoring_annotations(time)",
+    "CREATE INDEX IF NOT EXISTS ix_monitoring_annotations_kind "
+    "ON monitoring_annotations(kind)",
+    "CREATE INDEX IF NOT EXISTS ix_eval_runs_set_created "
+    "ON eval_runs(set_name, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_db_integrity_runs_checked "
+    "ON db_integrity_runs(checked_at)",
+]
+
+#: Dedup index on the pre-existing raw-corpus log (additive, no table rebuild).
+UNIQUE_CONTENT_HASH_INDEX = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_fraw_content_hash "
+    "ON foundation_raw_corpus(content_hash)"
+)
+
+
+def _eval_sets_ddl_statements() -> list[str]:
+    """Return the canonical ``eval_sets`` / ``eval_cases`` DDL statements.
+
+    ``eval_runs.set_name`` references ``eval_sets(set_name)``, so the parent
+    table has to exist before the child DDL runs on a fresh store.  The
+    statements come straight from :mod:`zolai.eval.store` so the two definitions
+    can never drift apart.
+    """
+    from zolai.eval.store import _SCHEMA_SQL
+
+    return [stmt.strip() for stmt in _SCHEMA_SQL.split(";") if stmt.strip()]
+
+
+def create_monitoring_tables(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create the L-ops monitoring tables and the content-hash dedup index.
+
+    Creates ``monitoring_annotations`` (Grafana-compatible annotations),
+    ``eval_runs`` (one row per ``zolai-eval`` run) and ``db_integrity_runs``
+    (foreign-key / integrity check history), plus the unique
+    ``ux_fraw_content_hash`` index used to reject duplicate raw imports.
+
+    Returns:
+        Dict with ``created`` / ``skipped`` / ``errors`` lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+
+    if not mgr._db_url.startswith("sqlite"):
+        return {
+            "created": [],
+            "skipped": [],
+            "errors": ["monitoring tables are SQLite-only for now"],
+        }
+
+    inspector = sa_inspect(mgr.engine)
+    existing = set(inspector.get_table_names())
+
+    statements: list[tuple[str, str]] = []
+    if "eval_sets" not in existing or "eval_cases" not in existing:
+        # Both halves of the store schema are ensured together: eval_runs.set_name
+        # references eval_sets, and eval_cases is the pair table they share.
+        statements.extend(("eval_parent", stmt) for stmt in _eval_sets_ddl_statements())
+    statements.extend(
+        [
+            ("monitoring_annotations", MONITORING_ANNOTATIONS_DDL),
+            ("eval_runs", EVAL_RUNS_DDL),
+            ("db_integrity_runs", DB_INTEGRITY_RUNS_DDL),
+        ]
+    )
+
+    try:
+        with mgr.engine.connect() as conn:
+            for name, ddl in statements:
+                conn.execute(text(ddl))
+                if name != "eval_parent" and name not in existing:
+                    created.append(name)
+                elif name != "eval_parent":
+                    skipped.append(f"{name} (already exists)")
+            for idx_sql in MONITORING_INDEXES:
+                conn.execute(text(idx_sql))
+            _ensure_unique_content_hash_index(conn, created, skipped, errors)
+            conn.commit()
+    except Exception as exc:
+        errors.append(f"monitoring_tables: {exc}")
+        return {"created": created, "skipped": skipped, "errors": errors}
+
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+def _ensure_unique_content_hash_index(
+    conn: Any, created: list[str], skipped: list[str], errors: list[str]
+) -> None:
+    """Create ``ux_fraw_content_hash`` unless duplicates already exist."""
+    table = conn.execute(
+        text(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND name='foundation_raw_corpus'"
+        )
+    ).first()
+    if table is None:
+        skipped.append("ux_fraw_content_hash (foundation_raw_corpus missing)")
+        return
+
+    index = conn.execute(
+        text(
+            "SELECT 1 FROM sqlite_master WHERE type='index' "
+            "AND name='ux_fraw_content_hash'"
+        )
+    ).first()
+    if index is not None:
+        skipped.append("ux_fraw_content_hash (already exists)")
+        return
+
+    duplicates = conn.execute(
+        text(
+            "SELECT content_hash FROM foundation_raw_corpus "
+            "GROUP BY content_hash HAVING COUNT(*) > 1 LIMIT 1"
+        )
+    ).first()
+    if duplicates is not None:
+        errors.append(
+            "ux_fraw_content_hash: duplicate content_hash values present; "
+            "deduplicate before enabling"
+        )
+        return
+
+    conn.execute(text(UNIQUE_CONTENT_HASH_INDEX))
+    created.append("ux_fraw_content_hash")
+
+
 def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
     """Run all constraint and index migrations including Foundation tables.
 
@@ -1332,6 +1524,7 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "lexicon_pos_columns": add_lexicon_pos_columns(mgr),
         "lexicon_pos_backfill": backfill_pos_canonical(mgr),
         "lexicon_pos_indexes": create_lexicon_pos_indexes(mgr),
+        "monitoring_tables": create_monitoring_tables(mgr),
     }
 
 

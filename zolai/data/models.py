@@ -17,10 +17,12 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     Column,
     Float,
+    ForeignKey,
     Index,
     Integer,
     String,
     Text,
+    text as sa_sql_text,
 )
 from sqlalchemy.orm import DeclarativeBase
 
@@ -859,6 +861,120 @@ class FoundationCostTracking(Base):
 
 
 # ---------------------------------------------------------------------------
+# L-ops — monitoring / evaluation / integrity tables (additive)
+# ---------------------------------------------------------------------------
+
+
+class MonitoringAnnotation(Base):
+    """Grafana-compatible annotation attached to the monitoring timeline.
+
+    One row per deploy / eval / manual marker. ``time`` holds either an epoch
+    value or an ISO-8601 timestamp (Grafana accepts both on its annotation API).
+    """
+
+    __tablename__ = "monitoring_annotations"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    time: str = Column(String, nullable=False)
+    title: str = Column(String, nullable=False)
+    text: str = Column(String, nullable=False, default="", server_default=sa_sql_text("''"))
+    tags: str = Column(String, nullable=False, default="[]", server_default=sa_sql_text("'[]'"))  # JSON list
+    kind: str = Column(
+        String,
+        nullable=False,
+        default="manual",
+        server_default=sa_sql_text("'manual'"),
+    )  # deploy|eval|manual
+    dashboard_id: int | None = Column(Integer, nullable=True)  # Grafana dashboardId
+    panel_id: int | None = Column(Integer, nullable=True)  # Grafana panelId
+    grafana_id: int | None = Column(Integer, nullable=True)  # id assigned by Grafana
+    created_at: str = Column(
+        String,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        server_default=sa_sql_text("datetime('now')"),
+    )
+
+    __table_args__ = (
+        Index("ix_monitoring_annotations_time", "time"),
+        Index("ix_monitoring_annotations_kind", "kind"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<MonitoringAnnotation(id={self.id}, kind={self.kind!r}, title={self.title!r})>"
+
+
+class EvalSet(Base):
+    """Mapping of the pre-existing ``eval_sets`` table (evaluation sets).
+
+    The table itself is owned by :mod:`zolai.eval.store`; the ORM mapping
+    exists so ``init_db()`` can create the parent before ``eval_runs`` on a
+    fresh store and keep the ``eval_runs.set_name`` foreign key valid.
+    """
+
+    __tablename__ = "eval_sets"
+
+    set_name: str = Column(String, primary_key=True)
+    version: str | None = Column(String, nullable=True)
+    description: str | None = Column(String, nullable=True)
+    case_count: int | None = Column(Integer, nullable=True)
+    created_at: str | None = Column(String, nullable=True)
+    updated_at: str | None = Column(String, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<EvalSet(set_name={self.set_name!r})>"
+
+
+class EvalRun(Base):
+    """One ``zolai-eval`` run: metrics snapshot + gate outcome.
+
+    ``set_name`` is a foreign key to ``eval_sets`` (the evaluation source of
+    truth), so a run can never reference an unknown set.
+    """
+
+    __tablename__ = "eval_runs"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    set_name: str = Column(
+        String,
+        ForeignKey("eval_sets.set_name"),
+        nullable=False,
+        index=True,
+    )
+    created_at: str = Column(String, nullable=False)
+    case_count: int = Column(Integer, nullable=False, default=0, server_default=sa_sql_text("0"))
+    duration_ms: float = Column(Float, nullable=False, default=0.0, server_default=sa_sql_text("0"))
+    gate_passed: int = Column(
+        Integer, nullable=False, default=1, server_default=sa_sql_text("1")
+    )  # 1/0
+    metrics: str = Column(Text, nullable=False, default="{}", server_default=sa_sql_text("'{}'"))  # JSON map
+    source: str = Column(String, nullable=False, default="db", server_default=sa_sql_text("'db'"))  # db|jsonl
+
+    __table_args__ = (Index("ix_eval_runs_set_created", "set_name", "created_at"),)
+
+    def __repr__(self) -> str:
+        return f"<EvalRun(set_name={self.set_name!r}, created_at={self.created_at!r}, gate_passed={self.gate_passed})>"
+
+
+class DbIntegrityRun(Base):
+    """Result of a foreign-key or full SQLite integrity check."""
+
+    __tablename__ = "db_integrity_runs"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    check_type: str = Column(String, nullable=False)  # foreign_key|full
+    ok: int = Column(Integer, nullable=False, default=1, server_default=sa_sql_text("1"))  # 1/0
+    issues: str = Column(Text, nullable=False, default="[]", server_default=sa_sql_text("'[]'"))
+    checked_at: str = Column(String, nullable=False)
+    duration_ms: float = Column(Float, nullable=False, default=0.0, server_default=sa_sql_text("0"))
+
+    __table_args__ = (Index("ix_db_integrity_runs_checked", "checked_at"),)
+
+    def __repr__(self) -> str:
+        return f"<DbIntegrityRun(check_type={self.check_type!r}, ok={self.ok})>"
+
+
+# ---------------------------------------------------------------------------
 # Model registry for migration/export
 # ---------------------------------------------------------------------------
 MODEL_REGISTRY: dict[str, type[Base]] = {
@@ -900,4 +1016,9 @@ MODEL_REGISTRY: dict[str, type[Base]] = {
     "foundation_review_queue": FoundationReviewQueue,
     "foundation_metrics": FoundationMetric,
     "foundation_cost_tracking": FoundationCostTracking,
+    # L-ops monitoring / evaluation / integrity
+    "eval_sets": EvalSet,
+    "eval_runs": EvalRun,
+    "monitoring_annotations": MonitoringAnnotation,
+    "db_integrity_runs": DbIntegrityRun,
 }
