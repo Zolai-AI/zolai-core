@@ -113,12 +113,14 @@ def _issues_json(issues: list[Any]) -> str:
         return "[]"
 
 
-def foreign_key_check(mgr: Any = None) -> dict[str, Any]:
+def foreign_key_check(mgr: Any = None, *, write: bool = False) -> dict[str, Any]:
     """Run ``PRAGMA foreign_key_check`` (startup-safe).
 
     Args:
         mgr: A :class:`~zolai.data.database.DatabaseManager`. Defaults to the
             process singleton.
+        write: Record the run in ``db_integrity_runs`` (operator/CLI runs only —
+            :func:`startup_guard` records its own entry).
 
     Returns:
         ``{kind, ok, issues, checked_at, duration_ms}`` where ``issues`` is a
@@ -140,13 +142,16 @@ def foreign_key_check(mgr: Any = None) -> dict[str, Any]:
                 "fkid": row[3],
             }
         )
-    return {
+    report = {
         "kind": KIND_FOREIGN_KEY,
         "ok": not issues,
         "issues": issues,
         "checked_at": _now(),
         "duration_ms": round((time.perf_counter() - started) * 1000, 2),
     }
+    if write:
+        _record(mgr, report)
+    return report
 
 
 def startup_guard(mgr: Any = None) -> dict[str, Any]:
