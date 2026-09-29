@@ -9,25 +9,20 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-import time
 import threading
-from pathlib import Path
-
+import time
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import Session
 
-from zolai.data.database import DatabaseManager, get_manager, init_db
+from zolai.data.database import DatabaseManager, get_manager
 from zolai.data.models import (
     MODEL_REGISTRY,
-    Base,
     BibleAnalysis,
     BibleVerse,
     DataAuditLog,
-    DictionaryEnZoEntry,
     DictionaryEntry,
+    DictionaryEnZoEntry,
     GrammarPattern,
     PhraseEntry,
     ProvenanceFile,
@@ -39,6 +34,7 @@ from zolai.data.models import (
     WordCollocation,
     WordUsageProfile,
 )
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -486,10 +482,6 @@ class TestPostgresSkip:
 class TestModelImports:
     def test_all_models_importable(self):
         """25. All 15 ORM models are importable and have correct table names."""
-        from zolai.data.models import (
-            BibleAnalysis, DataAuditLog, Proverb, TrainingExercise,
-            WordAlignment, WordCollocation,
-        )
 
         models = [
             DictionaryEntry, DictionaryEnZoEntry, BibleVerse, GrammarPattern,

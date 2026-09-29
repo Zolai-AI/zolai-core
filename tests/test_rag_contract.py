@@ -4,6 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import pytest
+
 from zolai.knowledge.rag_contract import Evidence, EvidencePack, ZolaiRAG, retrieve
 
 

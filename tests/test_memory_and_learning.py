@@ -2,13 +2,7 @@
 Tests for Zolai AI memory layers, learning engine, accuracy scorer,
 learning report, and rules reference.
 """
-import json
-import tempfile
-from pathlib import Path
 from unittest.mock import patch
-
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Memory Layers
@@ -43,7 +37,7 @@ class TestL1WorkingMemory:
 
 class TestL2SessionMemory:
     def test_persistence(self, tmp_path):
-        from zolai.api.memory_layers import L2SessionMemory, DATA_DIR
+        from zolai.api.memory_layers import L2SessionMemory
         with patch("zolai.api.memory_layers.DATA_DIR", tmp_path):
             mem = L2SessionMemory(session_id="test_persist")
             mem.add("user", "persist me")
@@ -133,8 +127,8 @@ class TestMemoryLayers:
 
 class TestLearningEngine:
     def test_process_feedback(self, tmp_path):
-        from zolai.api.memory_layers import MemoryLayers
         from zolai.api.learning_engine import LearningEngine
+        from zolai.api.memory_layers import MemoryLayers
         with patch("zolai.api.memory_layers.DATA_DIR", tmp_path):
             with patch("zolai.api.learning_engine.DATA_DIR", tmp_path):
                 mem = MemoryLayers(session_id="test_le")
@@ -148,8 +142,8 @@ class TestLearningEngine:
                 assert len(engine.corrections) >= 1
 
     def test_learning_velocity(self, tmp_path):
-        from zolai.api.memory_layers import MemoryLayers
         from zolai.api.learning_engine import LearningEngine
+        from zolai.api.memory_layers import MemoryLayers
         with patch("zolai.api.memory_layers.DATA_DIR", tmp_path):
             with patch("zolai.api.learning_engine.DATA_DIR", tmp_path):
                 mem = MemoryLayers(session_id="test_velocity")
@@ -185,9 +179,9 @@ class TestAccuracyScorer:
 
 class TestLearningReport:
     def test_generate_text_report(self, tmp_path):
-        from zolai.api.memory_layers import MemoryLayers
         from zolai.api.learning_engine import LearningEngine
         from zolai.api.learning_report import LearningReport
+        from zolai.api.memory_layers import MemoryLayers
         with patch("zolai.api.memory_layers.DATA_DIR", tmp_path):
             with patch("zolai.api.learning_engine.DATA_DIR", tmp_path):
                 with patch("zolai.api.learning_report.DATA_DIR", tmp_path):
@@ -199,9 +193,9 @@ class TestLearningReport:
                     assert "Vocabulary" in text
 
     def test_save_report(self, tmp_path):
-        from zolai.api.memory_layers import MemoryLayers
         from zolai.api.learning_engine import LearningEngine
         from zolai.api.learning_report import LearningReport
+        from zolai.api.memory_layers import MemoryLayers
         with patch("zolai.api.memory_layers.DATA_DIR", tmp_path):
             with patch("zolai.api.learning_engine.DATA_DIR", tmp_path):
                 with patch("zolai.api.learning_report.DATA_DIR", tmp_path):
@@ -242,7 +236,7 @@ class TestZolaiRules:
         assert len(violations) == 7
 
     def test_get_rules_reference(self):
-        from zolai.rules import get_rules_reference, ZolaiRules
+        from zolai.rules import get_rules_reference
         ref = get_rules_reference()
         assert ref.WORD_ORDER == "SOV"
         assert ref.ERGATIVE == "in"
@@ -255,14 +249,13 @@ class TestZolaiRules:
 
 def test_all_modules_importable():
     """Smoke test: all new modules can be imported."""
+    from zolai.api.accuracy_scorer import AccuracyScorer
+    from zolai.api.learning_engine import LearningEngine
+    from zolai.api.learning_report import LearningReport
     from zolai.api.memory_layers import (
-        L1WorkingMemory, L2SessionMemory, L3VocabularyMastery,
-        L4CrossSessionPatterns, MemoryLayers,
+        L1WorkingMemory,
     )
-    from zolai.api.learning_engine import LearningEngine, get_learning_engine
-    from zolai.api.accuracy_scorer import AccuracyScorer, get_accuracy_scorer
-    from zolai.api.learning_report import LearningReport, get_learning_report
-    from zolai.rules import ZolaiRules, get_rules_reference
+    from zolai.rules import ZolaiRules
     assert L1WorkingMemory is not None
     assert LearningEngine is not None
     assert AccuracyScorer is not None

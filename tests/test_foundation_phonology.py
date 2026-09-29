@@ -4,10 +4,13 @@ from __future__ import annotations
 import pytest
 
 from zolai.foundation.phonology import (
+    T1,
+    T2,
+    T3,
+    T4,
     PhonologicalAnalysis,
     PhonologicalAnalyzer,
     SyllableStructure,
-    T1, T2, T3, T4,
     get_phonological_analyzer,
 )
 

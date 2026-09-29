@@ -121,7 +121,7 @@ class TestExceptions:
 
     def test_historical_token_exception_suppresses_in_historical_context(self) -> None:
         """Historical tokens are ONLY suppressed if they appear in the Bible database.
-        
+
         Since 'pathian' does not appear in the Bible (which uses 'Pasian'),
         it should be flagged even in historical context.
         """
@@ -132,7 +132,7 @@ class TestExceptions:
 
     def test_historical_token_exception_suppresses_in_scripture_context(self) -> None:
         """Historical tokens are ONLY suppressed if they appear in the Bible database.
-        
+
         Since 'bawipa' does not appear in the Bible (which uses 'Topa'),
         it should be flagged even in scripture context.
         """
@@ -314,7 +314,7 @@ class TestHistoricalFlagging:
 
     def test_historical_context_allows_historical_forms(self) -> None:
         """Historical forms are ONLY allowed if they appear in the Bible database.
-        
+
         Since 'Pathian' does not appear in the Bible (which uses 'Pasian'),
         it should be flagged even in scripture context.
         """

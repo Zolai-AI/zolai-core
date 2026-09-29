@@ -6,24 +6,17 @@ data integrity, progress reporting, idempotency, empty tables.
 
 from __future__ import annotations
 
-import json
 import os
 import tempfile
-from unittest.mock import MagicMock, patch
 
 import pytest
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import Session
 
 from zolai.data.database import DatabaseManager
-from zolai.data.models import Base
 from zolai.data.sync import (
-    _row_to_dict,
-    _serialize_row,
-    get_sync_status,
-    sync_sqlite_to_postgres,
-    sync_postgres_to_sqlite,
     SYNC_TABLES,
+    get_sync_status,
+    sync_postgres_to_sqlite,
+    sync_sqlite_to_postgres,
 )
 
 

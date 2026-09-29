@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-import pytest
-
-import scripts.zvs.scan_content as scan_content
 from zolai.zvs import ExceptionRegistry, validate
 from zolai.zvs.cli import main as cli_main
 from zolai.zvs.rules_data import DEFAULT_EXCEPTIONS

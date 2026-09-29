@@ -4,6 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import pytest
+
 from zolai.tokenizer.zolai_tokenizer import ZolaiTokenizer
 
 MODEL_PATH = Path(__file__).parent.parent.parent / "data" / "tokenizer" / "zolai_spm.model"

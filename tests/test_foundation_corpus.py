@@ -4,9 +4,9 @@ from __future__ import annotations
 import pytest
 
 from zolai.foundation.corpus import (
+    Collocation,
     CorpusAnalysis,
     CorpusAnalyzer,
-    Collocation,
     get_corpus_analyzer,
 )
 

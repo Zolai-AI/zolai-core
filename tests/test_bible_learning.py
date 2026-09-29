@@ -1,7 +1,6 @@
 """Tests for Bible pattern learning and sentence building."""
-import pytest
-from zolai.learning.bible_pattern_learner import BiblePatternLearner, get_bible_learner
-from zolai.learning.sentence_builder import SentenceBuilder, get_sentence_builder
+from zolai.learning.bible_pattern_learner import get_bible_learner
+from zolai.learning.sentence_builder import get_sentence_builder
 
 
 class TestBiblePatternLearner:

@@ -5,10 +5,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from zolai.learning.context_validator import ContextValidator
-from zolai.learning.word_attestation import WordAttestation
-from zolai.learning.sentence_validator import SentenceValidator
 from zolai.api.rag_context_v2 import ZolaiRAGContextV2
+from zolai.learning.sentence_validator import SentenceValidator
+from zolai.learning.word_attestation import WordAttestation
 
 DATA_DIR = Path(__file__).parent.parent.parent / "data"
 
@@ -160,7 +159,6 @@ def test_attestation_loads_corpus_words():
 
 def test_attestation_loads__corpus():
     """WordAttestation loads  corpus words only when ZOLAI_LOAD_CORPUS=1."""
-    import os
     att = WordAttestation()
     att.attest_word("pasian")  # trigger load
     # With ZOLAI_LOAD_CORPUS unset,  is not loaded

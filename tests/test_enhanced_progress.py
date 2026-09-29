@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from zolai.learning.progress import ProgressTracker, _CEFR_THRESHOLDS, _FREQ_TIERS
+from zolai.learning.progress import _CEFR_THRESHOLDS, _FREQ_TIERS, ProgressTracker
 
 
 class TestProgressTracker:
