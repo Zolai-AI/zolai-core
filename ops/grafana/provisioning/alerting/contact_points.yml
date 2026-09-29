@@ -1,0 +1,19 @@
+# Grafana contact points (unified alerting provisioning).
+#
+# `GRAFANA_ALERT_WEBHOOK_URL` is expanded by Grafana from the container
+# environment — set in docker-compose.monitoring.yml (defaults to the local
+# annotation endpoint) or override it in `.env` to point at Slack/PagerDuty.
+# Never commit credentials here.
+
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: zolai-ops
+    receivers:
+      - uid: zolai-ops-webhook
+        type: webhook
+        disableResolveMessage: false
+        settings:
+          url: ${GRAFANA_ALERT_WEBHOOK_URL}
+          httpMethod: POST

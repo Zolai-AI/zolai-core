@@ -1,0 +1,236 @@
+# Grafana-managed alert rules (unified alerting provisioning).
+#
+# Thresholds mirror `zolai/monitoring/alerts.py` and `ops/prometheus/rules.yml`
+# — `tests/test_alert_rules_parity.py` keeps the three in sync.
+#
+# Pattern: query (A) -> reduce to a single number (B) -> threshold (C).
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: zolai-api
+    folder: Zolai
+    interval: 1m
+    rules:
+      - uid: zolai-http-error-rate-high
+        title: HTTP error rate high
+        condition: C
+        noDataState: NoData
+        execErrState: Alerting
+        for: 5m
+        isPaused: false
+        annotations:
+          summary: HTTP 5xx error rate above 5% for 5m
+          description: More than 5% of requests in the last 5 minutes returned a 5xx status.
+        labels:
+          severity: critical
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: sum(rate(zolai_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(zolai_http_requests_total[5m])), 1)
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              reducer: last
+              type: reduce
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [B]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              type: threshold
+              conditions:
+                - evaluator:
+                    params: [0.05]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+
+      - uid: zolai-http-latency-p95-high
+        title: HTTP p95 latency high
+        condition: C
+        noDataState: NoData
+        execErrState: Alerting
+        for: 5m
+        isPaused: false
+        annotations:
+          summary: HTTP p95 latency above 1s for 5m
+          description: The 95th percentile request latency exceeded 1 second for 5 minutes.
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: histogram_quantile(0.95, sum by (le) (rate(zolai_http_request_duration_seconds_bucket[5m])))
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              reducer: last
+              type: reduce
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [B]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              type: threshold
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C
+
+      - uid: zolai-db-query-p95-high
+        title: DB p95 query latency high
+        condition: C
+        noDataState: NoData
+        execErrState: Alerting
+        for: 5m
+        isPaused: false
+        annotations:
+          summary: DB p95 query latency above 50ms for 5m
+          description: The 95th percentile database query latency exceeded 50ms for 5 minutes.
+        labels:
+          severity: warning
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              expr: histogram_quantile(0.95, sum by (le) (rate(zolai_db_query_duration_seconds_bucket[5m])))
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              reducer: last
+              type: reduce
+              conditions:
+                - evaluator:
+                    params: []
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [B]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+          - refId: C
+            datasourceUid: __expr__
+            model:
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: B
+              type: threshold
+              conditions:
+                - evaluator:
+                    params: [0.05]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: C

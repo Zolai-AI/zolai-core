@@ -1,0 +1,39 @@
+# Alert rules for the zolai API.
+#
+# THRESHOLDS ARE NOT ARBITRARY: they mirror `zolai/monitoring/alerts.py`
+# (`RULES`) exactly, so the local `/api/metrics/alerts` evaluator and the
+# Prometheus rule group always agree. `tests/test_alert_rules_parity.py`
+# fails the build when they drift.
+#
+# Checked with: docker compose -f docker-compose.monitoring.yml run --rm prometheus promtool check rules /etc/prometheus/rules.yml
+
+groups:
+  - name: zolai-api
+    interval: 30s
+    rules:
+      - alert: HttpErrorRateHigh
+        expr: sum(rate(zolai_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(zolai_http_requests_total[5m])), 1) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: HTTP 5xx error rate above 5% for 5m
+          description: More than 5% of requests in the last 5 minutes returned a 5xx status.
+
+      - alert: HttpLatencyP95High
+        expr: histogram_quantile(0.95, sum by (le) (rate(zolai_http_request_duration_seconds_bucket[5m]))) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: HTTP p95 latency above 1s for 5m
+          description: The 95th percentile request latency exceeded 1 second for 5 minutes.
+
+      - alert: DbQueryP95High
+        expr: histogram_quantile(0.95, sum by (le) (rate(zolai_db_query_duration_seconds_bucket[5m]))) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: DB p95 query latency above 50ms for 5m
+          description: The 95th percentile database query latency exceeded 50ms for 5 minutes.
