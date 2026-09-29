@@ -7,6 +7,7 @@
 | [ACTION_PLAN.md](ACTION_PLAN.md) | High-level execution plan |
 | [AWS_DEPLOYMENT.md](AWS_DEPLOYMENT.md) | Cloud deployment guide |
 | [SERVER_SETUP_GUIDE.md](SERVER_SETUP_GUIDE.md) | Server provisioning guide |
+| [MONITORING.md](MONITORING.md) | Prometheus/Grafana runbook, metric inventory, DB integrity |
 | [STRUCTURE.md](STRUCTURE.md) | Repo/code layout |
 | [LOGS_AND_TMP.md](LOGS_AND_TMP.md) | Logging & temp artifact policy |
 
