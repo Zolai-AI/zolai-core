@@ -703,6 +703,14 @@ class DatabaseManager:
             # created without its PRAGMAs (foreign_keys is per-connection).
             event.listen(engine, "connect", sqlite_on_connect)
 
+        # Query latency / error metrics: operation-class labels only, never SQL.
+        try:
+            from ..monitoring.db_metrics import install_db_metrics
+
+            install_db_metrics(engine)
+        except Exception:  # pragma: no cover — monitoring must never break the DB
+            logger.debug("DB metric listeners not installed", exc_info=True)
+
         return engine
 
     @property

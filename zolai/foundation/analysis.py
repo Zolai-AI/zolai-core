@@ -15,6 +15,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from zolai.monitoring import record_operation, track_operation
 from zolai.morphology import _KNOWN_ROOTS as MORPH_KNOWN_ROOTS
 from zolai.morphology import ZolaiMorphology, get_morphology
 from zolai.pos_tagger import ZolaiPOSTagger, get_pos_tagger
@@ -197,6 +198,7 @@ class FoundationAnalyzer:
         return self._phonological_analyzer
 
     # ── Core analysis methods ────────────────────────────────────────────────
+    @record_operation("analyze_word")
     def analyze_word(self, word: str) -> WordAnalysis:
         """Analyze a single Zolai word (ref section 25)."""
         clean_word = word.strip()
@@ -304,6 +306,7 @@ class FoundationAnalyzer:
             zvs_notes=zvs_notes,
         )
 
+    @record_operation("analyze_sentence")
     def analyze_sentence(self, sentence: str) -> SentenceAnalysis:
         """Analyze a Zolai sentence (ref section 33)."""
         clean_sentence = sentence.strip()
@@ -412,7 +415,8 @@ class FoundationAnalyzer:
         Returns:
             PhonologicalAnalysis with syllable structures, tone patterns, etc.
         """
-        return self.phonological_analyzer.analyze(word)
+        with track_operation("analyze_phonology"):
+            return self.phonological_analyzer.analyze(word)
 
     def analyze_morphology_enhanced(self, word: str):
         """Run enhanced morphological analysis on a word.
@@ -423,7 +427,8 @@ class FoundationAnalyzer:
         Returns:
             MorphemeAnalysis with directional, aspect, particle detection.
         """
-        return self.enhanced_morphology.decompose(word)
+        with track_operation("analyze_morphology_enhanced"):
+            return self.enhanced_morphology.decompose(word)
 
     # ── Helpers ──────────────────────────────────────────────────────────────
     def _check_zvs_word(self, word: str, morph: MorphologyInfo) -> tuple[bool, tuple[str, ...]]:

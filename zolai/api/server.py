@@ -22,6 +22,7 @@ from ..cleaner.pipeline import CleanPipeline
 from ..config import config
 from ..crawler.engine import CrawlEngine
 from ..dictionary.manager import DictionaryManager
+from ..monitoring.middleware import MetricsMiddleware
 from ..trainer.dataset import DatasetBuilder
 from ..ui.routes import router as ui_router
 
@@ -276,6 +277,50 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+
+def _start_monitoring() -> None:
+    """Startup monitoring hooks: FK guard, build info, background sampler.
+
+    Every step is best-effort — monitoring must never stop the API from booting.
+    """
+    try:
+        from ..data.database import get_manager
+        from ..data.integrity import startup_guard
+
+        report = startup_guard(get_manager())
+        from ..monitoring.metrics import DB_INTEGRITY_STATUS
+
+        DB_INTEGRITY_STATUS.set(1.0 if report["ok"] else 0.0)
+    except Exception:
+        logger.exception("Startup FK guard failed")
+
+    try:
+        from .. import __version__
+        from ..monitoring.metrics import set_build_info
+        from ..monitoring.store import resolve_commit
+
+        set_build_info(__version__, resolve_commit())
+    except Exception:
+        logger.exception("Failed to publish build info metric")
+
+    try:
+        from ..monitoring.background import start_sampler
+
+        start_sampler()
+    except Exception:
+        logger.exception("Failed to start metrics sampler")
+
+
+def _stop_monitoring() -> None:
+    """Stop the background metrics sampler on shutdown."""
+    try:
+        from ..monitoring.background import stop_sampler
+
+        stop_sampler()
+    except Exception:  # pragma: no cover — shutdown path
+        logger.debug("Metrics sampler stop failed", exc_info=True)
+
+
 # --- App Factory ---
 
 
@@ -302,8 +347,12 @@ def create_app() -> FastAPI:
         except Exception:
             logger.exception("Failed to run database migrations on startup")
 
+        # Monitoring: FK guard, build info and the background metrics sampler.
+        _start_monitoring()
+
         logger.info("Zolai API started on %s:%d", config.api_host, config.api_port)
         yield
+        _stop_monitoring()
         logger.info("Zolai API shutting down")
 
     app = FastAPI(
@@ -343,6 +392,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # HTTP metrics: added last so it wraps everything above; labels are route
+    # templates only (never raw paths), so cardinality stays bounded.
+    app.add_middleware(MetricsMiddleware)
 
     # --- Health ---
 
