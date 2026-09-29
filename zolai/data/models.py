@@ -45,6 +45,21 @@ class DictionaryEntry(Base):
     source: str = Column(String, nullable=False, default="")
     pos: str = Column(String, nullable=False, default="")
 
+    # L1.3 — canonical POS + provenance (additive; legacy `pos` is untouched)
+    pos_canonical: str | None = Column(String, nullable=True)
+    pos_candidates: str | None = Column(Text, nullable=True, server_default="[]")
+    pos_evidence: str | None = Column(String, nullable=True, server_default="unknown")
+    morph_features: str | None = Column(Text, nullable=True, server_default="{}")
+    source_type: str | None = Column(String, nullable=True, server_default="unknown")
+    source_url: str | None = Column(Text, nullable=True)
+    creator: str | None = Column(String, nullable=True)
+    license: str | None = Column(String, nullable=True)
+    collection_date: str | None = Column(String, nullable=True)
+    import_date: str | None = Column(String, nullable=True)
+    processing_version: str | None = Column(String, nullable=True)
+    review_status: str | None = Column(String, nullable=True, server_default="unknown")
+    confidence: float | None = Column(Float, nullable=True)
+
     __table_args__ = (
         Index("ix_dict_zolai_source", "zolai", "source"),
     )
@@ -158,8 +173,60 @@ class VocabularyEntry(Base):
     books: str = Column(Text, nullable=False, default="[]")
     examples: str = Column(Text, nullable=False, default="[]")
 
+    # L1.3 — canonical POS + provenance (additive; legacy `pos` is untouched)
+    pos_canonical: str | None = Column(String, nullable=True)
+    pos_candidates: str | None = Column(Text, nullable=True, server_default="[]")
+    pos_evidence: str | None = Column(String, nullable=True, server_default="unknown")
+    morph_features: str | None = Column(Text, nullable=True, server_default="{}")
+    source_type: str | None = Column(String, nullable=True, server_default="unknown")
+    source_url: str | None = Column(Text, nullable=True)
+    creator: str | None = Column(String, nullable=True)
+    license: str | None = Column(String, nullable=True)
+    collection_date: str | None = Column(String, nullable=True)
+    import_date: str | None = Column(String, nullable=True)
+    processing_version: str | None = Column(String, nullable=True)
+    review_status: str | None = Column(String, nullable=True, server_default="unknown")
+    confidence: float | None = Column(Float, nullable=True)
+
     def __repr__(self) -> str:
         return f"<VocabularyEntry(headword={self.headword!r})>"
+
+
+class ZolaiVocabularyEntry(Base):
+    """Master vocabulary index (partial ORM view of ``zolai_vocabulary``).
+
+    Source: bible/vocab_index_full.jsonl + dictionary/processed/vocab_verified.jsonl
+
+    Only the columns needed for POS/provenance work are declared; the live
+    table carries further enrichment columns (tone_category, frequency_*,
+    compound metadata, …) that are managed by the JSONL pipeline via raw SQL.
+    """
+
+    __tablename__ = "zolai_vocabulary"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    zolai: str = Column(String, nullable=False)
+    english: str | None = Column(Text, nullable=True)
+    myanmar: str | None = Column(Text, nullable=True)
+    pos: str | None = Column(String, nullable=True)
+
+    # L1.3 — canonical POS + provenance (additive; legacy `pos` is untouched)
+    pos_canonical: str | None = Column(String, nullable=True)
+    pos_candidates: str | None = Column(Text, nullable=True, server_default="[]")
+    pos_evidence: str | None = Column(String, nullable=True, server_default="unknown")
+    morph_features: str | None = Column(Text, nullable=True, server_default="{}")
+    source_type: str | None = Column(String, nullable=True, server_default="unknown")
+    source_url: str | None = Column(Text, nullable=True)
+    creator: str | None = Column(String, nullable=True)
+    license: str | None = Column(String, nullable=True)
+    collection_date: str | None = Column(String, nullable=True)
+    import_date: str | None = Column(String, nullable=True)
+    processing_version: str | None = Column(String, nullable=True)
+    review_status: str | None = Column(String, nullable=True, server_default="unknown")
+    confidence: float | None = Column(Float, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<ZolaiVocabularyEntry(zolai={self.zolai!r})>"
 
 
 class TranslationPair(Base):
@@ -802,6 +869,7 @@ MODEL_REGISTRY: dict[str, type[Base]] = {
     "grammar_patterns": GrammarPattern,
     "phrases": PhraseEntry,
     "vocabulary": VocabularyEntry,
+    "zolai_vocabulary": ZolaiVocabularyEntry,
     "translations": TranslationPair,
     "word_usage": WordUsageProfile,
     "provenance": ProvenanceFile,

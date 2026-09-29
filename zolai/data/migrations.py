@@ -5,12 +5,14 @@ Run this after init_db to add proper constraints and indexes.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
 
 from .database import DatabaseManager
 from .models import Base
+from .pos_normalize import normalize_legacy_pos
 
 
 def create_foundation_tables(mgr: DatabaseManager) -> dict[str, Any]:
@@ -1046,6 +1048,264 @@ def create_user_streaks_table(mgr: DatabaseManager) -> dict[str, Any]:
         return {"created": [], "skipped": [], "errors": [f"user_streaks: {exc}"]}
 
 
+# ---------------------------------------------------------------------------
+# L1.3 — canonical POS + provenance columns for the lexicon tables
+#
+# Additive only: the legacy ``pos`` column is NEVER modified or dropped, and
+# no table is rebuilt.  Every statement below is ``ALTER TABLE ... ADD COLUMN``
+# or ``CREATE INDEX IF NOT EXISTS``.
+#
+# Reverse (rollback) SQL, run per table:
+#     DROP INDEX IF EXISTS ix_dictionary_pos_canonical;
+#     DROP INDEX IF EXISTS ix_vocabulary_pos_canonical;
+#     DROP INDEX IF EXISTS ix_zolai_vocabulary_pos_canonical;
+#     ALTER TABLE dictionary        DROP COLUMN pos_canonical;   -- SQLite >= 3.35
+#     ALTER TABLE dictionary        DROP COLUMN pos_candidates;
+#     ALTER TABLE dictionary        DROP COLUMN pos_evidence;
+#     ALTER TABLE dictionary        DROP COLUMN morph_features;
+#     ALTER TABLE dictionary        DROP COLUMN source_type;
+#     ALTER TABLE dictionary        DROP COLUMN source_url;
+#     ALTER TABLE dictionary        DROP COLUMN creator;
+#     ALTER TABLE dictionary        DROP COLUMN license;
+#     ALTER TABLE dictionary        DROP COLUMN collection_date;
+#     ALTER TABLE dictionary        DROP COLUMN import_date;
+#     ALTER TABLE dictionary        DROP COLUMN processing_version;
+#     ALTER TABLE dictionary        DROP COLUMN review_status;
+#     ALTER TABLE dictionary        DROP COLUMN confidence;
+#     ... repeat DROP COLUMN for vocabulary and zolai_vocabulary ...
+# ``DROP COLUMN`` cannot drop an indexed column — drop the index first.
+# ---------------------------------------------------------------------------
+
+#: Lexicon tables that receive the canonical POS / provenance columns.
+LEXICON_TABLES: tuple[str, ...] = ("dictionary", "vocabulary", "zolai_vocabulary")
+
+#: (column name, SQLite column DDL) — 13 columns × 3 tables = 39 ALTERs.
+LEXICON_POS_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("pos_canonical", "TEXT NULL"),
+    ("pos_candidates", "TEXT DEFAULT '[]'"),
+    ("pos_evidence", "TEXT DEFAULT 'unknown'"),
+    ("morph_features", "TEXT DEFAULT '{}'"),
+    ("source_type", "TEXT DEFAULT 'unknown'"),
+    ("source_url", "TEXT NULL"),
+    ("creator", "TEXT NULL"),
+    ("license", "TEXT NULL"),
+    ("collection_date", "TEXT NULL"),
+    ("import_date", "TEXT NULL"),
+    ("processing_version", "TEXT NULL"),
+    ("review_status", "TEXT DEFAULT 'unknown'"),
+    ("confidence", "REAL NULL"),
+)
+
+#: Partial indexes so queries can seek rows that already carry a canonical POS.
+LEXICON_POS_INDEXES: tuple[tuple[str, str, str], ...] = (
+    (
+        "ix_dictionary_pos_canonical",
+        "dictionary",
+        "CREATE INDEX IF NOT EXISTS ix_dictionary_pos_canonical "
+        "ON dictionary(pos_canonical) WHERE pos_canonical IS NOT NULL",
+    ),
+    (
+        "ix_vocabulary_pos_canonical",
+        "vocabulary",
+        "CREATE INDEX IF NOT EXISTS ix_vocabulary_pos_canonical "
+        "ON vocabulary(pos_canonical) WHERE pos_canonical IS NOT NULL",
+    ),
+    (
+        "ix_zolai_vocabulary_pos_canonical",
+        "zolai_vocabulary",
+        "CREATE INDEX IF NOT EXISTS ix_zolai_vocabulary_pos_canonical "
+        "ON zolai_vocabulary(pos_canonical) WHERE pos_canonical IS NOT NULL",
+    ),
+)
+
+#: Stamped on every row written by :func:`backfill_pos_canonical`.
+LEXICON_BACKFILL_VERSION = "l1.3-pos-backfill"
+
+
+def add_lexicon_pos_columns(mgr: DatabaseManager) -> dict[str, Any]:
+    """Add the 13 canonical POS / provenance columns to the 3 lexicon tables.
+
+    Uses ``ALTER TABLE ... ADD COLUMN`` only — the legacy ``pos`` column and
+    every existing row are left untouched, and no table is rebuilt.
+
+    Columns (13): pos_canonical, pos_candidates, pos_evidence, morph_features,
+    source_type, source_url, creator, license, collection_date, import_date,
+    processing_version, review_status, confidence.
+
+    Tables missing from the database are skipped.  Columns that already exist
+    (e.g. ``zolai_vocabulary.confidence``, which predates L1.3) are skipped so
+    the migration stays idempotent.
+
+    Returns:
+        Dict with 'added', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+
+    added: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+
+    for table_name in LEXICON_TABLES:
+        if table_name not in existing_tables:
+            skipped.append(f"{table_name} (table missing)")
+            continue
+
+        existing_cols = {c["name"] for c in inspector.get_columns(table_name)}
+        with mgr.engine.connect() as conn:
+            for col_name, col_def in LEXICON_POS_COLUMNS:
+                if col_name in existing_cols:
+                    skipped.append(f"{table_name}.{col_name} (already exists)")
+                    continue
+                try:
+                    conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def}"))
+                    conn.commit()
+                except Exception as exc:  # noqa: BLE001 - collect and continue
+                    errors.append(f"{table_name}.{col_name}: {exc}")
+                    continue
+                added.append(f"{table_name}.{col_name}")
+
+    return {"added": added, "skipped": skipped, "errors": errors}
+
+
+def backfill_pos_canonical(mgr: DatabaseManager) -> dict[str, Any]:
+    """Fill ``pos_canonical`` / ``pos_candidates`` / ``pos_evidence`` from ``pos``.
+
+    Reads every row whose legacy ``pos`` is non-empty and that has not been
+    processed yet, normalizes it with
+    :func:`zolai.data.pos_normalize.normalize_legacy_pos`, and writes back
+    **only**:
+
+    * ``pos_canonical`` (a 17-tag UPOS or NULL when ambiguous/unmapped)
+    * ``pos_candidates`` (JSON list, ``[]`` when not ambiguous)
+    * ``pos_evidence`` (one of the documented evidence values)
+    * ``import_date`` (UTC date of this backfill)
+    * ``processing_version`` (= ``l1.3-pos-backfill``)
+
+    The legacy ``pos`` value is never written to, and rows with an empty /
+    NULL ``pos`` are left completely untouched (all new columns stay NULL or
+    at their server defaults).  Rows whose POS is ambiguous or unmapped keep
+    ``pos_canonical IS NULL`` but still get ``processing_version`` stamped, so
+    a re-run updates 0 rows.
+
+    Returns:
+        Dict with 'updated' (row count), 'tables' (per-table counts),
+        'skipped' and 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+    import_date = datetime.now(timezone.utc).date().isoformat()
+
+    updated = 0
+    per_table: dict[str, int] = {}
+    skipped: list[str] = []
+    errors: list[str] = []
+
+    for table_name in LEXICON_TABLES:
+        if table_name not in existing_tables:
+            skipped.append(f"{table_name} (table missing)")
+            continue
+        existing_cols = {c["name"] for c in inspector.get_columns(table_name)}
+        if "pos" not in existing_cols:
+            skipped.append(f"{table_name} (no pos column)")
+            continue
+        if "pos_canonical" not in existing_cols:
+            skipped.append(f"{table_name} (no pos_canonical column — run add_lexicon_pos_columns)")
+            continue
+
+        try:
+            with mgr.engine.begin() as conn:
+                rows = conn.execute(
+                    text(
+                        f"SELECT id, pos FROM {table_name} "
+                        "WHERE pos IS NOT NULL AND TRIM(pos) != '' "
+                        "AND pos_canonical IS NULL AND processing_version IS NULL"
+                    )
+                ).all()
+                updates = []
+                for row in rows:
+                    decision = normalize_legacy_pos(row.pos)
+                    if decision.untouched:
+                        continue
+                    updates.append(
+                        {
+                            "id": row.id,
+                            "pos_canonical": decision.canonical,
+                            "pos_candidates": decision.candidates_json,
+                            "pos_evidence": decision.evidence,
+                            "import_date": import_date,
+                            "processing_version": LEXICON_BACKFILL_VERSION,
+                        }
+                    )
+                if updates:
+                    conn.execute(
+                        text(
+                            f"UPDATE {table_name} SET "
+                            "pos_canonical = :pos_canonical, "
+                            "pos_candidates = :pos_candidates, "
+                            "pos_evidence = :pos_evidence, "
+                            "import_date = :import_date, "
+                            "processing_version = :processing_version "
+                            "WHERE id = :id"
+                        ),
+                        updates,
+                    )
+        except Exception as exc:  # noqa: BLE001 - collect and continue
+            errors.append(f"{table_name}: {exc}")
+            continue
+
+        per_table[table_name] = len(updates)
+        updated += len(updates)
+
+    return {"updated": updated, "tables": per_table, "skipped": skipped, "errors": errors}
+
+
+def create_lexicon_pos_indexes(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create the 3 partial indexes on ``pos_canonical``.
+
+    Indexes only cover rows where ``pos_canonical IS NOT NULL``, so unmapped
+    legacy labels stay out of the index.
+
+    Returns:
+        Dict with 'created', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+
+    for index_name, table_name, index_sql in LEXICON_POS_INDEXES:
+        if table_name not in existing_tables:
+            skipped.append(f"{table_name} (table missing)")
+            continue
+        try:
+            existing_indexes = {idx["name"] for idx in inspector.get_indexes(table_name)}
+        except Exception as exc:  # noqa: BLE001 - collect and continue
+            errors.append(f"{table_name}: {exc}")
+            continue
+        if index_name in existing_indexes:
+            skipped.append(f"{index_name} (already exists)")
+            continue
+        try:
+            with mgr.engine.connect() as conn:
+                conn.execute(text(index_sql))
+                conn.commit()
+        except Exception as exc:  # noqa: BLE001 - collect and continue
+            errors.append(f"{index_name}: {exc}")
+            continue
+        created.append(index_name)
+
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
 def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
     """Run all constraint and index migrations including Foundation tables.
 
@@ -1069,6 +1329,9 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "sm2_columns": add_sm2_columns_to_vocabulary(mgr),
         "user_reviews_table": create_user_reviews_table(mgr),
         "user_streaks_table": create_user_streaks_table(mgr),
+        "lexicon_pos_columns": add_lexicon_pos_columns(mgr),
+        "lexicon_pos_backfill": backfill_pos_canonical(mgr),
+        "lexicon_pos_indexes": create_lexicon_pos_indexes(mgr),
     }
 
 
