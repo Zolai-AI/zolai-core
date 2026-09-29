@@ -4,15 +4,14 @@ Tests the complete chain: query → ZolaiRAG.retrieve() → EvidencePack → to_
 and feedback override integration.  Uses real data files (not mocked).
 """
 import sys
-import tempfile
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import pytest
+
 from zolai.knowledge.rag_contract import EvidencePack, ZolaiRAG
 from zolai.learning.feedback import FeedbackStore
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -149,6 +148,11 @@ class TestPromptFormatting:
             zvs=[],
             context=[],
         )
+        # Raw-dict evidence is accepted at construction time (to_prompt() needs
+        # Evidence objects — see pack2 below).
+        assert pack.query == "test"
+        assert len(pack.vocabulary) == 1
+
         # Build from raw dicts using the Evidence dataclass
         from zolai.knowledge.rag_contract import Evidence
         pack2 = EvidencePack(
@@ -288,7 +292,7 @@ class TestPipelineLatency:
     def test_pipeline_latency_english(self, rag):
         start = time.monotonic()
         pack = rag.retrieve("God")
-        prompt = pack.to_prompt()
+        pack.to_prompt()
         elapsed = time.monotonic() - start
 
         assert elapsed < 5.0, f"Pipeline took {elapsed:.1f}s (>5s limit)"
@@ -296,7 +300,7 @@ class TestPipelineLatency:
     def test_pipeline_latency_sentence(self, rag):
         start = time.monotonic()
         pack = rag.retrieve("Ka pai kei hi")
-        prompt = pack.to_prompt()
+        pack.to_prompt()
         elapsed = time.monotonic() - start
 
         assert elapsed < 5.0, f"Pipeline took {elapsed:.1f}s (>5s limit)"

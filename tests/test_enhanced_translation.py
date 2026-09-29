@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from zolai.learning.translation import TranslationEngine, _TIER_CONFIDENCE
+from zolai.learning.translation import _TIER_CONFIDENCE, TranslationEngine
 
 
 class TestTranslationEngine:

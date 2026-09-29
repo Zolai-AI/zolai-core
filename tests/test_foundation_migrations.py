@@ -194,16 +194,22 @@ class TestFoundationConstraints:
 
         with tmp_db_no_init.engine.connect() as conn:
             conn.execute(text("""
-                INSERT INTO foundation_staging_words (form, syllables, pos, morphology, meanings, tone_profile, zvs_compliant, frequency, source_hash, created_at)
-                VALUES ('pasian', '["pa","sian"]', 'N.PROPER', '{}', '[]', '{}', 1, 10, 'src1', '2024-01-01')
+                INSERT INTO foundation_staging_words
+                    (form, syllables, pos, morphology, meanings, tone_profile,
+                     zvs_compliant, frequency, source_hash, created_at)
+                VALUES ('pasian', '["pa","sian"]', 'N.PROPER', '{}', '[]', '{}',
+                        1, 10, 'src1', '2024-01-01')
             """))
             conn.commit()
 
             # Duplicate (form, source_hash) should fail
             with pytest.raises(Exception) as exc_info:
                 conn.execute(text("""
-                    INSERT INTO foundation_staging_words (form, syllables, pos, morphology, meanings, tone_profile, zvs_compliant, frequency, source_hash, created_at)
-                    VALUES ('pasian', '["pa","sian"]', 'N.PROPER', '{}', '[]', '{}', 1, 10, 'src1', '2024-01-01')
+                    INSERT INTO foundation_staging_words
+                        (form, syllables, pos, morphology, meanings, tone_profile,
+                         zvs_compliant, frequency, source_hash, created_at)
+                    VALUES ('pasian', '["pa","sian"]', 'N.PROPER', '{}', '[]', '{}',
+                            1, 10, 'src1', '2024-01-01')
                 """))
                 conn.commit()
             assert "UNIQUE CONSTRAINT FAILED" in str(exc_info.value).upper()
@@ -215,16 +221,24 @@ class TestFoundationConstraints:
 
         with tmp_db_no_init.engine.connect() as conn:
             conn.execute(text("""
-                INSERT INTO canonical_words (form, syllables, syllable_count, pos, morphology, meanings, tone_profile, zvs_compliant, frequency, version, source_hash, verified_at, verified_by, evidence_ids, created_at)
-                VALUES ('pasian', '["pa","sian"]', 2, 'N.PROPER', '{}', '[]', '{}', 1, 10, 1, 'src1', '2024-01-01', 'test', '[]', '2024-01-01')
+                INSERT INTO canonical_words
+                    (form, syllables, syllable_count, pos, morphology, meanings,
+                     tone_profile, zvs_compliant, frequency, version, source_hash,
+                     verified_at, verified_by, evidence_ids, created_at)
+                VALUES ('pasian', '["pa","sian"]', 2, 'N.PROPER', '{}', '[]', '{}',
+                        1, 10, 1, 'src1', '2024-01-01', 'test', '[]', '2024-01-01')
             """))
             conn.commit()
 
             # Duplicate (form, version) should fail
             with pytest.raises(Exception) as exc_info:
                 conn.execute(text("""
-                    INSERT INTO canonical_words (form, syllables, syllable_count, pos, morphology, meanings, tone_profile, zvs_compliant, frequency, version, source_hash, verified_at, verified_by, evidence_ids, created_at)
-                    VALUES ('pasian', '["pa","sian"]', 2, 'N.PROPER', '{}', '[]', '{}', 1, 10, 1, 'src2', '2024-01-01', 'test', '[]', '2024-01-01')
+                    INSERT INTO canonical_words
+                        (form, syllables, syllable_count, pos, morphology, meanings,
+                         tone_profile, zvs_compliant, frequency, version, source_hash,
+                         verified_at, verified_by, evidence_ids, created_at)
+                    VALUES ('pasian', '["pa","sian"]', 2, 'N.PROPER', '{}', '[]', '{}',
+                            1, 10, 1, 'src2', '2024-01-01', 'test', '[]', '2024-01-01')
                 """))
                 conn.commit()
             assert "UNIQUE CONSTRAINT FAILED" in str(exc_info.value).upper()
@@ -236,16 +250,22 @@ class TestFoundationConstraints:
 
         with tmp_db_no_init.engine.connect() as conn:
             conn.execute(text("""
-                INSERT INTO foundation_consensus (fact_type, fact_key, candidates, decision, confidence, method, threshold, agreeing_count, notes, created_at)
-                VALUES ('word', 'word:pasian', '[]', '{}', 0.9, 'weighted_evidence', 0.7, 1, '[]', '2024-01-01')
+                INSERT INTO foundation_consensus
+                    (fact_type, fact_key, candidates, decision, confidence, method,
+                     threshold, agreeing_count, notes, created_at)
+                VALUES ('word', 'word:pasian', '[]', '{}', 0.9, 'weighted_evidence',
+                        0.7, 1, '[]', '2024-01-01')
             """))
             conn.commit()
 
             # Duplicate (fact_type, fact_key, method) should fail
             with pytest.raises(Exception) as exc_info:
                 conn.execute(text("""
-                    INSERT INTO foundation_consensus (fact_type, fact_key, candidates, decision, confidence, method, threshold, agreeing_count, notes, created_at)
-                    VALUES ('word', 'word:pasian', '[]', '{}', 0.8, 'weighted_evidence', 0.7, 1, '[]', '2024-01-01')
+                    INSERT INTO foundation_consensus
+                        (fact_type, fact_key, candidates, decision, confidence, method,
+                         threshold, agreeing_count, notes, created_at)
+                    VALUES ('word', 'word:pasian', '[]', '{}', 0.8, 'weighted_evidence',
+                            0.7, 1, '[]', '2024-01-01')
                 """))
                 conn.commit()
             assert "UNIQUE CONSTRAINT FAILED" in str(exc_info.value).upper()

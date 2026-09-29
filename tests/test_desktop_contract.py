@@ -15,7 +15,7 @@ DESKTOP_CONTRACT = [
     ("GET", "/desktop/stats"),
     ("GET", "/desktop/tables"),
     ("GET", "/desktop/query"),
-    
+
     # Desktop Router - Dictionary Tools
     ("GET", "/desktop/dict/browse"),
     ("GET", "/desktop/dict/non-zolai"),
@@ -25,7 +25,7 @@ DESKTOP_CONTRACT = [
     ("PUT", "/dictionary/update"),
     ("DELETE", "/dictionary/delete"),
     ("GET", "/desktop/dict/stats"),
-    
+
     # Desktop Router - Bible Tools
     ("GET", "/desktop/bible/study"),
     ("GET", "/desktop/bible/learn"),
@@ -33,13 +33,13 @@ DESKTOP_CONTRACT = [
     ("GET", "/desktop/bible/context/word"),
     ("GET", "/desktop/bible/context/topics"),
     ("GET", "/bible/search"),
-    
+
     # Desktop Router - Gemini Tools
     ("GET", "/desktop/gemini/fill-en"),
     ("GET", "/desktop/gemini/fill-my"),
     ("GET", "/desktop/gemini/coverage"),
     ("GET", "/desktop/gemini/fill"),
-    
+
     # Desktop Router - Training Tools
     ("GET", "/desktop/training/generate"),
     ("GET", "/desktop/training/generate-sentences"),
@@ -50,34 +50,34 @@ DESKTOP_CONTRACT = [
     ("GET", "/desktop/training/export"),
     ("GET", "/desktop/training/build-corpus"),
     ("GET", "/desktop/training/corpus-stats"),
-    
+
     # Desktop Router - Test & Quiz Tools
     ("GET", "/desktop/test/quiz"),
     ("GET", "/desktop/test/stats"),
-    
+
     # Desktop Router - Grammar Tools
     ("GET", "/desktop/grammar/check"),
     ("GET", "/desktop/grammar/negation-rules"),
-    
+
     # Desktop Router - Paragraph Tools
     ("GET", "/desktop/paragraph/analyze"),
     ("GET", "/desktop/paragraph/style"),
     ("GET", "/desktop/paragraph/paraphrase"),
-    
+
     # Desktop Router - ZVS Tools
     ("GET", "/desktop/zvs/validate"),
     ("GET", "/desktop/zvs/forbidden"),
-    
+
     # Desktop Router - Pattern Tools
     ("GET", "/desktop/pattern/stats"),
     ("GET", "/desktop/pattern/learn"),
-    
+
     # Desktop Router - Export Tools
     ("GET", "/desktop/export/{data_type}"),
-    
+
     # Desktop Router - Audit Tools
     ("GET", "/desktop/audit/recent"),
-    
+
     # JSONL Pipeline Router
     ("POST", "/desktop/jsonl/import/all"),
     ("POST", "/desktop/jsonl/import/file"),
@@ -86,7 +86,7 @@ DESKTOP_CONTRACT = [
     ("POST", "/desktop/jsonl/export/table"),
     ("POST", "/desktop/jsonl/export/all"),
     ("GET", "/desktop/jsonl/tables"),
-    
+
     # Application Routes
     ("GET", "/health"),
     ("GET", "/monitor/health"),
