@@ -23,14 +23,17 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import MetaData, Table, create_engine, func, text
+from sqlalchemy import MetaData, Table, create_engine, event, func, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import QueuePool
 
@@ -38,6 +41,59 @@ from ..config import config
 from .models import Base, DataAuditLog
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# SQLite ACID write tuning
+# ---------------------------------------------------------------------------
+# ``BEGIN IMMEDIATE`` busy-wait backoff: 5 retries starting at 50ms and
+# doubling, capped at 1s (0.05 → 0.1 → 0.2 → 0.4 → 0.8s).  Each attempt also
+# waits up to ``busy_timeout`` (30s) inside SQLite itself, so this backoff
+# only matters when the lock is held by a process that never releases it.
+_BUSY_RETRIES = 5
+_BUSY_DELAY_S = 0.05
+_BUSY_DELAY_MAX_S = 1.0
+
+
+def _busy_delay(attempt: int) -> float:
+    """Exponential backoff delay for retry ``attempt`` (0-based), capped at 1s."""
+    return min(_BUSY_DELAY_S * (2**attempt), _BUSY_DELAY_MAX_S)
+
+
+def sqlite_on_connect(dbapi_connection: Any, connection_record: Any) -> None:
+    """Apply the per-connection SQLite PRAGMAs (``connect`` event listener).
+
+    ``PRAGMA foreign_keys`` is **per-connection and not persistent**, so running
+    it once right after ``create_engine()`` only ever affected the one pooled
+    connection that happened to exist at that moment — every later checkout
+    silently ran with FK enforcement off.  A ``connect`` listener is the only
+    place that guarantees every pooled connection carries the full PRAGMA set:
+
+    ====================  ==================================================
+    PRAGMA                Why
+    ====================  ==================================================
+    ``busy_timeout=30000``  wait instead of raising SQLITE_BUSY (writers)
+    ``journal_mode=WAL``    persistent; readers never block the writer
+    ``synchronous=NORMAL``  WAL-appropriate durability (see docs/MONITORING.md)
+    ``foreign_keys=ON``     ABORT enforcement, unless a startup FK check
+                            deferred it (see :mod:`zolai.data.integrity`)
+    ====================  ==================================================
+    """
+    if not isinstance(dbapi_connection, sqlite3.Connection):
+        return  # pragma: no cover — PostgreSQL backends never hit this listener
+
+    from .integrity import fk_policy
+
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute(
+            "PRAGMA foreign_keys=" + ("ON" if fk_policy() == "on" else "OFF")
+        )
+    finally:
+        cursor.close()
+
 
 # JSON column name → Python json.loads before returning
 _JSON_COLS: dict[str, set[str]] = {
@@ -193,6 +249,109 @@ class DatabaseManager:
     def get_session(self) -> Session:
         """Get a new SQLAlchemy session (caller must manage commit/close)."""
         return Session(self.engine)
+
+    # ------------------------------------------------------------------
+    # Write-path transactions (BEGIN IMMEDIATE + busy backoff)
+    # ------------------------------------------------------------------
+    def _acquire_immediate(self) -> tuple[Any, Any]:
+        """Check out a pooled connection and open ``BEGIN IMMEDIATE`` on it.
+
+        Retries up to :data:`_BUSY_RETRIES` times with an exponential backoff
+        (50ms → 1s) when SQLite reports the database as locked.
+
+        Returns:
+            ``(pooled_connection, raw_dbapi_connection)``
+        """
+        last: Exception | None = None
+        for attempt in range(_BUSY_RETRIES + 1):
+            pooled = self.engine.raw_connection()
+            raw = pooled.driver_connection
+            try:
+                raw.execute("BEGIN IMMEDIATE")
+            except sqlite3.OperationalError as exc:
+                last = exc
+                try:
+                    raw.rollback()
+                except Exception:  # pragma: no cover — connection already unusable
+                    logger.debug("rollback after failed BEGIN IMMEDIATE", exc_info=True)
+                pooled.close()
+                if attempt == _BUSY_RETRIES:
+                    break
+                time.sleep(_busy_delay(attempt))
+            else:
+                return pooled, raw
+        raise RuntimeError(
+            f"could not acquire BEGIN IMMEDIATE after {_BUSY_RETRIES + 1} attempts"
+        ) from last
+
+    @contextmanager
+    def immediate_transaction(self) -> Iterator[Any]:
+        """Atomic write transaction on a raw DBAPI connection.
+
+        Issues ``BEGIN IMMEDIATE`` up front so the write lock is taken *before*
+        any statement runs — two writers can never interleave, and a
+        ``SQLITE_BUSY`` response is retried with a 50ms → 1s exponential
+        backoff on top of the 30s ``busy_timeout``.
+
+        The block commits on success and rolls back on any exception, leaving
+        no partial rows behind.
+
+        Yields:
+            The raw DBAPI connection (execute statements with ``.execute``).
+        """
+        pooled, raw = self._acquire_immediate()
+        try:
+            yield raw
+        except BaseException:
+            raw.rollback()
+            raise
+        else:
+            raw.commit()
+        finally:
+            pooled.close()
+
+    def _immediate_session(self) -> Session:
+        """Session whose underlying connection has ``BEGIN IMMEDIATE`` open."""
+        last: Exception | None = None
+        for attempt in range(_BUSY_RETRIES + 1):
+            session = Session(self.engine)
+            try:
+                session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+            except OperationalError as exc:
+                last = exc
+                session.close()
+                if attempt == _BUSY_RETRIES:
+                    break
+                time.sleep(_busy_delay(attempt))
+            else:
+                return session
+        raise RuntimeError(
+            f"could not acquire BEGIN IMMEDIATE after {_BUSY_RETRIES + 1} attempts"
+        ) from last
+
+    @contextmanager
+    def write_session(self) -> Iterator[Session]:
+        """Context-managed ORM session running inside a write transaction.
+
+        Drop-in replacement for :meth:`session` for code that writes: the
+        transaction is upgraded to ``BEGIN IMMEDIATE`` before the first
+        statement, so concurrent writers queue (with busy backoff) instead of
+        failing with ``SQLITE_BUSY``, and commit/rollback semantics are
+        identical to :meth:`session`.
+
+        Usage:
+            with mgr.write_session() as session:
+                session.add(row)
+        """
+        session = self._immediate_session()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     # ------------------------------------------------------------------
     # Optimistic Locking Helpers
@@ -508,10 +667,21 @@ class DatabaseManager:
         }
 
     def _create_engine_with_pool(self) -> Engine:
-        """Create engine with configured pool settings."""
+        """Create engine with configured pool settings.
+
+        SQLite gets an explicit ``QueuePool`` (10 + 20 overflow, 30s checkout
+        timeout) plus ``check_same_thread=False``/``timeout=30`` connect args,
+        and every connection that leaves the pool is PRAGMA-stamped by
+        :func:`sqlite_on_connect`.
+        """
         if self._db_url.startswith("sqlite"):
-            connect_args = {"check_same_thread": False}
-            pool_kwargs = {}
+            connect_args = {"check_same_thread": False, "timeout": 30}
+            pool_kwargs = {
+                "poolclass": QueuePool,
+                "pool_size": 10,
+                "max_overflow": 20,
+                "pool_timeout": 30,
+            }
         else:
             connect_args = {}
             pool_kwargs = getattr(self, "_pool_config", {
@@ -529,11 +699,9 @@ class DatabaseManager:
         )
 
         if self._db_url.startswith("sqlite"):
-            with engine.connect() as conn:
-                conn.execute(text("PRAGMA journal_mode=WAL"))
-                conn.execute(text("PRAGMA busy_timeout=30000"))
-                conn.execute(text("PRAGMA synchronous=NORMAL"))
-                conn.commit()
+            # Registered BEFORE the first checkout so no connection can be
+            # created without its PRAGMAs (foreign_keys is per-connection).
+            event.listen(engine, "connect", sqlite_on_connect)
 
         return engine
 
