@@ -304,3 +304,52 @@ def test_fk_policy_is_settable_and_validated():
             set_fk_policy("maybe")
     finally:
         set_fk_policy(original)
+
+
+# ---------------------------------------------------------------------------
+# CLI: `zolai db integrity`
+# ---------------------------------------------------------------------------
+
+
+def test_foreign_key_check_write_records_run(mgr):
+    """An operator-invoked FK scan leaves an audit row in db_integrity_runs."""
+    from sqlalchemy import text as _text
+
+    with mgr.engine.connect() as conn:
+        before = conn.execute(_text("SELECT count(*) FROM db_integrity_runs")).scalar()
+
+    report = foreign_key_check(mgr, write=True)
+    assert report["ok"] is True
+
+    with mgr.engine.connect() as conn:
+        after = conn.execute(_text("SELECT count(*) FROM db_integrity_runs")).scalar()
+        row = conn.execute(
+            _text(
+                "SELECT check_type, ok FROM db_integrity_runs"
+                " ORDER BY id DESC LIMIT 1"
+            )
+        ).fetchone()
+    assert after == before + 1
+    assert row[0] == KIND_FOREIGN_KEY
+    assert row[1] == 1
+
+
+def test_db_integrity_cli_reports_ok(mgr, monkeypatch):
+    """`zolai db integrity --json` runs the fast FK scan and exits 0 when clean."""
+    import json
+    import re
+
+    from typer.testing import CliRunner
+
+    import zolai.data.database as database_module
+    from zolai.cli.main import app as cli_app
+
+    monkeypatch.setattr(database_module, "get_manager", lambda *a, **k: mgr)
+
+    result = CliRunner().invoke(cli_app, ["db", "integrity", "--json"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(re.sub(r"\x1b\[[0-9;]*m", "", result.stdout))
+    assert payload["kind"] == KIND_FOREIGN_KEY
+    assert payload["ok"] is True
+    assert payload["issues"] == []
+    assert payload["fk_policy"] in {"on", "deferred"}

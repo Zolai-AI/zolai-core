@@ -1022,6 +1022,86 @@ def info():
     console.print(panel)
 
 
+# ============================================================
+# DATABASE
+# ============================================================
+
+db_app = typer.Typer(
+    name="db",
+    help="🗄️ Database maintenance (integrity checks).",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(db_app, name="db")
+
+
+@db_app.command("integrity")
+def db_integrity(
+    full: bool = typer.Option(
+        False,
+        "--full",
+        help="Full PRAGMA integrity_check (tens of seconds on the 2.3GB store)",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Print the raw report as JSON"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """🧬 Check referential integrity (fast FK scan, or --full for a b-tree scan).
+
+    The default scan is startup-safe. `--full` is explicit-only: it walks every
+    table and index, so never wire it to a startup path. Both runs are recorded
+    in `db_integrity_runs`. Exit code is 1 when violations are found.
+    """
+    _setup_logging(verbose)
+    import json as _json
+
+    from ..data.integrity import fk_policy, foreign_key_check, full_integrity_check
+
+    report = full_integrity_check() if full else foreign_key_check(write=True)
+    report = {**report, "fk_policy": fk_policy()}
+
+    if json_out:
+        rprint(_json.dumps(report, indent=2, default=str))
+    else:
+        label = "PRAGMA integrity_check" if full else "PRAGMA foreign_key_check"
+        table = Table(title=f"Database integrity — {label}", border_style="blue")
+        table.add_column("Check", style="cyan")
+        table.add_column("Result")
+        table.add_column("Issues", justify="right")
+        table.add_column("Duration", justify="right")
+        table.add_column("Checked at (UTC)")
+        table.add_column("FK policy")
+        table.add_row(
+            report["kind"],
+            "[green]ok[/green]" if report["ok"] else "[red]FAILED[/red]",
+            str(len(report["issues"])),
+            f"{report['duration_ms']:.1f} ms",
+            report["checked_at"],
+            report["fk_policy"],
+        )
+        console.print(table)
+        if report["issues"]:
+            shown = Table(title="First violations", border_style="red")
+            shown.add_column("Table")
+            shown.add_column("Rowid")
+            shown.add_column("Parent")
+            shown.add_column("FK id")
+            for issue in report["issues"][:20]:
+                if isinstance(issue, dict):
+                    shown.add_row(
+                        str(issue.get("table", "—")),
+                        str(issue.get("rowid", "—")),
+                        str(issue.get("parent", "—")),
+                        str(issue.get("fkid", "—")),
+                    )
+                else:  # full check returns PRAGMA messages
+                    shown.add_row(str(issue), "", "", "")
+            console.print(shown)
+            if len(report["issues"]) > 20:
+                rprint(f"[yellow]… {len(report['issues']) - 20} more[/yellow]")
+
+    raise typer.Exit(code=0 if report["ok"] else 1)
+
+
 def main() -> None:
     app()
 
