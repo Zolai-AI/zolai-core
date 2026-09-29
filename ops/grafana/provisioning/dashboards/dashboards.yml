@@ -1,0 +1,15 @@
+# Grafana file-provisioning provider for the three Zolai dashboards.
+apiVersion: 1
+
+providers:
+  - name: zolai
+    orgId: 1
+    folder: Zolai
+    folderUid: zolai
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false

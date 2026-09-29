@@ -1,0 +1,68 @@
+# Prometheus + Grafana monitoring stack for zolai-core.
+#
+#   docker compose -f docker-compose.monitoring.yml config   # validate
+#   docker compose -f docker-compose.monitoring.yml up -d    # start
+#
+# Prerequisite: the API must expose /metrics on the host, e.g.
+#   uvicorn zolai.api.server:app --host 0.0.0.0 --port 8000
+#
+# Prometheus scrapes the host through `host.docker.internal`, which Linux
+# resolves via the `host-gateway` extra_host below.
+
+name: zolai-monitoring
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    container_name: zolai-prometheus
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+
+  grafana:
+    image: grafana/grafana:13.2.3
+    container_name: zolai-grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "3000:3000"
+    environment:
+      # Local-dev defaults; override in .env — never commit real credentials.
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      # Receiver for provisioned alerting — point at Slack/PagerDuty via .env.
+      GRAFANA_ALERT_WEBHOOK_URL: ${GRAFANA_ALERT_WEBHOOK_URL:-http://host.docker.internal:8000/api/metrics/annotations}
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      # Sibling of the provisioning mount (not nested under the grafana-data
+      # volume) so the bind mount is unambiguous.
+      - ./ops/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+
+  # Optional: run the API inside the stack instead of on the host.
+  # api:
+  #   build: .
+  #   profiles: ["api"]
+  #   ports:
+  #     - "8000:8000"
+  #   env_file:
+  #     - .env
+
+volumes:
+  prometheus-data:
+  grafana-data:
