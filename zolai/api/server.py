@@ -24,7 +24,9 @@ from ..api.jsonl_router import router as jsonl_router
 from ..api.lexicon_router import router as lexicon_router
 from ..api.linguistics_router import router as linguistics_router
 from ..api.metrics_router import router as metrics_router
+from ..api.record_review_router import router as record_review_router
 from ..api.records_router import router as records_router
+from ..api.word_engine_router import router as word_engine_router
 from ..cleaner.pipeline import CleanPipeline
 from ..config import config
 from ..crawler.engine import CrawlEngine
@@ -386,11 +388,13 @@ def create_app() -> FastAPI:
     # `@app.get("/{path:path}")` at the bottom of this factory, otherwise the
     # catch-all shadows every metrics path.
     app.include_router(metrics_router)
-    # P1 /api/v1 core surface (lexicon, linguistics, records, audit) —
-    # same rule: register BEFORE the catch-all below.
+    # P1 /api/v1 core surface (lexicon, linguistics, word-engine, records,
+    # audit, record review) — same rule: register BEFORE the catch-all below.
     app.include_router(lexicon_router)
     app.include_router(linguistics_router)
     app.include_router(records_router)
+    app.include_router(record_review_router)
+    app.include_router(word_engine_router)
 
     # --- Static File Serving for Desktop App ---
     from fastapi.responses import FileResponse
