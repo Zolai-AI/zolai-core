@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Smart Zolai installer — detects system and installs only what's needed."""
-import subprocess, sys, os, shutil, platform, json
+import subprocess
+import sys
+import os
+import shutil
+import platform
+import json
 from pathlib import Path
 
 GREEN = "\033[0;32m"
@@ -66,10 +71,6 @@ def main():
         print(f"  {RED}⚠️  WARNING: Only {disk}GB free disk space!{NC}")
         print(f"  {RED}   Install may fail. Clear space first.{NC}\n")
 
-    # Determine what to install
-    install_packages = []
-    install_groups = []
-
     # Core packages (always needed)
     core = [
         ("fastapi>=0.134", "API server"),
@@ -108,20 +109,9 @@ def main():
         ("mypy>=1.8", "Type checking"),
     ]
 
-    # GPU packages (only if NVIDIA GPU detected)
-    gpu_packages = [
-        ("torch>=2.10", "Deep learning (GPU)"),
-        ("bitsandbytes>=0.43.0", "Quantization"),
-        ("accelerate>=1.13", "Training acceleration"),
-        ("peft>=0.19", "LoRA fine-tuning"),
-        ("trl>=1.1", "RL training"),
-        ("scipy>=1.10", "Scientific computing"),
-    ]
-
-    # CPU packages (always needed as torch replacement)
-    cpu_packages = [
-        ("torch>=2.10", "Deep learning (CPU)"),
-    ]
+    # GPU packages (only if NVIDIA GPU detected): torch>=2.10, bitsandbytes>=0.43.0,
+    # accelerate>=1.13, peft>=0.19, trl>=1.1, scipy>=1.10 — installed inline below.
+    # CPU-only systems get torch>=2.10 from the CPU wheel index instead.
 
     print(f"  {YELL}Installing packages...{NC}\n")
 
@@ -191,12 +181,12 @@ def main():
     print(f"{GREEN}║${NC}  {YELL}Installation Complete{NC}                    {GREEN}║{NC}")
     print(f"{GREEN}╚══════════════════════════════════════════╝{NC}")
     print(f"\n  {YELL}Quick start:{NC}")
-    print(f"    cd zolai-core && ./menu.sh")
-    print(f"    Or: zolai serve")
+    print("    cd zolai-core && ./menu.sh")
+    print("    Or: zolai serve")
     print(f"\n  {YELL}For GPU training later:{NC}")
-    print(f"    pip install -e '.[gpu]'")
+    print("    pip install -e '.[gpu]'")
     print(f"\n  {YELL}For CPU-only (what you have):{NC}")
-    print(f"    pip install -e .  (already done)")
+    print("    pip install -e .  (already done)")
 
 if __name__ == "__main__":
     main()

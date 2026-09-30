@@ -27,7 +27,7 @@ classifiers = [
 # ML extras: [ml] CPU embeddings/transformers, [gpu] CUDA training stack.
 dependencies = [
     # Core
-    "fastapi>=0.141.1",
+    "fastapi>=0.142.2",
     "uvicorn>=0.34.0",
     "typer>=0.12",
     "rich>=13.7",
@@ -97,7 +97,7 @@ dev = [
 ]
 # Desktop sidecar: slim deps for Tauri integration (no ML/torch)
 desktop = [
-    "fastapi>=0.141.1",
+    "fastapi>=0.142.2",
     "uvicorn>=0.34.0",
     "sqlalchemy>=2.0.36",
     "httpx>=0.28.1",
