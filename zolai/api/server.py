@@ -16,6 +16,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..analyzer.corpus import CorpusAnalyzer
+from ..api.admin_api_keys_router import router as admin_api_keys_router
+from ..api.auth_middleware import ApiKeyMiddleware
 from ..api.desktop_router import router as desktop_router
 from ..api.foundation_router import router as foundation_router
 from ..api.jsonl_router import router as jsonl_router
@@ -373,6 +375,8 @@ def create_app() -> FastAPI:
         app.router.routes.append(route)
     # Foundation Review Queue API
     app.include_router(foundation_router, prefix="/api/v1")
+    # API-key admin (issue/list/rotate/revoke) — scope-gated, plaintext once
+    app.include_router(admin_api_keys_router)
     # UI Routes for review queue
     app.include_router(ui_router)
     # Metrics REST API — MUST stay registered before the catch-all
@@ -399,6 +403,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # API-key auth on /api/v1 only (ZOLAI_API_AUTH=warn|enforce|off). Added
+    # after CORS and *before* MetricsMiddleware so the metrics wrapper stays
+    # outermost and 401/429 responses are counted in zolai_http_requests_total.
+    app.add_middleware(ApiKeyMiddleware)
     # HTTP metrics: added last so it wraps everything above; labels are route
     # templates only (never raw paths), so cardinality stays bounded.
     app.add_middleware(MetricsMiddleware)
