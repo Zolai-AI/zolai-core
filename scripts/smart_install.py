@@ -73,7 +73,7 @@ def main():
 
     # Core packages (always needed)
     core = [
-        ("fastapi>=0.134", "API server"),
+        ("fastapi>=0.142.2", "API server"),
         ("uvicorn>=0.27", "ASGI server"),
         ("typer>=0.12", "CLI framework"),
         ("rich>=13.7", "Rich terminal output"),
@@ -94,9 +94,9 @@ def main():
         ("tqdm>=4.66", "Progress bars"),
         ("kaggle>=1.6.0", "Kaggle CLI"),
         ("kagglehub>=0.3", "KaggleHub"),
-        ("huggingface_hub>=0.36", "HF Hub"),
+        ("huggingface_hub>=1.33.0,<2", "HF Hub"),
         ("mistralai>=1.0", "Mistral AI"),
-        ("ddgs>=9.0", "Web search"),
+        ("ddgs>=9.16", "Web search"),
         ("beautifulsoup4>=4.12", "HTML parser"),
         ("lxml>=5.1", "XML parser"),
         ("python-dotenv>=1.0", "Env files"),
@@ -119,7 +119,7 @@ def main():
     print(f"  {GREEN}[1/3] Core packages...{NC}")
     pkg_list = " ".join([p[0] for p in core if p[0].split('>=')[0].lower() not in installed])
     if pkg_list:
-        r = run(f'{sys.executable} -m pip install -q {" ".join([p[0] for p in core])}', check=False)
+        r = run(f'{sys.executable} -m pip install -q {" ".join(f"\'{p[0]}\'" for p in core)}', check=False)
         if r[2] == 0:
             print(f"    {GREEN}✅ Core packages installed{NC}")
         else:

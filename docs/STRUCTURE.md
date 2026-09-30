@@ -155,7 +155,6 @@ zolai/                                          # repo root
 │   ├── ssh/
 │   ├── tools-setup.md
 │   ├── training_config.json
-│   ├── uv.lock
 │   ├── zolai-chat.service
 │   └── zolai_qwen_7b_lora.yaml
 ├── artifacts/                                  # reports & analysis (gitignored: artifacts/kg/)
@@ -194,7 +193,7 @@ Contains only `tests/README.md`. The pytest suite is **not yet populated**.
 
 ### `config/` — configuration
 
-Holds `cpu_optimization.yaml`, `training_config.json`, `uv.lock`, `package-lock.json`, `nginx/`, `ssh/`, `env/`, service files, and helper scripts.
+Holds `cpu_optimization.yaml`, `training_config.json`, `package-lock.json`, `nginx/`, `ssh/`, `env/`, service files, and helper scripts. Dependency installs go through pip (`pyproject.toml` / `requirements.txt` / `scripts/install.sh`); there is no uv lockfile.
 
 ---
 

@@ -101,7 +101,6 @@ config/
 ├── cpu_optimization.yaml  CPU training config
 ├── nginx/                 Nginx configuration
 ├── ssh/                   SSH configuration
-├── uv.lock                UV lock file
 └── package-lock.json      NPM lock file
 ```
 
