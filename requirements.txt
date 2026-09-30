@@ -4,7 +4,7 @@
 #   pip install -e ".[gpu]"     # CUDA training stack (NVIDIA required)
 #
 # CPU-light base (mirrors [project] dependencies in pyproject.toml):
-fastapi>=0.141.1
+fastapi>=0.142.2
 uvicorn[standard]>=0.34.0
 pydantic>=2.13.5
 python-dotenv>=1.0
