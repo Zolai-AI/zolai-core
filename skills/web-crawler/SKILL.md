@@ -10,7 +10,7 @@ Crawls Zolai websites for language data.
 
 ## Prerequisites
 ```bash
-pip install beautifulsoup4 lxml duckduckgo-search
+pip install beautifulsoup4 lxml ddgs
 ```
 
 ## Workflow
@@ -40,7 +40,7 @@ def crawl(url):
 
 ### Step 3: DuckDuckGo Search
 ```python
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 def search(query, max_results=10):
     ddgs = DDGS()

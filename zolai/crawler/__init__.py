@@ -165,10 +165,10 @@ class SearchEngine:
     def client(self):
         if self._client is None:
             try:
-                from duckduckgo_search import DDGS
+                from ddgs import DDGS
                 self._client = DDGS()
             except ImportError:
-                log.warning("duckduckgo-search not installed")
+                log.warning("ddgs not installed")
                 self._client = None
         return self._client
 

@@ -96,7 +96,7 @@ def main():
         ("kagglehub>=0.3", "KaggleHub"),
         ("huggingface_hub>=0.36", "HF Hub"),
         ("mistralai>=1.0", "Mistral AI"),
-        ("duckduckgo-search>=5.0", "Web search"),
+        ("ddgs>=9.0", "Web search"),
         ("beautifulsoup4>=4.12", "HTML parser"),
         ("lxml>=5.1", "XML parser"),
         ("python-dotenv>=1.0", "Env files"),
