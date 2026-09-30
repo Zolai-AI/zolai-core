@@ -1498,6 +1498,62 @@ def _ensure_unique_content_hash_index(
     created.append("ux_fraw_content_hash")
 
 
+# ---------------------------------------------------------------------------
+# API-key auth (ADR-014 / backlog P0-1) — additive only, no legacy table touched.
+#
+# Reverse (rollback) SQL:
+#     DROP TABLE IF EXISTS api_keys;
+# ---------------------------------------------------------------------------
+
+API_KEYS_DDL = """
+CREATE TABLE IF NOT EXISTS api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    key_prefix TEXT NOT NULL,
+    key_hash TEXT NOT NULL UNIQUE,
+    scopes TEXT NOT NULL DEFAULT '[]',
+    created_by TEXT NOT NULL DEFAULT 'cli',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT,
+    last_used_at TEXT,
+    revoked_at TEXT
+)
+"""
+
+API_KEYS_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_api_keys_revoked ON api_keys(revoked_at)",
+]
+
+
+def create_api_keys_table(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create the ``api_keys`` table (API-key auth, ADR-014).
+
+    Idempotent and additive: only runs when the table is missing, so existing
+    stores keep whatever they already have.  Only the SHA-256 hash and a
+    display prefix are ever stored — never the plaintext key.
+
+    Returns:
+        Dict with 'created', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+
+    if "api_keys" in existing_tables:
+        return {"created": [], "skipped": ["api_keys (already exists)"], "errors": []}
+
+    try:
+        with mgr.engine.connect() as conn:
+            conn.execute(text(API_KEYS_DDL))
+            for idx_sql in API_KEYS_INDEXES:
+                conn.execute(text(idx_sql))
+            conn.commit()
+        return {"created": ["api_keys"], "skipped": [], "errors": []}
+    except Exception as exc:
+        return {"created": [], "skipped": [], "errors": [f"api_keys: {exc}"]}
+
+
 def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
     """Run all constraint and index migrations including Foundation tables.
 
@@ -1525,6 +1581,7 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "lexicon_pos_backfill": backfill_pos_canonical(mgr),
         "lexicon_pos_indexes": create_lexicon_pos_indexes(mgr),
         "monitoring_tables": create_monitoring_tables(mgr),
+        "api_keys_table": create_api_keys_table(mgr),
     }
 
 
