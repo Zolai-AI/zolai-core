@@ -103,8 +103,6 @@ async def correct_record(
                 "allowed": sorted(RECORDS_WHITELIST),
             },
         )
-    if not body.corrected_fields:
-        raise HTTPException(status_code=422, detail={"error": "empty_corrected_fields"})
 
     conn = _connect()
     try:
