@@ -348,3 +348,60 @@ commits per `/tmp/opencode/plan-monitoring-acid.md`.
 - `zolai/pos_tagger` POS-first wave (L1) continues: POS_SPEC, lexicon POS
   annotation, baseline CRF tagger.
 - Speaker/advisor recruitment (blocked on founder outreach).
+
+---
+
+## 2026-09-30 (Session — P0-1 API-key auth shipped + reviewer fixes)
+
+**Headline:** `/api/v1` now has API-key auth + per-key rate limits (ADR-014),
+closed out with the reviewer's FIX_REQUIRED defects.
+
+### Commits
+
+| SHA | Message |
+|-----|---------|
+| `309df21` | feat(db): `api_keys` migration + API-key auth service (ADR-014) |
+| `9046651` | feat(api): API-key middleware + admin key endpoints on `/api/v1` |
+| `1619ec3` | feat(cli): `zolai apikey` create/list/rotate/revoke (ADR-014) |
+| this | fix(api-auth): bound auth cache and require key on admin minting routes |
+
+### What shipped
+
+- **Auth:** `zolai/api/auth.py` — SHA-256-at-rest hashes, frozen 30-action
+  scope vocabulary, `require_scope` dependency, `ZOLAI_API_AUTH`
+  `warn` (default) → `enforce` → `off`.
+- **Middleware:** `zolai/api/auth_middleware.py` gates only `/api/v1`
+  (exempt: `/health`, `/metrics`, `/api/v1/health`), per-key token bucket
+  60 rpm → **429** + `Retry-After` + `X-RateLimit-*`.
+- **Admin:** `GET/POST /api/v1/admin/api-keys`, `.../{id}/rotate|revoke`
+  (scope `apikey:manage`, plaintext returned once, `data_audit_log` rows).
+- **CLI:** `zolai apikey create|list|rotate|revoke` — the bootstrap path for
+  the first key (enforce flip = founder gate).
+
+### Reviewer defects fixed (this commit)
+
+1. **Bounded auth cache** — `_CACHE` wrote every presented token (incl.
+   invalid) with a logical-only TTL → now prunes expired entries + hard cap
+   `_CACHE_PRUNE_SIZE=4096` on write (mirrors `_BUCKET_PRUNE_SIZE`); flood test.
+2. **Warn-mode admin minting closed** — `require_scope(..., strict=True)` on
+   the admin router requires a presented, valid `apikey:manage` key in `warn`
+   **and** `enforce` (only `off` bypasses); middleware publishes
+   `api_key_error` so the 401 keeps an accurate `missing`/`invalid` reason.
+3. **Doc sync** — router docstring corrected; warn-mode dual-accept test
+   retargeted to a non-admin path; root `api-design.md` 401/403 bodies
+   matched to the real `{"detail":{...}}` envelope.
+
+### Validation
+
+- `tests/test_api_auth.py test_api_key_admin.py test_api_key_cli.py
+  test_api_keys_migration.py` → **51 passed** (+3 new).
+- `ruff check zolai tests` → clean.
+- `tests/test_foundation_review_api.py` → 24 passed (no regression on the
+  ordinary warn dual-accept path).
+
+### Open / follow-ups
+
+- Issue consumer keys (`zolai-mcp-server`, `zolai-tauri`, scripts) → founder
+  gate: flip `ZOLAI_API_AUTH=enforce` (reviewer: zero current `/api/v1`
+  consumers, so the flip is low-risk).
+- Row-limit ("per-key/organization") counters still PENDING.

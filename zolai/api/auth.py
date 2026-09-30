@@ -14,7 +14,10 @@ Design notes:
   time on the compared value).
 - A small in-process TTL cache keeps the hot path off SQLite; every mutation
   (create/rotate/revoke) invalidates it so revocation is immediate in-process
-  (cross-process revocation converges within ``KEY_CACHE_TTL_S``).
+  (cross-process revocation converges within ``KEY_CACHE_TTL_S``).  The cache
+  is **bounded**: writes prune expired entries first and hard-evict
+  oldest-inserted down to ``_CACHE_PRUNE_SIZE``, so a scan presenting unique
+  garbage tokens cannot grow it without limit.
 - ``last_used_at`` writes are throttled to at most one UPDATE per key per
   minute.
 - Auth-failure logging is rate limited per reason (structured, logger
@@ -49,6 +52,12 @@ PREFIX_LEN = 16
 
 #: Positive/negative verification cache TTL (seconds).
 KEY_CACHE_TTL_S = 10.0
+
+#: Cache size upper bound before a prune (mirrors ``_BUCKET_PRUNE_SIZE`` in
+#: :mod:`zolai.api.auth_middleware`).  Negative entries are cached too, so
+#: without this a scan with unique garbage tokens would grow the dict forever
+#: (TTL is logical only — an expired entry still occupies memory until evicted).
+_CACHE_PRUNE_SIZE = 4096
 
 #: Minimum spacing between ``last_used_at`` writes for one key (seconds).
 LAST_USED_THROTTLE_S = 60.0
@@ -244,6 +253,20 @@ def invalidate_key_cache(key_hash: str | None = None) -> None:
             _CACHE.pop(key_hash, None)
 
 
+def _prune_cache(now: float) -> None:
+    """Drop expired entries, then enforce a hard size cap.
+
+    Caller must hold ``_cache_lock``.  Eviction order after the TTL sweep is
+    insertion order (oldest first) — the cache is a pure memo of the SQLite
+    lookup, so evicting a live entry only costs a re-lookup on next use.
+    """
+    expired = [k for k, (expires_at, _record) in _CACHE.items() if now >= expires_at]
+    for k in expired:
+        _CACHE.pop(k, None)
+    while len(_CACHE) >= _CACHE_PRUNE_SIZE:
+        _CACHE.pop(next(iter(_CACHE)))
+
+
 def reset_failure_log() -> None:
     """Reset the auth-failure log throttle (tests)."""
     with _fail_lock:
@@ -314,7 +337,9 @@ def _lookup_by_hash(key_hash: str) -> dict[str, Any] | None:
     if row is None:
         return None
     record = _row_to_record(row)
-    # Constant-time compare of the stored hash against the computed one.
+    # ``WHERE key_hash = :h`` is an indexed equality, so the stored digest can
+    # only differ if the column were tampered with — this compare is
+    # defense-in-depth, and compare_digest keeps that branch constant-time.
     if not hmac.compare_digest(str(record.get("key_hash") or ""), key_hash):
         return None
     if record.get("revoked_at"):
@@ -350,6 +375,8 @@ def resolve_key(plain: str | None) -> dict[str, Any] | None:
         return None
 
     with _cache_lock:
+        if len(_CACHE) >= _CACHE_PRUNE_SIZE:
+            _prune_cache(now)
         _CACHE[computed] = (now + KEY_CACHE_TTL_S, record)
     if record is not None:
         touch_last_used(record)
@@ -614,12 +641,19 @@ def revoke_api_key(key_id: int, *, actor: str = "cli") -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def require_scope(action: str) -> Any:
+def require_scope(action: str, *, strict: bool = False) -> Any:
     """Route dependency enforcing a frozen ``resource:action`` scope.
 
     Auth itself is the middleware's job; this only checks scopes once a key
-    is present.  In ``warn`` mode an absent key is dual-accepted (legacy
-    posture), but a *presented* key without the scope is still denied.
+    is present.  On ordinary routes, ``warn`` mode dual-accepts an absent key
+    (legacy posture), but a *presented* key without the scope is still denied.
+
+    ``strict=True`` is for privileged routes (API-key minting): an absent key
+    is rejected with **401** in both ``warn`` **and** ``enforce`` — only
+    ``ZOLAI_API_AUTH=off`` bypasses.  Without this, the default ``warn``
+    posture would let an unauthenticated caller mint a ``*``-scoped key that
+    survives the enforce flip; the ``zolai apikey`` CLI remains the bootstrap
+    path for the first key.
     """
     if action not in VALID_ACTIONS:
         raise ValueError(f"require_scope('{action}') is not in the frozen vocabulary")
@@ -627,10 +661,14 @@ def require_scope(action: str) -> Any:
     def dependency(request: Request) -> dict[str, Any]:
         record: dict[str, Any] | None = getattr(request.state, "api_key", None)
         if record is None:
-            if api_auth_mode() == "enforce":
+            mode = api_auth_mode()
+            if mode == "enforce" or (strict and mode != "off"):
+                # The middleware published why the key did not resolve
+                # (missing vs invalid) when it dual-accepted in warn mode.
+                reason = getattr(request.state, "api_key_error", None) or "missing_api_key"
                 raise HTTPException(
                     status_code=401,
-                    detail={"error": "unauthorized", "reason": "missing_api_key"},
+                    detail={"error": "unauthorized", "reason": reason},
                 )
             # warn/off: dual-accept — the middleware already logged the miss.
             return {}
