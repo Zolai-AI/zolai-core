@@ -60,7 +60,9 @@ dependencies = [
     # Kaggle
     "kaggle>=1.6.0",
     "kagglehub>=0.3",
-    "huggingface_hub>=1.30.0",
+    # <2 cap: transformers 5.17 / sentence-transformers 6.1 / tokenizers require <2;
+    # revisit when transformers declares >=2
+    "huggingface_hub>=1.33.0,<2",
     # OCR
     "mistralai>=1.0",
 ]
