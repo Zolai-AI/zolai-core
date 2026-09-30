@@ -1,10 +1,13 @@
 """Admin API-key endpoints — issue / list / rotate / revoke.
 
-Mounted under ``/api/v1/admin/api-keys``.  Every route requires the frozen
-scope ``apikey:manage`` (via :func:`zolai.api.auth.require_scope` on the
-router) *and* an authenticated key from the middleware.  The plaintext secret
-is returned **once** on create/rotate and never again — the DB stores only
-the SHA-256 hash and a display prefix.
+Mounted under ``/api/v1/admin/api-keys``.  Every route requires a
+**presented, valid** API key holding the frozen scope ``apikey:manage``:
+the router-level :func:`zolai.api.auth.require_scope` runs in ``strict`` mode,
+so an absent or invalid key is **401** in ``warn`` *and* ``enforce`` — only
+``ZOLAI_API_AUTH=off`` bypasses (CLI ``zolai apikey create`` is the bootstrap
+path for the first key).  The plaintext secret is returned **once** on
+create/rotate and never again — the DB stores only the SHA-256 hash and a
+display prefix.
 """
 
 from __future__ import annotations
@@ -19,7 +22,8 @@ from . import auth
 router = APIRouter(
     prefix="/api/v1/admin/api-keys",
     tags=["admin"],
-    dependencies=[Depends(auth.require_scope("apikey:manage"))],
+    # strict=True: warn mode must NOT dual-accept absent keys on minting routes.
+    dependencies=[Depends(auth.require_scope("apikey:manage", strict=True))],
 )
 
 

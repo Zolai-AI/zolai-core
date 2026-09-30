@@ -203,7 +203,11 @@ class ApiKeyMiddleware:
                     },
                 )
                 return
-            # warn: dual-accept, continue unauthenticated (require_scope allows).
+            # warn: dual-accept, continue unauthenticated (require_scope allows
+            # ordinary routes).  Publish *why* the key failed so strict
+            # dependencies (admin key minting) can answer an accurate 401.
+            state = scope.setdefault("state", {})
+            state["api_key_error"] = "missing_api_key" if not token else "invalid_api_key"
             await self.app(scope, receive, send)
             return
 

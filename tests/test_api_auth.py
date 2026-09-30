@@ -3,7 +3,9 @@
 Covers the P0-1 / ADR-014 done-when:
 
 - enforce: no key 401 · valid 200 · expired 401 · revoked 401 · bad scope 403
-- default warn: accepts but logs unauthenticated ``/api/v1``
+- default warn: accepts but logs unauthenticated ``/api/v1`` (non-admin);
+  admin key-minting routes stay strict (401) in warn
+- verification cache stays bounded under a garbage-token flood
 - ``/health``, ``/metrics``, ``/api/metrics/*`` and legacy routes byte-identical
 - >rate-limit 429 + Retry-After + X-RateLimit-*
 - 401s are counted by MetricsMiddleware (registration order)
@@ -170,11 +172,50 @@ def test_rate_limit_429_with_retry_after_and_headers(
 def test_default_warn_mode_accepts_but_logs(
     client: TestClient, auth_db, caplog: pytest.LogCaptureFixture, monkeypatch
 ) -> None:
+    """Ordinary (non-admin) /api/v1 routes still dual-accept in default warn."""
     monkeypatch.delenv("ZOLAI_API_AUTH", raising=False)
     with caplog.at_level(logging.WARNING, logger="zolai.api.auth"):
-        response = client.get("/api/v1/admin/api-keys")
-    assert response.status_code == 200
+        response = client.get("/api/v1/definitely-missing")
+    # Non-401 means the warn gate let the request through to the router
+    # (unknown /api/v1 paths fall through to the app's catch-all).
+    assert response.status_code in (200, 404)
     assert "missing_key" in caplog.text
+
+
+def test_warn_mode_requires_key_on_admin_minting_routes(
+    client: TestClient, auth_db, monkeypatch
+) -> None:
+    """Admin minting never dual-accepts: absent/invalid key → 401 in warn."""
+    monkeypatch.setenv("ZOLAI_API_AUTH", "warn")
+    payload = {"name": "sneaky", "scopes": ["*"]}
+
+    absent = client.post("/api/v1/admin/api-keys", json=payload)
+    assert absent.status_code == 401
+    detail = absent.json()["detail"]
+    assert detail["error"] == "unauthorized"
+    assert detail["reason"] == "missing_api_key"
+
+    invalid = client.post(
+        "/api/v1/admin/api-keys",
+        headers={"Authorization": "Bearer zolai_sk_not-a-real-key"},
+        json=payload,
+    )
+    assert invalid.status_code == 401
+    assert invalid.json()["detail"]["reason"] == "invalid_api_key"
+
+
+def test_warn_mode_admin_minting_with_manage_key_succeeds(
+    client: TestClient, auth_db, monkeypatch
+) -> None:
+    monkeypatch.setenv("ZOLAI_API_AUTH", "warn")
+    key = auth.create_api_key(name="bootstrap-admin", scopes=["apikey:manage"])
+    response = client.post(
+        "/api/v1/admin/api-keys",
+        headers=_auth_headers(key),
+        json={"name": "warn-minted", "scopes": ["dataset:read"]},
+    )
+    assert response.status_code == 201
+    assert response.json()["plaintext"].startswith("zolai_sk_")
 
 
 def test_warn_mode_still_enforces_scopes_on_presented_key(
@@ -195,6 +236,27 @@ def test_off_mode_bypasses_entirely(
         response = client.get("/api/v1/admin/api-keys")
     assert response.status_code == 200
     assert "missing_key" not in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Cache bounding — a garbage-token flood must not grow _CACHE without limit
+# ---------------------------------------------------------------------------
+
+
+def test_key_cache_is_bounded_under_garbage_token_flood(
+    auth_db, monkeypatch
+) -> None:
+    """Unique garbage tokens are negative-cached, but never past the cap.
+
+    The TTL is logical only, so the hard size cap is what stops an attacker
+    from growing the dict (and forcing one SQLite lookup per new token) forever.
+    Cap is shrunk here to keep the flood cheap; the prune path is identical.
+    """
+    cap = 256
+    monkeypatch.setattr(auth, "_CACHE_PRUNE_SIZE", cap)
+    for i in range(cap * 2 + 96):
+        assert auth.resolve_key(f"zolai_sk_garbage-{i:05d}") is None
+    assert len(auth._CACHE) <= cap
 
 
 # ---------------------------------------------------------------------------
