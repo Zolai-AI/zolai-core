@@ -1102,6 +1102,164 @@ def db_integrity(
     raise typer.Exit(code=0 if report["ok"] else 1)
 
 
+# ============================================================
+# API KEYS (ADR-014 / backlog P0-1)
+# ============================================================
+
+apikey_app = typer.Typer(
+    name="apikey",
+    help="🔑 API-key management for /api/v1 (issue, list, rotate, revoke).",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(apikey_app, name="apikey")
+
+
+def _apikey_bootstrap():
+    """Ensure the api_keys table exists and return the auth service."""
+    from ..api import auth
+
+    auth.ensure_api_keys_table()
+    return auth
+
+
+def _apikey_print(payload: dict, plaintext: str | None = None) -> None:
+    import json as _json
+
+    if plaintext is not None:
+        payload = {**payload, "plaintext": plaintext}
+    rprint(_json.dumps(payload, indent=2, default=str))
+
+
+@apikey_app.command("create")
+def apikey_create(
+    name: str = typer.Option(..., "--name", "-n", help="Human-readable key name"),
+    scopes: str = typer.Option(
+        ..., "--scopes", help='Comma-separated scopes, e.g. "dataset:read,catalog:read"'
+    ),
+    expires_days: int = typer.Option(
+        0, "--expires-days", help="Expire after N days (0 = no expiry)"
+    ),
+    created_by: str = typer.Option("cli", "--created-by", help="Recorded on the key + audit"),
+    json_out: bool = typer.Option(False, "--json", help="Print the raw record as JSON"),
+):
+    """🔐 Issue a new API key — the plaintext secret is shown **once**."""
+    _setup_logging(False)
+    auth = _apikey_bootstrap()
+    scope_list = [s.strip() for s in scopes.split(",") if s.strip()]
+    try:
+        key = auth.create_api_key(
+            name=name,
+            scopes=scope_list,
+            created_by=created_by,
+            expires_days=expires_days or None,
+            actor=created_by,
+        )
+    except ValueError as exc:
+        rprint(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+
+    if json_out:
+        _apikey_print(key)
+    else:
+        table = Table(title="API key created", border_style="green")
+        table.add_column("ID", style="cyan")
+        table.add_column("Name")
+        table.add_column("Prefix")
+        table.add_column("Scopes")
+        table.add_column("Expires")
+        table.add_row(
+            str(key["id"]),
+            key["name"],
+            key["key_prefix"],
+            ", ".join(key["scopes"]),
+            key.get("expires_at") or "never",
+        )
+        console.print(table)
+        rprint(f"[yellow]Plaintext (shown once, not stored):[/yellow] [bold]{key['plaintext']}[/bold]")
+
+
+@apikey_app.command("list")
+def apikey_list(
+    json_out: bool = typer.Option(False, "--json", help="Print the raw records as JSON"),
+):
+    """📋 List API keys (hashes/prefixes only — never plaintext)."""
+    _setup_logging(False)
+    auth = _apikey_bootstrap()
+    keys = auth.list_api_keys()
+
+    if json_out:
+        _apikey_print({"items": keys, "count": len(keys)})
+    else:
+        table = Table(title="API keys", border_style="blue")
+        for column in ("ID", "Name", "Prefix", "Scopes", "Created", "Expires", "Last used", "Revoked"):
+            table.add_column(column)
+        for k in keys:
+            table.add_row(
+                str(k["id"]),
+                k["name"],
+                k["key_prefix"],
+                ", ".join(k["scopes"]),
+                k.get("created_at") or "",
+                k.get("expires_at") or "never",
+                k.get("last_used_at") or "",
+                k.get("revoked_at") or "",
+            )
+        console.print(table)
+        if not keys:
+            rprint('[yellow]No API keys yet — run `zolai apikey create --name X --scopes "..."`[/yellow]')
+
+
+@apikey_app.command("rotate")
+def apikey_rotate(
+    key_id: int = typer.Argument(..., help="ID of the key to rotate"),
+    json_out: bool = typer.Option(False, "--json", help="Print the raw record as JSON"),
+):
+    """🔁 Rotate a key — a replacement is issued and the old one revoked."""
+    _setup_logging(False)
+    auth = _apikey_bootstrap()
+    try:
+        rotated = auth.rotate_api_key(key_id, actor="cli")
+    except LookupError as exc:
+        rprint(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+    except ValueError as exc:
+        rprint(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+
+    if json_out:
+        _apikey_print(rotated)
+    else:
+        rprint(f"[green]✓ Rotated key {rotated['old_id']}[/green] → new id {rotated['id']} "
+               f"(old key revoked at {rotated['old_revoked_at']})")
+        rprint(f"[yellow]New plaintext (shown once, not stored):[/yellow] [bold]{rotated['plaintext']}[/bold]")
+
+
+@apikey_app.command("revoke")
+def apikey_revoke(
+    target: str = typer.Argument(..., help="Key ID or key prefix"),
+    json_out: bool = typer.Option(False, "--json", help="Print the raw record as JSON"),
+):
+    """🚫 Revoke a key — it is rejected (401) from the very next request."""
+    _setup_logging(False)
+    auth = _apikey_bootstrap()
+    record = auth.find_api_key(target)
+    if record is None:
+        rprint(f"[red]✗ No API key matches '{target}'[/red]")
+        raise typer.Exit(code=1)
+    try:
+        revoked = auth.revoke_api_key(int(record["id"]), actor="cli")
+    except ValueError as exc:
+        rprint(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+
+    if json_out:
+        _apikey_print(revoked)
+    else:
+        rprint(f"[green]✓ Revoked key {revoked['id']}[/green] "
+               f"({revoked['name']}, {revoked['key_prefix']}) at {revoked['revoked_at']}")
+
+
 def main() -> None:
     app()
 
