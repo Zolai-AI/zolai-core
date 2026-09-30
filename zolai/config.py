@@ -16,6 +16,19 @@ def _env_path(key: str, default: Path) -> Path:
     return Path(val) if val else default
 
 
+def _env_int(key: str, default: int):
+    """Factory for an int field from env — invalid values fall back to default."""
+
+    def _factory() -> int:
+        raw = os.environ.get(key, "").strip()
+        try:
+            return int(raw) if raw else default
+        except ValueError:
+            return default
+
+    return _factory
+
+
 def _data_root() -> Path:
     return _env_path("ZOLAI_DATA_ROOT", _TOOLKIT_ROOT / "data")
 
@@ -132,6 +145,13 @@ class AppConfig:
     cleaner: CleanerConfig = field(default_factory=CleanerConfig)
     api_host: str = os.environ.get("ZOLAI_API_HOST", "127.0.0.1")
     api_port: int = int(os.environ.get("ZOLAI_API_PORT", "8000"))
+    # API-key auth on /api/v1 (ADR-014): warn (default, dual-accept) | enforce | off.
+    # Read live via zolai.api.auth.api_auth_mode()/api_rate_limit_rpm() so ops can
+    # flip the window without a restart; these fields are the import-time defaults.
+    api_auth_mode: str = field(
+        default_factory=lambda: os.environ.get("ZOLAI_API_AUTH", "warn")
+    )
+    api_rate_limit_rpm: int = field(default_factory=_env_int("ZOLAI_API_RATE_LIMIT_RPM", 60))
     gui_theme: str = os.environ.get("ZOLAI_GUI_THEME", "dark")
     monthly_budget_usd: float = field(
         default_factory=lambda: float(os.getenv("ZOLAI_MONTHLY_BUDGET_USD", "50.0"))
