@@ -38,7 +38,7 @@ dependencies = [
     "pydantic>=2.13.5",
     "jinja2>=3.1",
     # Web/Crawler
-    "duckduckgo-search>=5.0",
+    "ddgs>=9.0",
     "beautifulsoup4>=4.12",
     "lxml>=5.1",
     # Database
