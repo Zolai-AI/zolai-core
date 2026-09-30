@@ -80,6 +80,20 @@ CREATE TABLE dictionary_en_zo (
 );
 """
 
+# Only the ZO→EN table exists — the single-table path must still round-trip
+# composite ``<id>:<table>`` cursors.
+_DICT_ONLY_SQL = """
+CREATE TABLE dictionary (
+    id INTEGER PRIMARY KEY,
+    zolai TEXT NOT NULL,
+    english TEXT
+);
+INSERT INTO dictionary VALUES
+    (1, 'pasian', 'God'),
+    (2, 'gam', 'earth, land'),
+    (3, 'tapa', 'son, life');
+"""
+
 
 @pytest.fixture(autouse=True)
 def _clean_auth_state() -> Iterator[None]:
@@ -116,6 +130,12 @@ def bare_api_db(tmp_path, monkeypatch) -> Iterator[Path]:
 
 
 @pytest.fixture()
+def dict_only_db(tmp_path, monkeypatch) -> Iterator[Path]:
+    """Only the ``dictionary`` table — exercises the single-table cursor path."""
+    yield _seed(tmp_path, monkeypatch, _DICT_ONLY_SQL)
+
+
+@pytest.fixture()
 def auth_db(tmp_path, monkeypatch) -> Iterator[DatabaseManager]:
     """Throwaway api_keys DB for the auth service (singleton seam)."""
     mgr = DatabaseManager(f"sqlite:///{tmp_path / 'auth.db'}")
@@ -138,6 +158,30 @@ def _enforce(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _headers(key: dict) -> dict[str, str]:
     return {"Authorization": f"Bearer {key['plaintext']}"}
+
+
+def _walk(client: TestClient, params: dict, max_pages: int = 20) -> list[tuple[int, str]]:
+    """Follow ``next_cursor`` until exhausted; return ``(id, table)`` per row.
+
+    Fails the test on any non-200 page or if pagination never terminates.
+    """
+    seen: list[tuple[int, str]] = []
+    cursor: str | None = None
+    for _ in range(max_pages):
+        page_params = dict(params)
+        if cursor is not None:
+            page_params["cursor"] = cursor
+        resp = client.get("/api/v1/lexicon/search", params=page_params)
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert len(data["items"]) <= params["limit"]
+        seen.extend((item["id"], item["table"]) for item in data["items"])
+        if not data["has_more"]:
+            assert data["next_cursor"] is None
+            return seen
+        assert data["next_cursor"] is not None
+        cursor = data["next_cursor"]
+    pytest.fail("pagination did not terminate")  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
@@ -215,27 +259,51 @@ class TestLexiconSearch:
 
     def test_search_pagination_cursor_walk(self, client: TestClient, api_db) -> None:
         """limit=2 over 6 matches (3 per table) → pages join without duplicates."""
-        seen: list[tuple[str, int]] = []
-        cursor = None
-        for _ in range(6):
-            params: dict = {"q": "a", "limit": 2}
-            if cursor is not None:
-                params["cursor"] = cursor
-            resp = client.get("/api/v1/lexicon/search", params=params)
-            assert resp.status_code == 200
-            data = resp.json()
-            assert len(data["items"]) <= 2
-            seen.extend((item["table"], item["id"]) for item in data["items"])
-            if not data["has_more"]:
-                assert data["next_cursor"] is None
-                break
-            assert data["next_cursor"] is not None
-            cursor = data["next_cursor"]
-        else:  # pragma: no cover — pagination must terminate
-            pytest.fail("pagination did not terminate")
-
+        seen = _walk(client, {"q": "a", "limit": 2})
         assert len(seen) == 6
         assert len(set(seen)) == 6  # no duplicates across pages
+
+    def test_search_cursor_walk_limit_1_returns_colliding_ids_once(self, client: TestClient, api_db) -> None:
+        """Page boundary ON a cross-table id tie must not drop the same-id twin.
+
+        ids 1–3 exist in BOTH tables (6 rows).  With limit=1 every boundary
+        splits a tie — the old bare-``id`` keyset lost all en_zo twins.
+        """
+        seen = _walk(client, {"q": "a", "limit": 1})
+        assert seen == [
+            (1, "dictionary"),
+            (1, "dictionary_en_zo"),
+            (2, "dictionary"),
+            (2, "dictionary_en_zo"),
+            (3, "dictionary"),
+            (3, "dictionary_en_zo"),
+        ]  # every colliding-id pair exactly once, merge order (id, table)
+
+    def test_search_cursor_walk_odd_limit(self, client: TestClient, api_db) -> None:
+        """limit=3 (odd) lands exactly on a tie boundary — still 6 distinct rows."""
+        seen = _walk(client, {"q": "a", "limit": 3})
+        assert len(seen) == 6
+        assert len(set(seen)) == 6
+
+    def test_next_cursor_is_composite_id_table(self, client: TestClient, api_db) -> None:
+        resp = client.get("/api/v1/lexicon/search", params={"q": "a", "limit": 1})
+        data = resp.json()
+        assert data["has_more"] is True
+        assert data["next_cursor"] == "1:dictionary"
+
+    def test_single_table_short_circuit_with_composite_cursor(self, client: TestClient, dict_only_db) -> None:
+        """q hitting only one table still paginates with the composite format."""
+        seen = _walk(client, {"q": "a", "limit": 1})
+        assert seen == [(1, "dictionary"), (2, "dictionary"), (3, "dictionary")]
+
+    @pytest.mark.parametrize(
+        "bad_cursor",
+        ["5", "abc", "1:", "1:nope", "dictionary:1", "1:dictionary:2", "-1:dictionary", "1.5:dictionary"],
+    )
+    def test_malformed_cursor_is_400(self, client: TestClient, api_db, bad_cursor: str) -> None:
+        resp = client.get("/api/v1/lexicon/search", params={"q": "a", "cursor": bad_cursor})
+        assert resp.status_code == 400
+        assert resp.json()["detail"]["error"] == "invalid_cursor"
 
     def test_search_requires_q(self, client: TestClient, api_db) -> None:
         assert client.get("/api/v1/lexicon/search").status_code == 422
