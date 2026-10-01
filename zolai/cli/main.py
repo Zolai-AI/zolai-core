@@ -1408,6 +1408,63 @@ def corpus_clean(
         raise typer.Exit(code=1)
 
 
+@corpus_app.command("revert-c1")
+def corpus_revert_c1(
+    apply: bool = typer.Option(False, "--apply", help="Write reverts (default: dry-run)"),
+    batch_size: int = typer.Option(5000, "--batch-size", help="Cells per transaction"),
+    db: Path = typer.Option(None, "--db", help="SQLite store (default: canonical data/zolai.db)"),
+    json_out: bool = typer.Option(False, "--json", help="Print the raw stats as JSON"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """↩️ C1.1 correction — restore cells corpus_clean_v1 wrongly rewrote.
+
+    Categories (derived from data_audit_log, never hard-coded ids):
+    `name_ram` titlecase person-name cells · `en_headword` dictionary_en_zo EN
+    glosses · `usage_ram` word_usage name lists · `grammar_meta` grammar
+    teaching cells. DRY-RUN unless `--apply`. Original corpus_clean_v1 audit
+    rows are kept; each reverted cell appends a `c1_1_name_revert by cli` row.
+    """
+    _setup_logging(verbose)
+    from ..data.corpus_clean import REVERT_CATEGORIES, run_revert_c1_1
+
+    stats = run_revert_c1_1(db_path=db, apply=apply, batch_size=batch_size)
+
+    if json_out:
+        import json as _json
+
+        typer.echo(_json.dumps(stats, indent=2, default=str))
+        raise typer.Exit(code=0)
+
+    mode = "[bold green]APPLY[/bold green]" if apply else "[bold yellow]DRY-RUN[/bold yellow]"
+    rprint(f"{mode} · C1.1 revert · {stats['duration_s']}s · {stats['db']}")
+    rprint(
+        f"[cyan]scanned:[/cyan] {stats['scanned_audit_rows']} corpus_clean_v1 audit rows · "
+        f"out-of-scope {stats['status']['out_of_scope']} · "
+        f"already {stats['status']['already']} · "
+        f"conflict {stats['status']['conflict']} · missing {stats['status']['missing']}"
+    )
+
+    t = Table(title="C1.1 revert — by category", border_style="blue")
+    t.add_column("Category", justify="left")
+    t.add_column("Detected", justify="right")
+    t.add_column("Reverted", justify="right")
+    for key in REVERT_CATEGORIES:
+        t.add_row(key, str(stats["detected"][key]), str(stats["reverted_by_category"][key]))
+    t.add_row("TOTAL", str(stats["status"]["pending"]), str(stats["reverted"]))
+    console.print(t)
+
+    rprint(f"[cyan]audit rows appended:[/cyan] {stats['audit_rows']} "
+           f"· log total {stats['audit_log_total_after']}")
+    rprint(f"[cyan]pending after run:[/cyan] {stats['pending_after']}"
+           + (" [green]✓ (idempotent)[/green]"
+              if apply and stats["pending_after"] == 0 else ""))
+
+    if apply and stats["row_counts_before"] != stats["row_counts_after"]:
+        rprint(f"[red]✗ row counts changed: {stats['row_counts_before']} → "
+               f'{stats["row_counts_after"]} (must never happen)[/red]')
+        raise typer.Exit(code=1)
+
+
 def main() -> None:
     app()
 

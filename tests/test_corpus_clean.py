@@ -33,11 +33,15 @@ from zolai.data.corpus_clean import (
     COLUMN_REGISTRY,
     DUP_KEYS,
     REASON,
+    REVERT_CATEGORIES,
+    REVERT_REASON,
     _registry_tables,
     _specs_for,
     append_apply_results,
+    clean_value,
     run_audit,
     run_clean,
+    run_revert_c1_1,
     write_report,
 )
 
@@ -590,3 +594,256 @@ def test_cli_clean_json_and_table_filter(runner: CliRunner, db: Path) -> None:
     payload = json.loads(result.clean)
     assert payload["scanned_tables"] == ["dictionary"]
     assert payload["applied"] is False
+
+
+# ---------------------------------------------------------------------------
+# C1.1 prevention guards (founder catch: person-name Ram / EN glosses /
+# grammar meta-docs) + the revert writer
+# ---------------------------------------------------------------------------
+
+
+def test_c1_1_titlecase_ram_preserved_lowercase_rewritten() -> None:
+    """Guard 1: `Ram` (Bible person-name) is never rewritten; exact lowercase
+    `ram` still receives the ZVS rule."""
+    sentence = "Jerahmeel, Ram, leh Khelubai ahi uh hi."
+    kept = clean_value(sentence, "sentence")
+    assert not kept.changed
+    assert kept.cleaned == sentence
+    assert kept.zvs_applied == 0
+
+    rewritten = clean_value("a ram hi.", "sentence")
+    assert rewritten.changed
+    assert rewritten.cleaned == "a gam hi."
+
+
+def test_c1_1_en_headword_element_untouched_others_cleaned() -> None:
+    """Guard 2: a JSON element equal to an EN headword is an English gloss —
+    no ZVS; a non-headword ZO element in the same cell is still cleaned."""
+    cell = json.dumps(["ram", "pathian"])
+    guarded = clean_value(
+        cell, "json", table="dictionary_en_zo", en_headwords={"ram"}
+    )
+    assert json.loads(guarded.cleaned) == ["ram", "pasian"]
+
+    # Without the guard (no table context) lowercase ram still rewrites.
+    unguarded = clean_value(cell, "json")
+    assert json.loads(unguarded.cleaned) == ["gam", "pasian"]
+
+    # Plain `translations_clean` values take the same whole-value guard.
+    word = clean_value("ram", "word", table="dictionary_en_zo", en_headwords={"ram"})
+    assert not word.changed
+    assert clean_value("ram", "word").cleaned == "gam"
+
+
+def test_c1_1_meta_doc_guard_preserves_teaching_contrast() -> None:
+    """Guard 3: `(not ` / `❌` teaching cells keep the forbidden form — the
+    contrast is the content; normal cells in the same table still clean."""
+    meta = "Uses `gam` (not `ram`)"
+    guarded = clean_value(meta, "sentence", table="zolai_grammar_patterns")
+    assert not guarded.changed
+    assert guarded.cleaned == meta
+
+    marked = clean_value("\u274c `ram`", "sentence", table="zolai_grammar_patterns")
+    assert not marked.changed
+
+    # Same text outside the grammar table is still normalised (guard is
+    # table-scoped), proving the veto is what preserves the contrast.
+    unguarded = clean_value(meta, "sentence")
+    assert unguarded.changed
+    assert unguarded.cleaned == "Uses `gam` (not `gam`)"
+
+    # A normal (non-meta) cell in the same table keeps compound clean-up.
+    normal = clean_value("ka hi leh om.", "sentence", table="zolai_grammar_patterns")
+    assert normal.cleaned == "ka hihleh om."
+
+
+def _seed_c1_1(db: Path) -> dict[str, int]:
+    """Install one corrupted cell per founder category (A-D) plus one
+    out-of-scope legit correction, each with its `corpus_clean_v1` audit row."""
+    conn = _connect(db)
+
+    def seed(table: str, row_id: int, field: str, old: str, new: str) -> None:
+        conn.execute(
+            f'UPDATE "{table}" SET "{field}" = ? WHERE id = ?', (new, row_id)
+        )
+        conn.execute(
+            "INSERT INTO data_audit_log "
+            "(table_name, row_id, field, old_value, new_value, changed_at, reason) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (table, row_id, field, old, new, "2026-10-01T12:00:00", REASON),
+        )
+
+    a_id = _insert(
+        conn,
+        "translations",
+        source="Hezron",
+        target="Jerahmeel, Gam, leh Khelubai ahi uh hi.",
+        direction="en_to_zo",
+    )
+    seed(
+        "translations", a_id, "target",
+        "Jerahmeel, Ram, leh Khelubai ahi uh hi.",
+        "Jerahmeel, Gam, leh Khelubai ahi uh hi.",
+    )
+
+    b_id = _insert(
+        conn,
+        "dictionary_en_zo",
+        headword="ram",
+        translations='["pieces", "gam"]',
+        translations_clean="",
+    )
+    seed("dictionary_en_zo", b_id, "translations",
+         '["pieces", "ram"]', '["pieces", "gam"]')
+
+    # B control: changed ZO leaf that is NOT an EN headword → stays.
+    keep_id = _insert(
+        conn,
+        "dictionary_en_zo",
+        headword="the",
+        translations='["nasep"]',
+        translations_clean="",
+    )
+    seed("dictionary_en_zo", keep_id, "translations",
+         '["na sep"]', '["nasep"]')
+
+    c_id = _insert(conn, "word_usage", word="gam", co_occurring_words=None)
+    seed("word_usage", c_id, "word", "ram", "gam")
+
+    d_id = _insert(
+        conn,
+        "zolai_grammar_patterns",
+        zolai_example="Uses `gam` (not `gam`)",
+        english_translation="contrast",
+    )
+    seed(
+        "zolai_grammar_patterns", d_id, "zolai_example",
+        "Uses `gam` (not `ram`)", "Uses `gam` (not `gam`)",
+    )
+
+    # Out of scope: legit compound correction in a real ZO sentence.
+    keep_ex_id = _insert(
+        conn, "training_exercises", zolai="a hihleh om", english="he did"
+    )
+    seed("training_exercises", keep_ex_id, "zolai",
+         "a hi leh om", "a hihleh om")
+
+    conn.commit()
+    conn.close()
+    return {
+        "name_ram": a_id,
+        "en_headword": b_id,
+        "en_headword_keep": keep_id,
+        "usage_ram": c_id,
+        "grammar_meta": d_id,
+        "keep_example": keep_ex_id,
+    }
+
+
+def test_c1_1_revert_dry_run_writes_nothing(db: Path) -> None:
+    ids = _seed_c1_1(db)
+    conn = _connect(db)
+    audit_before = len(_audit_rows(conn))
+    target_before = conn.execute(
+        "SELECT target FROM translations WHERE id = ?", (ids["name_ram"],)
+    ).fetchone()[0]
+    conn.close()
+
+    stats = run_revert_c1_1(db_path=db)
+    assert stats["applied"] is False
+    assert stats["status"]["pending"] == 4
+    for key in REVERT_CATEGORIES:
+        assert stats["detected"][key] == 1, (key, stats["detected"])
+    assert stats["reverted"] == 0
+    assert stats["audit_rows"] == 0
+
+    conn = _connect(db)
+    assert len(_audit_rows(conn)) == audit_before
+    assert conn.execute(
+        "SELECT target FROM translations WHERE id = ?", (ids["name_ram"],)
+    ).fetchone()[0] == target_before
+    conn.close()
+
+
+def test_c1_1_revert_apply_restores_cells_and_appends_audit_rows(db: Path) -> None:
+    ids = _seed_c1_1(db)
+    count_tables = (
+        "translations", "dictionary_en_zo", "word_usage",
+        "zolai_grammar_patterns", "training_exercises",
+    )
+    conn = _connect(db)
+    rows_before = {
+        t: conn.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]
+        for t in count_tables
+    }
+    conn.close()
+
+    stats = run_revert_c1_1(db_path=db, apply=True)
+    assert stats["applied"] is True
+    assert stats["reverted"] == 4
+    assert stats["reverted_by_category"] == {key: 1 for key in REVERT_CATEGORIES}
+    assert stats["audit_rows"] == 4
+    assert stats["pending_after"] == 0
+
+    conn = _connect(db)
+    # A: person-name restored
+    assert conn.execute(
+        "SELECT target FROM translations WHERE id = ?", (ids["name_ram"],)
+    ).fetchone()[0] == "Jerahmeel, Ram, leh Khelubai ahi uh hi."
+    # B: EN-headword cell restored; non-headword ZO cell untouched
+    assert json.loads(conn.execute(
+        "SELECT translations FROM dictionary_en_zo WHERE id = ?",
+        (ids["en_headword"],),
+    ).fetchone()[0]) == ["pieces", "ram"]
+    assert json.loads(conn.execute(
+        "SELECT translations FROM dictionary_en_zo WHERE id = ?",
+        (ids["en_headword_keep"],),
+    ).fetchone()[0]) == ["nasep"]
+    # C: usage name cell restored
+    assert conn.execute(
+        "SELECT word FROM word_usage WHERE id = ?", (ids["usage_ram"],)
+    ).fetchone()[0] == "ram"
+    # D: teaching contrast restored
+    assert conn.execute(
+        "SELECT zolai_example FROM zolai_grammar_patterns WHERE id = ?",
+        (ids["grammar_meta"],),
+    ).fetchone()[0] == "Uses `gam` (not `ram`)"
+    # Out-of-scope legit correction keeps its cleaned value
+    assert conn.execute(
+        "SELECT zolai FROM training_exercises WHERE id = ?", (ids["keep_example"],)
+    ).fetchone()[0] == "a hihleh om"
+
+    # New audit rows carry the revert reason; originals are never deleted.
+    audit = _audit_rows(conn)
+    assert len([r for r in audit if r["reason"] == REVERT_REASON]) == 4
+    assert len([r for r in audit if r["reason"] == REASON]) == 6
+    revert_rows = [r for r in audit if r["reason"] == REVERT_REASON]
+    ram_row = next(r for r in revert_rows if r["field"] == "target")
+    assert ram_row["old_value"] == "Jerahmeel, Gam, leh Khelubai ahi uh hi."
+    assert ram_row["new_value"] == "Jerahmeel, Ram, leh Khelubai ahi uh hi."
+
+    # Row counts unchanged (revert only ever UPDATEs).
+    for table, before in rows_before.items():
+        after = conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+        assert after == before, table
+    conn.close()
+
+    # Idempotent: a second apply finds nothing pending and writes nothing.
+    again = run_revert_c1_1(db_path=db, apply=True)
+    assert again["status"]["pending"] == 0
+    assert again["reverted"] == 0
+    assert again["audit_rows"] == 0
+    assert again["audit_log_total_after"] == stats["audit_log_total_after"]
+
+
+def test_cli_revert_c1_dry_run_json(runner: CliRunner, db: Path) -> None:
+    _seed_c1_1(db)
+    result = _invoke(runner, "corpus", "revert-c1", "--db", str(db), "--json")
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.clean)
+    assert payload["applied"] is False
+    assert payload["status"]["pending"] == 4
+    assert payload["reverted"] == 0
+    conn = _connect(db)
+    assert len([r for r in _audit_rows(conn) if r["reason"] == REVERT_REASON]) == 0
+    conn.close()
