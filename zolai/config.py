@@ -152,6 +152,12 @@ class AppConfig:
         default_factory=lambda: os.environ.get("ZOLAI_API_AUTH", "warn")
     )
     api_rate_limit_rpm: int = field(default_factory=_env_int("ZOLAI_API_RATE_LIMIT_RPM", 60))
+    # Engine mode (ADR/D2): rule (default, offline+deterministic) | hybrid | ai.
+    # Read live via zolai.engines.engine_mode() so ops can flip without restart;
+    # this field is the import-time default (mirrors api_auth_mode above).
+    engine_mode: str = field(
+        default_factory=lambda: os.environ.get("ZOLAI_ENGINE_MODE", "rule")
+    )
     gui_theme: str = os.environ.get("ZOLAI_GUI_THEME", "dark")
     monthly_budget_usd: float = field(
         default_factory=lambda: float(os.getenv("ZOLAI_MONTHLY_BUDGET_USD", "50.0"))

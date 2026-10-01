@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ..engines import llm_allowed
 from .providers.base import LLMProvider, get_provider_registry
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,19 @@ class FallbackChain:
         Returns:
             Dict with 'response', 'provider', 'model', 'fallback_used'.
         """
+        # Engine mode gate (D2): in ``rule`` mode — the default — and in
+        # ``hybrid``/``ai`` without a provider key, the chain never opens an
+        # outbound socket.  It answers straight from the deterministic
+        # rule-based fallback so the public contract is identical in every mode.
+        if not llm_allowed():
+            response = await self._rule_based.generate(messages, model=model, **kwargs)
+            return {
+                "response": response,
+                "provider": "rule_based",
+                "model": "rule_based",
+                "fallback_used": True,
+            }
+
         providers = self._registry.get_available_providers()
 
         # If preferred provider specified, try it first

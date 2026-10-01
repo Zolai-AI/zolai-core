@@ -55,6 +55,8 @@ class HealthResponse(BaseModel):
     tables_loaded: bool
     unigram_count: int
     bigram_count: int
+    # D2: active engine mode (rule|hybrid|ai) — additive key, same contract.
+    mode: str = "rule"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -110,7 +112,9 @@ async def corrections(
 
 @router.get("/health", response_model=HealthResponse)
 async def health():
-    """Health check — report whether n-gram tables are loaded."""
+    """Health check — n-gram table status + the active engine mode (D2)."""
+    from zolai.engines import engine_mode
+
     tables = _tables()
     unis = tables.get("unigrams", {})
     bigrams = tables.get("bigrams", {})
@@ -121,4 +125,5 @@ async def health():
         tables_loaded=loaded,
         unigram_count=len(unis),
         bigram_count=len(bigrams),
+        mode=engine_mode(),
     )
