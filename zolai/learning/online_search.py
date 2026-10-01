@@ -1,8 +1,9 @@
-"""Online search module for vocabulary, grammar, and Bible lookup.
+"""Database-backed search over vocabulary, grammar, and Bible tables.
 
-Uses web search to find additional resources for Zolai language learning.
-Provides ranked search with TF-IDF-inspired scoring, cross-lingual lookup,
-topical Bible search, TTL caching, and search analytics.
+Despite the historical "online" name, this module performs no network I/O: all
+``search_*`` methods read the local Zolai SQLite database. Provides ranked search
+with TF-IDF-inspired scoring, cross-lingual lookup, topical Bible search, TTL
+caching, and search analytics.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ _DEFAULT_TTL = 300  # seconds
 
 
 class OnlineSearch:
-    """Search online resources for Zolai language learning.
+    """Database-backed search for Zolai language learning (local SQLite; no network I/O).
 
     Features:
     - TF-IDF-inspired relevance scoring for ranked results

@@ -11,9 +11,9 @@
 |-------|--------|
 | Registry entries | **16** (`zolai/engines.py`), all lazy targets resolve (`test_lazy_import_resolves`) |
 | Registry ↔ probe drift guard | pass (`test_probe_table_matches_registry`) |
-| Offline engines (network=False) run twice, identical output | **15/15** pass (ZVS determinism) |
-| Offline engines under socket guard (zero outbound network) | **15/15** pass — 0 attempts recorded |
-| Network-flagged engines excluded from offline runs | `online_search` construct-only (`network=True`, `deterministic=False`) |
+| Offline engines (network=False) run twice, identical output | **16/16** pass (ZVS determinism) |
+| Offline engines under socket guard (zero outbound network) | **16/16** pass — 0 attempts recorded |
+| Network-flagged engines excluded from offline runs | **none** — all 16 engines are `network=False` after the `online_search` flag correction (see F2: REJECTED) |
 | Mode default | `rule` (`ZOLAI_ENGINE_MODE` unset → rule; unknown value → rule, never `ai`) |
 | Rule mode vs LLM chain | gate fires **before** provider registry is consulted, even with `GEMINI_API_KEY` set |
 | `ai`/`hybrid` without key | degrade to rule path — chain returns `provider="rule_based"`, zero sockets; HTTP endpoints still **200** with identical bodies (modulo additive `mode`) |
@@ -37,16 +37,21 @@
   `llm_allowed()`) or gate each handler with `llm_allowed()` + rule-path answer; P5 proxy posture
   already DENYs legacy mutations and keeps this surface internal. **No fix in P2.**
 
-## F2 — `OnlineSearch` has no mode gate (Low)
+## F2 — `OnlineSearch` has no mode gate (REJECTED — not a defect; naming only)
 
-- **Where:** `zolai/learning/online_search.py` (registry entry `online_search`, `network=True`).
-- **Defect:** nothing inside the class consults `llm_allowed()`/`resolve_engine_path()`; any caller in
-  `rule` mode can still trigger web search. The registry *documents* the capability, but enforcement
-  is caller-side only.
-- **Evidence:** capability flags + `test_network_engine_probe_runs_unguarded` (probe is construct-only
-  by design — a live search would hit external backends and flake CI).
-- **Proposed fix:** gate `search_*` entry points on engine mode (or assert mode in the router layer)
-  when C2 lands the DB-backed usage-pattern queries that replace most web-search dependence.
+- **Original premise (rejected):** `OnlineSearch` was registry-flagged `network=True`, so the
+  finding assumed any caller in `rule` mode could trigger a live web search with no
+  `llm_allowed()` gate.
+- **Reality (verifier evidence):** `zolai/learning/online_search.py` imports only stdlib +
+  `zolai.config` and every `search_*` path is a sqlite3 read against the local DB — zero outbound
+  network. A socket-guarded run recorded **0 attempts** with stable output, so there was nothing
+  to gate: the module was DB-only all along and only the *name* ("online") was misleading.
+- **Fix applied (metadata-only):** registry flag corrected to `network=False, deterministic=True`
+  and `online_search` now runs in the guarded offline contract set
+  (`test_offline_engine_contract`), plus a drift guard (`test_online_search_is_db_only`).
+- **Residual (backlog, not a gate defect):** the class/module is still named "online" — rename
+  candidate (`OnlineSearch` → `DatabaseSearch` / `LocalSearch`) when C2 lands the DB-backed
+  usage-pattern queries, together with its router call sites.
 
 ## F3 — Tokenizer contract is construct-only until P3 (Info)
 
@@ -100,4 +105,5 @@
 - `FallbackChain` gate ordering: provider registry is never touched when the mode says no — proven by
   the exploding-registry sentinel in `test_rule_mode_blocks_chain_even_with_key`.
 
-**All findings above are deferred by design — P2 is inventory + harness only.**
+**P2 is inventory + harness only:** F1, F3–F6 are deferred by design; F2 was resolved by a
+metadata-only registry correction (flag + docs — no behavior change).

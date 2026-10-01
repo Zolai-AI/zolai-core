@@ -237,7 +237,7 @@ def _probe_attestation() -> Callable[[], Any]:
 
 
 def _probe_online_search() -> Callable[[], Any]:
-    """Construct-only: ``search_*`` methods hit the web by design (network=True)."""
+    """Construct-only: ``OnlineSearch`` is DB-backed (sqlite3 reads) — no network I/O."""
     from zolai.learning.online_search import OnlineSearch
 
     instance = OnlineSearch()
@@ -344,10 +344,32 @@ def test_offline_engine_contract(spec: EngineSpec) -> None:
 
 
 def test_network_engine_probe_runs_unguarded() -> None:
-    """``online_search`` is the sanctioned network engine — excluded from offline runs."""
+    """Run unguarded probes for every ``network=True`` engine.
+
+    Historically ``online_search`` was the only flagged network engine — that flag
+    was wrong (it is a DB-only sqlite3 reader; see F2 in ENGINE_FINDINGS.md, now
+    REJECTED as naming confusion) and it is now ``network=False``, i.e. part of the
+    guarded offline set. The registry currently registers **no** network engines, so
+    this test skips; if a genuinely network-backed engine ever joins, its probe runs
+    unguarded here (it is excluded from the socket-guarded offline contract).
+    """
+    network_engines = [s for s in ENGINES if s.capabilities.network]
+    if not network_engines:
+        pytest.skip("no network engines registered — all engines are offline/deterministic")
+    for spec in network_engines:
+        run = PROBES[spec.name]()
+        assert run() is not None, f"{spec.name}: probe returned None"
+
+
+def test_online_search_is_db_only() -> None:
+    """Regression guard: ``online_search`` must stay network-free and deterministic.
+
+    It reads only the local SQLite DB (vocabulary/grammar/Bible), so it belongs in the
+    socket-guarded offline contract set — never flagged as a network engine again.
+    """
     spec = get_engine_spec("online_search")
-    assert spec.capabilities.network is True
-    assert spec.capabilities.deterministic is False
+    assert spec.capabilities.network is False
+    assert spec.capabilities.deterministic is True
     run = PROBES["online_search"]()
     assert run() == "OnlineSearch"
 
