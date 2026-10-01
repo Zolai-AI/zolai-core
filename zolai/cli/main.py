@@ -1296,7 +1296,8 @@ def _corpus_matrix(columns) -> Table:
 def _corpus_needs_line(review: dict, label: str = "review-needs") -> str:
     return (
         f"[yellow]{label}:[/yellow] suah {review['suah']} · "
-        f"word-sanity {review['word_sanity']} · json {review['json']} "
+        f"word-sanity {review['word_sanity']} · json {review['json']} · "
+        f"unique {review['unique']} "
         f"· total {review['total']}"
     )
 

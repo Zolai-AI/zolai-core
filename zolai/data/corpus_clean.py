@@ -29,6 +29,12 @@ Invariants
   miss can never hide a violation).
 - ``suah`` is **never** rewritten (rules_data → ``chuak`` vs AGENTS →
   ``suahtakna``: two canonical docs disagree → review-needs / needs-founder).
+- UNIQUE-index collisions are never written: a cleaned value already owned by
+  another row would merge two rows (a destructive dedupe) → refused and
+  counted as the ``unique`` review-need instead (row counts never change).
+  Keys are checked against the live table *and* a reserved-key set so dry-run
+  and apply behave identically; the write is still wrapped in an
+  ``IntegrityError`` guard as a last line of defence.
 - Bible Hakha/Falam columns ``zo_hcl06``/``zo_fcl`` are audit-only — never
   written (converting them would falsify the parallel versions).
 - EN/MY columns and label columns (``pattern``/``structure``/``pattern_text``)
@@ -183,6 +189,10 @@ NEEDS_FOUNDER: tuple[str, ...] = (
     "review-need for a founder decision.",
     "**Dedupe DELETEs** — duplicate groups are counted only (destructive "
     "removal needs an explicit founder decision; row counts are unchanged).",
+    "**Unique-index collisions** — a cleaned value that already exists in "
+    "another row of the same table (e.g. `dictionary.zolai` has a UNIQUE "
+    "index) would merge two rows. C1 refuses the write and counts the cell as "
+    "a review-need (`unique`); row counts never change.",
     "**Junk / word-sanity headwords** — word fields whose cleaned value fails "
     "`^[a-z][a-z-]*$` are left untouched (changing them could alter headword "
     "identity); they are counted as review-needs.",
@@ -219,11 +229,19 @@ class CellOutcome:
     sanity_fail: bool | None = None
     #: JSON column whose content could not be parsed (review-need, no write).
     json_bad: bool = False
+    #: The cleaned value already exists in another row of the same table
+    #: (UNIQUE index) — writing it would merge rows (review-need, no write).
+    unique_blocked: bool = False
 
     @property
     def writable(self) -> bool:
         """True when this cell should be written (changed and not gated)."""
-        return self.changed and not self.blocked and not self.json_bad
+        return (
+            self.changed
+            and not self.blocked
+            and not self.json_bad
+            and not self.unique_blocked
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -532,6 +550,70 @@ def _count(conn: sqlite3.Connection, table: str) -> int:
     return int(conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0])
 
 
+def _unique_indexes(conn: sqlite3.Connection, table: str) -> list[tuple[str, ...]]:
+    """Column tuples of every UNIQUE index/constraint on *table*."""
+    out: list[tuple[str, ...]] = []
+    for idx in conn.execute(f'PRAGMA index_list("{table}")'):
+        if not idx["unique"]:
+            continue
+        cols = tuple(
+            r["name"] for r in conn.execute(f'PRAGMA index_info("{idx["name"]}")')
+        )
+        if cols and all(cols):
+            out.append(cols)
+    return out
+
+
+def _unique_keys(
+    spec: ColumnSpec,
+    row: sqlite3.Row,
+    cleaned: str,
+    uniq: Sequence[tuple[str, ...]],
+) -> list[tuple[tuple[str, ...], tuple[Any, ...]]]:
+    """``(index_cols, values)`` for every UNIQUE index containing the cleaned column.
+
+    NULL columns are dropped: SQLite treats NULLs as distinct in unique
+    indexes, so such a key can never collide.
+    """
+    keys: list[tuple[tuple[str, ...], tuple[Any, ...]]] = []
+    for cols in uniq:
+        if spec.column not in cols:
+            continue
+        values = tuple(cleaned if col == spec.column else row[col] for col in cols)
+        if any(v is None for v in values):
+            continue
+        keys.append((cols, values))
+    return keys
+
+
+def _unique_conflict(
+    conn: sqlite3.Connection,
+    table: str,
+    keys: Sequence[tuple[tuple[str, ...], tuple[Any, ...]]],
+    row_id: Any,
+    reserved: set[tuple[tuple[str, ...], tuple[Any, ...]]],
+) -> bool:
+    """True when writing these unique keys would collide with another row.
+
+    Checks both ``reserved`` (same-scan candidates the cleaner already
+    committed to writing — keeps dry-run and apply identical) and the live
+    table (rows written by earlier batches or pre-existing data).  A collision
+    means two rows would share a UNIQUE key — merging them is a destructive
+    dedupe C1 refuses to decide, so the cell becomes a review-need instead.
+    """
+    for cols, values in keys:
+        if (cols, values) in reserved:
+            return True
+        where = " AND ".join(f'"{col}" = ?' for col in cols)
+        hit = conn.execute(
+            f'SELECT 1 FROM "{table}" WHERE {where} AND id != ? LIMIT 1',
+            (*values, row_id),
+        ).fetchone()
+        if hit:
+            return True
+    return False
+
+
 def _registry_tables() -> list[str]:
     return list(dict.fromkeys(spec.table for spec in COLUMN_REGISTRY))
 
@@ -540,12 +622,17 @@ def _specs_for(table: str) -> list[ColumnSpec]:
     return [spec for spec in COLUMN_REGISTRY if spec.table == table]
 
 
-def _needed_columns(specs: Sequence[ColumnSpec]) -> list[str]:
+def _needed_columns(specs: Sequence[ColumnSpec], uniq_cols: Sequence[str] = ()) -> list[str]:
     cols: list[str] = ["id"]
     for spec in specs:
         for col in (spec.column, spec.only_when[0] if spec.only_when else None):
             if col and col not in cols:
                 cols.append(col)
+    # Unique-index guards need the *other* index columns of the row too
+    # (e.g. `word_usage(word, book)` when only `word` is cleaned).
+    for col in uniq_cols:
+        if col not in cols:
+            cols.append(col)
     return cols
 
 
@@ -584,6 +671,7 @@ def _new_col_stats(spec: ColumnSpec, sample_limit: int) -> dict[str, Any]:
         "uppercase": 0,
         "word_sanity": 0,
         "blocked": 0,
+        "unique_blocked": 0,
         "json_bad": 0,
         "changed_cells": 0,
         "would_write": 0,
@@ -601,6 +689,7 @@ def _accumulate(st: dict[str, Any], spec: ColumnSpec, outcome: CellOutcome, row_
     st["suah_cells"] += int(outcome.suah_hits > 0)
     st["json_bad"] += int(outcome.json_bad)
     st["blocked"] += int(outcome.blocked)
+    st["unique_blocked"] += int(outcome.unique_blocked)
     if spec.kind == "word":
         st["uppercase"] += int(any(c.isupper() for c in outcome.original))
         st["word_sanity"] += int(bool(outcome.sanity_fail))
@@ -620,13 +709,16 @@ def _review_needs_from(sts: Sequence[dict[str, Any]]) -> dict[str, int]:
     suah = sum(st["suah_cells"] for st in sts if st["writable"])
     word = sum(st["blocked"] for st in sts if st["writable"])
     js = sum(st["json_bad"] for st in sts if st["writable"])
-    return {"suah": suah, "word_sanity": word, "json": js, "total": suah + word + js}
+    uniq = sum(st["unique_blocked"] for st in sts if st["writable"])
+    return {"suah": suah, "word_sanity": word, "json": js, "unique": uniq,
+            "total": suah + word + js + uniq}
 
 
 def _totals_from(sts: Sequence[dict[str, Any]]) -> dict[str, int]:
     keys = (
         "cells", "html", "whitespace", "zvs_cells", "zvs_hits", "suah_cells",
-        "uppercase", "word_sanity", "blocked", "json_bad", "changed_cells", "would_write",
+        "uppercase", "word_sanity", "blocked", "unique_blocked", "json_bad",
+        "changed_cells", "would_write",
     )
     return {k: sum(st[k] for st in sts) for k in keys}
 
@@ -676,8 +768,13 @@ def run_audit(
             for spec in specs:
                 if spec.column not in _columns(conn, table):
                     raise LookupError(f"column missing from live schema: {table}.{spec.column}")
-            cols = _needed_columns(specs)
+            uniq = _unique_indexes(conn, table)
+            uniq_cols = tuple(dict.fromkeys(c for cols_ in uniq for c in cols_))
+            cols = _needed_columns(specs, uniq_cols)
             per_spec = {spec.column: _new_col_stats(spec, sample_limit) for spec in specs}
+            # Keys this scan already committed to writing — keeps dry-run and
+            # apply identical for pairs that collide only with each other.
+            reserved: set[tuple[tuple[str, ...], tuple[Any, ...]]] = set()
             # Only one spec per column per table (translations targets distinct
             # columns), so a keyed dict is unambiguous.
             cur = conn.execute(f"SELECT {_quoted(cols)} FROM \"{table}\"")
@@ -696,6 +793,12 @@ def run_audit(
                         if spec.kind != "json" and text == "":
                             continue
                         outcome = clean_value(text, spec.kind, spec.ctx, registries=registries)
+                        if spec.writable and outcome.writable:
+                            keys = _unique_keys(spec, row, outcome.cleaned, uniq)
+                            if _unique_conflict(conn, table, keys, row["id"], reserved):
+                                outcome.unique_blocked = True
+                            else:
+                                reserved.update(keys)
                         _accumulate(per_spec[spec.column], spec, outcome, row["id"])
             column_stats.extend(per_spec[spec.column] for spec in specs)
             if table in DUP_KEYS:
@@ -797,14 +900,20 @@ def run_clean(
             for spec in specs:
                 if spec.column not in _columns(conn, table):
                     raise LookupError(f"column missing from live schema: {table}.{spec.column}")
+            uniq = _unique_indexes(conn, table)
+            uniq_cols = tuple(dict.fromkeys(c for cols_ in uniq for c in cols_))
             per_spec = {spec.column: _new_col_stats(spec, sample_limit) for spec in specs}
             classes = {"html": 0, "whitespace": 0, "zvs": 0, "json": 0}
             cells_changed = 0
             audit_rows = 0
-            review = {"suah": 0, "word_sanity": 0, "json": 0}
+            review = {"suah": 0, "word_sanity": 0, "json": 0, "unique": 0}
+            # Persists across batches: dry-run never writes, so without it a
+            # pair colliding only with each other would slip through in
+            # dry-run but block in apply (keeps the two modes identical).
+            reserved: set[tuple[tuple[str, ...], tuple[Any, ...]]] = set()
 
             cursor = cursors.get(table, 0) if apply else 0
-            cols = _needed_columns(specs)
+            cols = _needed_columns(specs, uniq_cols)
             while True:
                 rows = conn.execute(
                     f'SELECT {_quoted(cols)} FROM "{table}" WHERE id > ? ORDER BY id LIMIT ?',
@@ -824,6 +933,12 @@ def run_clean(
                         if spec.kind != "json" and text == "":
                             continue
                         outcome = clean_value(text, spec.kind, spec.ctx, registries=registries)
+                        if spec.writable and outcome.writable:
+                            keys = _unique_keys(spec, row, outcome.cleaned, uniq)
+                            if _unique_conflict(conn, table, keys, row["id"], reserved):
+                                outcome.unique_blocked = True
+                            else:
+                                reserved.update(keys)
                         _accumulate(per_spec[spec.column], spec, outcome, row["id"])
                         if spec.writable and outcome.json_bad:
                             review["json"] += 1
@@ -831,16 +946,27 @@ def run_clean(
                             review["suah"] += 1
                         if spec.writable and outcome.blocked:
                             review["word_sanity"] += 1
+                        if spec.writable and outcome.unique_blocked:
+                            review["unique"] += 1
                         if spec.writable and outcome.writable:
                             pending.append((spec, row["id"], outcome))
 
+                written = pending
                 if apply and pending:
                     stamp = _utc_now()
+                    written = []
                     for spec, row_id, outcome in pending:
-                        conn.execute(
-                            f'UPDATE "{table}" SET "{spec.column}" = ? WHERE id = ?',
-                            (outcome.cleaned, row_id),
-                        )
+                        try:
+                            conn.execute(
+                                f'UPDATE "{table}" SET "{spec.column}" = ? WHERE id = ?',
+                                (outcome.cleaned, row_id),
+                            )
+                        except sqlite3.IntegrityError:
+                            # Safety net for conflicts the scan check cannot
+                            # see (expression indexes, concurrent writers):
+                            # skip the cell, never merge rows.
+                            review["unique"] += 1
+                            continue
                         conn.execute(
                             "INSERT INTO data_audit_log "
                             "(table_name, row_id, field, old_value, new_value, changed_at, reason) "
@@ -855,9 +981,10 @@ def run_clean(
                                 REASON,
                             ),
                         )
+                        written.append((spec, row_id, outcome))
                     conn.commit()
 
-                for spec, _row_id, outcome in pending:
+                for spec, _row_id, outcome in written:
                     cells_changed += 1
                     audit_rows += int(apply)
                     if spec.kind == "json":
@@ -923,7 +1050,7 @@ def run_clean(
             "json": sum(st["classes"]["json"] for st in table_stats.values()),
             "review_needs": {
                 key: sum(st["review_needs"][key] for st in table_stats.values())
-                for key in ("suah", "word_sanity", "json")
+                for key in ("suah", "word_sanity", "json", "unique")
             },
             "rows_before": sum(row_counts_before.values()),
             "rows_after": sum(row_counts_after.values()),
@@ -998,7 +1125,7 @@ def _render_report(audit: dict[str, Any]) -> str:
         f'suah {totals["suah_cells"]} · uppercase {totals["uppercase"]} · '
         f'word-sanity {totals["word_sanity"]} · json-unparseable {totals["json_bad"]}',
         f'- review-needs: **suah {rn["suah"]}** · **word-sanity {rn["word_sanity"]}** · '
-        f'**json {rn["json"]}** (total {rn["total"]})',
+        f'**json {rn["json"]}** · **unique {rn["unique"]}** (total {rn["total"]})',
         f'- exact-duplicate groups: **{audit["duplicate_groups_total"]}** (detect + count only — no deletes)',
         "",
         "> `suah` is never rewritten; `zo_hcl06`/`zo_fcl` are audit-only; "
@@ -1036,6 +1163,9 @@ def _render_report(audit: dict[str, Any]) -> str:
         "(The full count of word cells failing the regex — including those needing no "
         "change — is the `sanity` column of the defect matrix.)",
         "- **json** — JSON cells that fail to parse → left untouched, counted only.",
+        "- **unique** — a cleaned value that would collide with another row in a "
+        "UNIQUE index (shared headword/zolai key) → merging rows is a destructive "
+        "dedupe C1 refuses to decide; cell left untouched, counted only.",
         "",
         "## Exclusions",
         "",
@@ -1065,7 +1195,7 @@ def _render_report(audit: dict[str, Any]) -> str:
         "",
         "**Cleaned ≠ zero defects.** Only deterministic ZVS/whitespace/HTML fixes are "
         "applied; everything else stays as review-needs triage (`suah`, word-sanity, "
-        "json, duplicates). After `--apply` an `## Apply results` section is appended "
+        "json, unique-collision, duplicates). After `--apply` an `## Apply results` section is appended "
         "with before/after row counts, audit-row totals and the idempotency proof.",
         "",
     ]
@@ -1136,7 +1266,7 @@ def append_apply_results(
         "### Re-audit after apply (remaining defects = triage)",
         "",
         f'- review-needs: suah **{rn_after["suah"]}** · word-sanity **{rn_after["word_sanity"]}** · '
-        f'json **{rn_after["json"]}** (total {rn_after["total"]})',
+        f'json **{rn_after["json"]}** · unique **{rn_after["unique"]}** (total {rn_after["total"]})',
         f'- would-write cells remaining: **{audit_after["totals"]["would_write"]}**',
         f'- duplicate groups: **{audit_after["duplicate_groups_total"]}** (unchanged — no deletes)',
         f'- html remaining: {audit_after["totals"]["html"]} · whitespace remaining: '
@@ -1158,7 +1288,7 @@ def append_apply_results(
         "",
         *_render_needs_founder(),
         "",
-        "> `suah` / word-sanity / json / duplicate counts above are the deliberate "
+        "> `suah` / word-sanity / json / unique / duplicate counts above are the deliberate "
         "remainder — **cleaned ≠ zero defects**.",
         "",
     ]
