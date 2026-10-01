@@ -14,6 +14,8 @@ Covers the invariants of ``zolai.data.corpus_clean`` (plan C1_CORPUS_CLEAN):
 - JSON dicts clean the ``zo`` key only; unparseable JSON is a review-need.
 - direction-aware ``translations`` cleaning (``en_to_zo`` target / ``zo_to_en``
   source only) and duplicate-group counting.
+- a cleaned value already owned by another row under a UNIQUE index is refused
+  (review-need ``unique``) — row merges are a destructive dedupe C1 never does.
 """
 
 from __future__ import annotations
@@ -83,6 +85,11 @@ def db(tmp_path: Path) -> Path:
         decl = ", ".join(f'"{name}" {ctype}' for name, ctype in cols.items())
         conn.execute(f'CREATE TABLE "{table}" ({decl})')
 
+    # UNIQUE indexes like the live schema — a cleaned value that already
+    # exists in another row must be refused (review-need `unique`), not merged.
+    conn.execute("CREATE UNIQUE INDEX ux_dict_zolai ON dictionary(zolai)")
+    conn.execute("CREATE UNIQUE INDEX ux_prov_zolai ON proverbs(zolai)")
+
     # --- dictionary (modern ZO word column) --------------------------------
     _insert(conn, "dictionary", zolai="  khem&nbsp;  ", english="lie &amp; deceive")
     _insert(conn, "dictionary", zolai="pathian", english="God")
@@ -128,6 +135,10 @@ def db(tmp_path: Path) -> Path:
     _insert(conn, "word_collocations", word1="ni", word2="bang")
     # --- remaining registry tables (smoke cells) ---------------------------
     _insert(conn, "proverbs", zolai="ni&amp;amp; bang", english="day and")
+    # `bawipa` would clean to `topa`, which already exists in another row —
+    # the UNIQUE index makes that a row merge, so C1 must refuse the write.
+    _insert(conn, "proverbs", zolai="bawipa", english="first")
+    _insert(conn, "proverbs", zolai="topa", english="second")
     _insert(conn, "zolai_vocabulary", zolai="nunnak", english="life")
     _insert(conn, "zolai_bible_analysis", zolai="Pasian&nbsp;hi", english="God is")
     _insert(conn, "zolai_grammar_patterns", zolai_example="ka&nbsp;pai kei", english_translation="no")
@@ -323,7 +334,7 @@ def test_html_unescapes_to_fixed_point(db: Path) -> None:
     assert conn.execute("SELECT zolai FROM dictionary WHERE id = 1").fetchone()[0] == "khem"
     assert conn.execute("SELECT zolai FROM zolai_bible_analysis").fetchone()[0] == "Pasian hi"
     # double-encoded entity needs two unescape passes (`&amp;amp;` → `&amp;` → `&`)
-    assert conn.execute("SELECT zolai FROM proverbs").fetchone()[0] == "ni& bang"
+    assert conn.execute("SELECT zolai FROM proverbs WHERE id = 1").fetchone()[0] == "ni& bang"
     # EN columns are never selected — byte-identical after apply
     assert conn.execute("SELECT english FROM dictionary WHERE id = 1").fetchone()[0] == "lie &amp; deceive"
     conn.close()
@@ -405,6 +416,41 @@ def test_json_review_need_counted(db: Path) -> None:
     assert audit["totals"]["json_bad"] == 1
 
 
+def test_unique_collision_is_skipped_and_counted(db: Path) -> None:
+    """A cleaned value already owned by another row must never be written.
+
+    `proverbs.bawipa` cleans to `topa`, but another row already holds `topa`
+    under a UNIQUE index — writing it would merge two rows. C1 refuses the
+    write, counts it as the `unique` review-need, and a second apply stays at
+    0 cells (the collision is permanent until a founder decides).
+    """
+    audit = run_audit(db_path=db)
+    assert audit["review_needs"]["unique"] == 1
+    # blocked cells leave the would-write pool
+    assert audit["totals"]["would_write"] < audit["totals"]["changed_cells"]
+
+    stats = run_clean(db_path=db, apply=True)
+    assert stats["totals"]["review_needs"]["unique"] == 1
+
+    conn = _connect(db)
+    zolai_values = [r["zolai"] for r in _rows(conn, "proverbs")]
+    assert "bawipa" in zolai_values          # refused — still the original
+    assert "topa" in zolai_values            # the pre-existing row untouched
+    # no audit row was appended for the refused cell
+    assert not [
+        a for a in _audit_rows(conn)
+        if a["table_name"] == "proverbs" and a["old_value"] == "bawipa"
+    ]
+    conn.close()
+
+    # permanent collision: a second apply writes 0 cells (idempotent refusal)
+    second = run_clean(db_path=db, apply=True)
+    assert second["totals"]["cells_changed"] == 0
+    audit2 = run_audit(db_path=db)
+    assert audit2["totals"]["would_write"] == 0
+    assert audit2["review_needs"]["unique"] == 1
+
+
 def test_duplicate_groups_counted_without_dropping_rows(db: Path) -> None:
     audit = run_audit(db_path=db)
     assert audit["duplicates"]["training_exercises"]["groups"] == 1
@@ -422,6 +468,7 @@ def test_duplicate_groups_counted_without_dropping_rows(db: Path) -> None:
 
 def test_clean_rejects_missing_column(db: Path) -> None:
     conn = _connect(db)
+    conn.execute("DROP INDEX ux_dict_zolai")  # SQLite blocks DROP COLUMN under an index
     conn.execute("ALTER TABLE dictionary DROP COLUMN zolai")
     conn.commit()
     conn.close()
