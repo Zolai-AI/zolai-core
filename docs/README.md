@@ -10,8 +10,11 @@
 | [MONITORING.md](MONITORING.md) | Prometheus/Grafana runbook, metric inventory, DB integrity |
 | [STRUCTURE.md](STRUCTURE.md) | Repo/code layout |
 | [LOGS_AND_TMP.md](LOGS_AND_TMP.md) | Logging & temp artifact policy |
+| [linguistics/ENGINE_HARDCODE_INVENTORY.md](linguistics/ENGINE_HARDCODE_INVENTORY.md) | D2 hardcode audit — literal inventory + C2/C3 replacements |
+| [linguistics/ENGINE_FINDINGS.md](linguistics/ENGINE_FINDINGS.md) | P2 engine contract findings (xfail reasons F1–F6) |
 
 **Directories:**  `prompts/` (LLM prompts) · `specs/` (schemas) · `templates/` (repo scaffolds) ·
-`reports/` (past reports) · `guides/` · `index/` (indexes) · `learning/` · `archive/` (legacy).
+`reports/` (past reports) · `guides/` · `index/` (indexes) · `learning/` · `linguistics/`
+(specs + engine audits) · `archive/` (legacy).
 
 > Docs for other domains (data, training, wiki, org) moved to their own repos in `Zolai-AI`.
