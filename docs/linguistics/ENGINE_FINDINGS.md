@@ -36,6 +36,21 @@
 - **Proposed fix (later phase):** route legacy chat through `FallbackChain` (which now honours
   `llm_allowed()`) or gate each handler with `llm_allowed()` + rule-path answer; P5 proxy posture
   already DENYs legacy mutations and keeps this surface internal. **No fix in P2.**
+- **Completeness addendum (post-review 2026-10-01):** F1's endpoint list omits two other
+  egress surfaces — both confirmed by code inspection, neither gated by `llm_allowed()`:
+  - `zolai/api/pipeline.py:248` — `POST /api/translate` makes a direct `GEMINI_SERVER_URL`
+    **httpx** call, **not `llm_allowed()`-gated**. Safe only because the pipeline router is
+    never mounted (no `include_router` / no route append for it in `server.py`) —
+    **if ever mounted = live D2 violation**.
+  - `zolai/api/desktop_router.py:863` — `GET /desktop/ollama/models` **is mounted**
+    (`server.py` appends `desktop_router.routes` onto `app.router.routes`) and opens a
+    socket to localhost Ollama (`/api/tags`) in `rule` mode — a metadata probe, but still
+    outbound egress outside the mode gate.
+- **Call-graph note:** `FallbackChain` has **no production callers** yet — `llm_allowed()` is
+  consulted inside `FallbackChain.generate`, so the gate is defense-in-depth for the future
+  C2 path, not a global egress barrier today.
+- **Status unchanged:** F1 stays `xfail` / deferred — this is a completeness addendum, not a
+  behavior change.
 
 ## F2 — `OnlineSearch` has no mode gate (REJECTED — not a defect; naming only)
 
