@@ -523,11 +523,15 @@ def test_report_and_append_render(db: Path, tmp_path: Path) -> None:
     append_apply_results(
         report, apply_stats=stats, audit_after=after,
         backup_note="backup-test.db.gz", idem_stats=None,
+        notes=["pre-apply section regenerated from backup (counter fix)."],
     )
     text = report.read_text(encoding="utf-8")
     assert "## Apply results" in text
     assert "NO-drops proof" in text
     assert "backup-test.db.gz" in text
+    assert "count-only — no deletes" in text
+    assert "### Report notes" in text
+    assert "counter fix" in text
 
 
 # ---------------------------------------------------------------------------
