@@ -40,6 +40,38 @@ Invariants
   written (converting them would falsify the parallel versions).
 - EN/MY columns and label columns (``pattern``/``structure``/``pattern_text``)
   are never selected.
+
+C1.1 prevention guards (added after the founder caught false positives)
+----------------------------------------------------------------------
+- **Titlecase person-name guard** — the DIALECT earth/land rewrite applies
+  only to the exact lowercase token; the titlecase onomastic form (1CH
+  2:9-11 genealogy, Job 32:2) is a Bible person-name and is never rewritten.
+  All other DIALECT entries (God-name, life/son, …) keep rewriting
+  case-insensitively (same-lexeme modernisation) — the full literal map
+  lives in ``zvs/rules_data.DIALECT_FORBIDDEN_TO_PREFERRED`` (this docstring
+  deliberately cites only descriptive glosses: the source-compliance gate
+  forbids raw forbidden forms in ``zolai/`` comments and docstrings).
+- **EN-headword guard** — a ``dictionary_en_zo`` JSON element (or the whole
+  ``translations_clean`` value) whose stored text exactly equals an EN headword
+  of the same table is an English gloss and never receives ZVS (whitespace and
+  HTML fixes still apply).
+- **Meta-doc guard** — a ``zolai_grammar_patterns`` cell that documents the
+  forbidden forms themselves (contains ``(not `` or ``❌`` alongside a ZVS
+  violation) is teaching material: ZVS is skipped for the whole cell so the
+  teaching contrast (``Uses gam (not …)``) is never destroyed.
+  Whitespace/HTML fixes still apply.
+
+``zolai corpus revert-c1 [--apply]``
+    C1.1 correction: restore every cell that ``corpus_clean_v1`` wrongly
+    rewrote in one of the four founder-audited categories (person-name cells,
+    EN-headword glosses in ``dictionary_en_zo``, ``word_usage`` name lists,
+    grammar meta-docs).  The revert set is derived on every run from
+    ``data_audit_log`` (``reason=corpus_clean_v1``) joined against the *live*
+    cell — never from hard-coded ids — so the command is reproducible and
+    idempotent (a second ``--apply`` finds 0 pending cells).  Dry-run by
+    default; each written cell gets a new ``data_audit_log`` row
+    (``reason=c1_1_name_revert by cli``) while the original ``corpus_clean_v1``
+    rows stay in place.
 """
 
 from __future__ import annotations
@@ -52,7 +84,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Sequence
+from typing import Any, Callable, Literal, Sequence
 
 from ..config import config
 from ..zvs import validate
@@ -65,6 +97,22 @@ Ctx = Literal["modern", "scripture"]
 
 #: ``data_audit_log.reason`` for every cell written by this module.
 REASON = "corpus_clean_v1 by cli"
+
+#: ``data_audit_log.reason`` for every C1.1 revert (see
+#: :func:`run_revert_c1_1`); the original ``REASON`` rows are never deleted.
+REVERT_REASON = "c1_1_name_revert by cli"
+
+#: ``zolai_grammar_patterns`` documents the forbidden forms themselves — the
+#: teaching markers that put a cell in meta-doc territory (C1.1 guard 3).
+GRAMMAR_TABLE = "zolai_grammar_patterns"
+DICT_EN_ZO_TABLE = "dictionary_en_zo"
+
+#: Meta-documentation markers: a ``(not …`` clause or a ``❌`` bullet next to
+#: a ZVS violation (see guard 3 in the module docstring).
+_META_DOC_RE = re.compile(r"\(not\s|\u274c")
+
+#: Titlecase person-name detection (Bible genealogy: son of Hezron, 1CH 2:9).
+_RAM_NAME_RE = re.compile(r"\bRam\b")
 
 #: Rows per batched transaction (plan §4).
 DEFAULT_BATCH_SIZE = 5000
@@ -369,7 +417,9 @@ def _zvs_step(
     text: str, registry: ExceptionRegistry, bible_ctx: Ctx
 ) -> tuple[str, int, int, int]:
     """Run ``zolai.zvs.validate()``; rewrite violations except the
-    context-dependent token (review-need, plan §3).
+    context-dependent token (review-need, plan §3) and the titlecase
+    person-name (C1.1 guard 1 — the DIALECT earth/land rewrite applies only
+    to the exact lowercase token; the titlecase form is a Bible person-name).
 
     Returns ``(text, hits, suah_hits, applied)``.
     """
@@ -382,6 +432,13 @@ def _zvs_step(
         if v.forbidden == "suah":
             suah_hits += 1
             continue
+        if v.forbidden == "ram" and (
+            v.start is None or v.end is None or text[v.start : v.end] != "ram"
+        ):
+            # C1.1: the rule pattern is re.IGNORECASE, so the titlecase
+            # person-name (1CH 2:9-11 / Job 32:2) matches the earth/land
+            # rule — only the exact lowercase token is a ZVS defect.
+            continue
         if v.preferred and v.start is not None and v.end is not None:
             applicable.append(v)
     out, applied = _replace_right_to_left(text, applicable)
@@ -389,10 +446,20 @@ def _zvs_step(
 
 
 def _clean_string(
-    text: str, kind: Kind, bible_ctx: Ctx, registry: ExceptionRegistry
+    text: str,
+    kind: Kind,
+    bible_ctx: Ctx,
+    registry: ExceptionRegistry,
+    *,
+    zvs_guard: Callable[[str], bool] | None = None,
+    meta_doc: bool = False,
 ) -> tuple[str, bool, bool, int, int, int]:
     """Pipeline: HTML → whitespace → ZVS. Returns
-    ``(cleaned, html_fixed, ws_fixed, zvs_hits, suah_hits, zvs_applied)``."""
+    ``(cleaned, html_fixed, ws_fixed, zvs_hits, suah_hits, zvs_applied)``.
+
+    ``zvs_guard(text)`` (C1.1 guard 2) and ``meta_doc`` (C1.1 guard 3) may
+    veto only the ZVS step — whitespace and HTML fixes still run.
+    """
     html_fixed = False
     after_html = text
     if "<" in text or "&" in text:
@@ -400,12 +467,27 @@ def _clean_string(
         html_fixed = after_html != text
     after_ws = _ws_step(after_html, kind)
     ws_fixed = after_ws != after_html
+    if zvs_guard is not None and zvs_guard(text):
+        return after_ws, html_fixed, ws_fixed, 0, 0, 0
+    if (
+        meta_doc
+        and _META_DOC_RE.search(text)
+        and _ZVS_PRECHECK.search(text)
+    ):
+        # Teaching cell documenting a forbidden form (``Uses gam (not …)``
+        # or a ❌ bullet) — rewriting it destroys the contrast (C1.1 guard 3).
+        return after_ws, html_fixed, ws_fixed, 0, 0, 0
     cleaned, hits, suah, applied = _zvs_step(after_ws, registry, bible_ctx)
     return cleaned, html_fixed, ws_fixed, hits, suah, applied
 
 
 def _clean_json_node(
-    node: Any, bible_ctx: Ctx, registry: ExceptionRegistry
+    node: Any,
+    bible_ctx: Ctx,
+    registry: ExceptionRegistry,
+    *,
+    zvs_guard: Callable[[str], bool] | None = None,
+    meta_doc: bool = False,
 ) -> tuple[Any, bool, bool, bool, int, int, int]:
     """Recursively clean a parsed JSON node.
 
@@ -413,10 +495,16 @@ def _clean_json_node(
     the ``zo`` key **only** (other keys — ``en``, ``ref`` — stay byte-identical);
     lists recurse; scalars are untouched.
 
+    ``zvs_guard`` / ``meta_doc`` are the C1.1 vetoes (see :func:`_clean_string`)
+    and are evaluated per string node against its **stored** text.
+
     Returns ``(new_node, changed, html_fixed, ws_fixed, hits, suah_hits, applied)``.
     """
     if isinstance(node, str):
-        cleaned, h, w, hits, suah, applied = _clean_string(node, "sentence", bible_ctx, registry)
+        cleaned, h, w, hits, suah, applied = _clean_string(
+            node, "sentence", bible_ctx, registry,
+            zvs_guard=zvs_guard, meta_doc=meta_doc,
+        )
         return cleaned, cleaned != node, h, w, hits, suah, applied
     if isinstance(node, list):
         changed = False
@@ -425,7 +513,10 @@ def _clean_json_node(
         out: list[Any] = []
         for item in node:
             if isinstance(item, (str, list, dict)):
-                new_item, c, h, w, hi, su, ap = _clean_json_node(item, bible_ctx, registry)
+                new_item, c, h, w, hi, su, ap = _clean_json_node(
+                    item, bible_ctx, registry,
+                    zvs_guard=zvs_guard, meta_doc=meta_doc,
+                )
             else:
                 new_item, c, h, w, hi, su, ap = item, False, False, False, 0, 0, 0
             changed = changed or c
@@ -439,7 +530,10 @@ def _clean_json_node(
     if isinstance(node, dict):
         if "zo" not in node or not isinstance(node["zo"], str):
             return node, False, False, False, 0, 0, 0
-        new_zo, c, h, w, hi, su, ap = _clean_json_node(node["zo"], bible_ctx, registry)
+        new_zo, c, h, w, hi, su, ap = _clean_json_node(
+            node["zo"], bible_ctx, registry,
+            zvs_guard=zvs_guard, meta_doc=meta_doc,
+        )
         if not c:
             # No write pending — but the zo value may still hold a deferred
             # review-need (``suah_hits``). Propagate the counters (they are
@@ -452,12 +546,38 @@ def _clean_json_node(
     return node, False, False, False, 0, 0, 0
 
 
+def _headword_guard(en_headwords: set[str]) -> Callable[[str], bool]:
+    """C1.1 guard 2: an exact EN headword is an English gloss → no ZVS."""
+
+    def guard(text: str) -> bool:
+        return text in en_headwords
+
+    return guard
+
+
+def _en_headwords(
+    conn: sqlite3.Connection, scanned: Sequence[str]
+) -> set[str] | None:
+    """Load the ``dictionary_en_zo`` headword set for the C1.1 gloss guard
+    (``None`` when that table is not part of the scan)."""
+    if DICT_EN_ZO_TABLE not in scanned:
+        return None
+    return {
+        row[0]
+        for row in conn.execute(
+            f'SELECT headword FROM "{DICT_EN_ZO_TABLE}" WHERE headword IS NOT NULL'
+        )
+    }
+
+
 def clean_value(
     text: str,
     kind: Kind,
     bible_ctx: Ctx = "modern",
     *,
     registries: Registries | None = None,
+    table: str | None = None,
+    en_headwords: set[str] | None = None,
 ) -> CellOutcome:
     """Clean one stored cell (plan §3 entry point: ``clean_value(text, kind,
     bible_ctx)``).
@@ -469,9 +589,21 @@ def clean_value(
         ``"sentence"`` — collapse non-newline whitespace + ZVS (no lowercasing);
         ``"json"`` — parse, clean ZO string values (``zo`` keys in dicts only),
         re-dump only when something actually changed (unparseable → review-need).
+
+    ``table`` selects the C1.1 cell guards:
+        ``dictionary_en_zo`` — an element/value equal to an EN headword in
+        ``en_headwords`` is an English gloss: ZVS is skipped (guard 2);
+        ``zolai_grammar_patterns`` — a ``(not `` / ``❌`` teaching cell with a
+        ZVS violation is skipped wholesale (guard 3).  Both guards leave
+        whitespace/HTML fixes running.
     """
     original = text if isinstance(text, str) else str(text)
     registry = _registry_for(bible_ctx, registries)
+
+    zvs_guard = _headword_guard(en_headwords) if (
+        table == DICT_EN_ZO_TABLE and en_headwords
+    ) else None
+    meta_doc = table == GRAMMAR_TABLE
 
     if kind == "json":
         if original == "":
@@ -480,7 +612,9 @@ def clean_value(
             parsed: Any = json.loads(original)
         except (ValueError, TypeError):
             return CellOutcome(original, original, json_bad=True)
-        new_node, changed, h, w, hits, suah, applied = _clean_json_node(parsed, bible_ctx, registry)
+        new_node, changed, h, w, hits, suah, applied = _clean_json_node(
+            parsed, bible_ctx, registry, zvs_guard=zvs_guard, meta_doc=meta_doc
+        )
         if not changed:
             return CellOutcome(original, original, zvs_hits=hits, suah_hits=suah)
         return CellOutcome(
@@ -497,7 +631,10 @@ def clean_value(
     if original == "":
         return CellOutcome(original, original, sanity_fail=False if kind == "word" else None)
 
-    cleaned, h, w, hits, suah, applied = _clean_string(original, kind, bible_ctx, registry)
+    cleaned, h, w, hits, suah, applied = _clean_string(
+        original, kind, bible_ctx, registry,
+        zvs_guard=zvs_guard, meta_doc=meta_doc,
+    )
     changed = cleaned != original
     sanity_fail: bool | None = None
     blocked = False
@@ -765,6 +902,7 @@ def run_audit(
         scanned = [t for t in wanted if t in present]
         skipped = [t for t in wanted if t not in present]
         registries = build_registries(conn)
+        en_headwords = _en_headwords(conn, scanned)
 
         row_counts = {t: _count(conn, t) for t in scanned}
         column_stats: list[dict[str, Any]] = []
@@ -799,7 +937,10 @@ def run_audit(
                         text = cell if isinstance(cell, str) else str(cell)
                         if spec.kind != "json" and text == "":
                             continue
-                        outcome = clean_value(text, spec.kind, spec.ctx, registries=registries)
+                        outcome = clean_value(
+                            text, spec.kind, spec.ctx, registries=registries,
+                            table=spec.table, en_headwords=en_headwords,
+                        )
                         if spec.writable and outcome.writable:
                             keys = _unique_keys(spec, row, outcome.cleaned, uniq)
                             if _unique_conflict(conn, table, keys, row["id"], reserved):
@@ -879,6 +1020,7 @@ def run_clean(
         scanned = [t for t in wanted if t in present]
         skipped = [t for t in wanted if t not in present]
         registries = build_registries(conn)
+        en_headwords = _en_headwords(conn, scanned)
 
         resuming = False
         cursors: dict[str, int] = {}
@@ -939,7 +1081,10 @@ def run_clean(
                         text = cell if isinstance(cell, str) else str(cell)
                         if spec.kind != "json" and text == "":
                             continue
-                        outcome = clean_value(text, spec.kind, spec.ctx, registries=registries)
+                        outcome = clean_value(
+                            text, spec.kind, spec.ctx, registries=registries,
+                            table=spec.table, en_headwords=en_headwords,
+                        )
                         if spec.writable and outcome.writable:
                             keys = _unique_keys(spec, row, outcome.cleaned, uniq)
                             if _unique_conflict(conn, table, keys, row["id"], reserved):
@@ -1077,6 +1222,256 @@ def run_clean(
             "row_counts_after": row_counts_after,
             "audit_log_total_after": audit_log_total,
             "totals": totals,
+            "duration_s": round(time.time() - started, 2),
+        }
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# C1.1 correction — revert cells wrongly rewritten by ``corpus_clean_v1``
+# ---------------------------------------------------------------------------
+
+#: ``data_audit_log`` columns used when appending a revert row (matches the
+#: :func:`run_clean` writer so both eras of the log stay schema-compatible).
+_REVERT_AUDIT_SQL = (
+    "INSERT INTO data_audit_log "
+    "(table_name, row_id, field, old_value, new_value, changed_at, reason) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?)"
+)
+
+#: Category keys reported by :func:`run_revert_c1_1` (founder audit A-D).
+REVERT_CATEGORIES: tuple[str, ...] = ("name_ram", "en_headword", "usage_ram", "grammar_meta")
+
+_USAGE_TABLES: frozenset[str] = frozenset({"word_usage", "zolai_word_usage"})
+
+
+def _changed_str_leaves(old: Any, new: Any) -> list[str]:
+    """Strings that differ between the stored ``old`` and ``new`` JSON values.
+
+    Lists walk positionally (clean never adds/removes elements), dicts walk
+    shared keys; a value pair that only one side parses falls back to the
+    whole stored text (``translations_clean`` is a plain string).
+    """
+    try:
+        o: Any = json.loads(old) if isinstance(old, str) else old
+        n: Any = json.loads(new) if isinstance(new, str) else new
+    except (ValueError, TypeError):
+        return [old] if isinstance(old, str) and old != new else []
+    if isinstance(o, list) and isinstance(n, list) and len(o) == len(n):
+        leaves: list[str] = []
+        for a, b in zip(o, n):
+            leaves.extend(_changed_str_leaves(a, b))
+        return leaves
+    if isinstance(o, dict) and isinstance(n, dict):
+        leaves = []
+        for key in o.keys() & n.keys():
+            leaves.extend(_changed_str_leaves(o[key], n[key]))
+        return leaves
+    return [o] if isinstance(o, str) and o != n else []
+
+
+def _c1_1_category(
+    table: str, old_value: str, new_value: str, en_headwords: set[str] | None
+) -> str | None:
+    """Classify one ``corpus_clean_v1`` audit row against the founder audit.
+
+    Returns the category key (see :data:`REVERT_CATEGORIES`) or ``None`` when
+    the change is out of scope (legit corrections such as the COMPOUND
+    rewrites in ``zvs/rules_data`` or titlecase God-name same-lexeme
+    modernisation stay).
+
+    - ``name_ram`` (A): titlecase person-name cells rewritten to gam/Gam —
+      any table; detection: ``_RAM_NAME_RE`` in old AND ``gam`` in new.
+    - ``en_headword`` (B): ``dictionary_en_zo`` cell with ≥1 changed string
+      leaf whose **old** value is an exact EN headword of that table.
+    - ``usage_ram`` (C): ``word_usage`` / ``zolai_word_usage`` cell with a
+      lowercase earth/land token rewritten to gam (name lists / name words —
+      conservative revert, needs-founder triage later).
+    - ``grammar_meta`` (D): ``zolai_grammar_patterns`` teaching cell — old
+      holds a ZVS violation inside a meta-doc marker (``(not `` / ``❌``).
+    """
+    old = old_value or ""
+    new = new_value or ""
+    if _RAM_NAME_RE.search(old) and "gam" in new.lower():
+        return "name_ram"
+    if table == DICT_EN_ZO_TABLE:
+        if en_headwords is None:
+            return None
+        if any(leaf in en_headwords for leaf in _changed_str_leaves(old, new)):
+            return "en_headword"
+        return None
+    if table in _USAGE_TABLES and re.search(r"\bram\b", old) and "gam" in new.lower():
+        return "usage_ram"
+    if table == GRAMMAR_TABLE and _META_DOC_RE.search(old) and _ZVS_PRECHECK.search(old):
+        return "grammar_meta"
+    return None
+
+
+def _revert_candidates(
+    conn: sqlite3.Connection, en_headwords: set[str] | None
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Derive the C1.1 revert set: one entry per ``corpus_clean_v1`` cell
+    that is **still** in its corrupted state (live value == ``new_value``).
+
+    The latest audit row per cell wins (a cell rewritten twice reverts only
+    once); cells already restored (live == ``old_value``) or modified by
+    another writer since (conflict) are counted but never written.
+    """
+    present = _table_names(conn)
+    counts = {
+        "audit_rows": 0,
+        "out_of_scope": 0,
+        "already": 0,
+        "conflict": 0,
+        "missing": 0,
+        "pending": 0,
+    }
+    for key in REVERT_CATEGORIES:
+        counts[f"pending_{key}"] = 0
+    latest: dict[tuple[str, int, str], sqlite3.Row] = {}
+    rows = conn.execute(
+        "SELECT table_name, row_id, field, old_value, new_value "
+        "FROM data_audit_log WHERE reason = ? ORDER BY id",
+        (REASON,),
+    ).fetchall()
+    counts["audit_rows"] = len(rows)
+    for row in rows:
+        latest[(row["table_name"], row["row_id"], row["field"])] = row
+
+    pending: list[dict[str, Any]] = []
+    for (table, row_id, field), row in sorted(latest.items()):
+        category = _c1_1_category(table, row["old_value"] or "", row["new_value"] or "", en_headwords)
+        if category is None:
+            counts["out_of_scope"] += 1
+            continue
+        if table not in present or field not in _columns(conn, table):
+            counts["missing"] += 1
+            continue
+        live = conn.execute(
+            f'SELECT "{field}" FROM "{table}" WHERE id = ?', (row_id,)
+        ).fetchone()
+        if live is None:
+            counts["missing"] += 1
+            continue
+        live_value = live[0]
+        if live_value == row["new_value"]:
+            counts["pending"] += 1
+            counts[f"pending_{category}"] += 1
+            pending.append(
+                {
+                    "category": category,
+                    "table": table,
+                    "row_id": row_id,
+                    "field": field,
+                    "old_value": row["old_value"],
+                    "corrupted": row["new_value"],
+                }
+            )
+        elif live_value == row["old_value"]:
+            counts["already"] += 1
+        else:
+            counts["conflict"] += 1
+    return pending, counts
+
+
+def run_revert_c1_1(
+    db_path: Path | str | None = None,
+    *,
+    apply: bool = False,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> dict[str, Any]:
+    """C1.1 correction — restore cells wrongly rewritten by ``corpus_clean_v1``.
+
+    Deterministic: the revert set is re-derived on every call from
+    ``data_audit_log`` (``reason=corpus_clean_v1 by cli``) joined against the
+    live cell, never from hard-coded ids.  Dry-run by default.  With
+    ``apply=True`` each batch of ≤ ``batch_size`` cells is one transaction
+    (field-only ``UPDATE`` back to ``old_value`` guarded by
+    ``SET ... WHERE id = ? AND col = <corrupted>`` plus one ``data_audit_log``
+    row with ``reason=c1_1_name_revert by cli`` — ``old_value`` = the corrupted
+    text, ``new_value`` = the restored text).  Original ``corpus_clean_v1``
+    audit rows are never deleted; row counts never change.
+
+    Returns stats including per-category ``pending_*`` counts before the run
+    and ``pending_after`` (re-derived post-run — 0 after a successful
+    ``apply``; a second call therefore writes nothing).
+    """
+    started = time.time()
+    db = _resolve_db(db_path)
+    conn = _connect(db)
+    try:
+        en_headwords = (
+            {
+                row[0]
+                for row in conn.execute(
+                    f'SELECT headword FROM "{DICT_EN_ZO_TABLE}" WHERE headword IS NOT NULL'
+                )
+            }
+            if DICT_EN_ZO_TABLE in _table_names(conn)
+            else None
+        )
+        pending, counts = _revert_candidates(conn, en_headwords)
+
+        touched = sorted({c["table"] for c in pending})
+        rows_before = {t: _count(conn, t) for t in touched}
+
+        reverted_by_cat: dict[str, int] = {key: 0 for key in REVERT_CATEGORIES}
+        reverted = 0
+        audit_rows = 0
+        conflicts_during_write = 0
+        if apply and pending:
+            stamp = _utc_now()
+            for start in range(0, len(pending), batch_size):
+                for cand in pending[start : start + batch_size]:
+                    cursor = conn.execute(
+                        f'UPDATE "{cand["table"]}" SET "{cand["field"]}" = ? '
+                        f"WHERE id = ? AND \"{cand['field']}\" = ?",
+                        (cand["old_value"], cand["row_id"], cand["corrupted"]),
+                    )
+                    if cursor.rowcount != 1:
+                        conflicts_during_write += 1
+                        continue
+                    conn.execute(
+                        _REVERT_AUDIT_SQL,
+                        (
+                            cand["table"],
+                            cand["row_id"],
+                            cand["field"],
+                            cand["corrupted"],
+                            cand["old_value"],
+                            stamp,
+                            REVERT_REASON,
+                        ),
+                    )
+                    reverted += 1
+                    reverted_by_cat[cand["category"]] += 1
+                    audit_rows += 1
+                conn.commit()
+
+        rows_after = {t: _count(conn, t) for t in touched}
+        _, post_counts = _revert_candidates(conn, en_headwords)
+        audit_log_total = int(conn.execute("SELECT COUNT(*) FROM data_audit_log").fetchone()[0])
+        return {
+            "applied": apply,
+            "db": str(db),
+            "reason": REVERT_REASON,
+            "scanned_audit_rows": counts["audit_rows"],
+            "detected": {key: counts[f"pending_{key}"] for key in REVERT_CATEGORIES},
+            "status": {
+                "pending": counts["pending"],
+                "already": counts["already"],
+                "conflict": counts["conflict"] + conflicts_during_write,
+                "missing": counts["missing"],
+                "out_of_scope": counts["out_of_scope"],
+            },
+            "reverted": reverted,
+            "reverted_by_category": reverted_by_cat,
+            "audit_rows": audit_rows,
+            "audit_log_total_after": audit_log_total,
+            "row_counts_before": rows_before,
+            "row_counts_after": rows_after,
+            "pending_after": post_counts["pending"],
             "duration_s": round(time.time() - started, 2),
         }
     finally:
