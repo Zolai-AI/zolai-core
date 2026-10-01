@@ -4,7 +4,7 @@ Authoritative spec: ``docs/planning/C1_CORPUS_CLEAN_PLAN.md`` (workspace root
 repo).  Two commands are exposed through ``zolai corpus audit|clean``:
 
 ``zolai corpus audit [--report PATH]``
-    Read-only defect scan: ZVS forbidden forms, ``suah`` conflicts, HTML
+    Read-only defect scan: ZVS forbidden forms, ``suah_hits`` conflicts, HTML
     entities/tags, whitespace, word-field sanity, JSON parse failures and
     exact-duplicate groups.  Writes a markdown report when ``--report`` is
     given.  Never writes to the database.
@@ -27,8 +27,9 @@ Invariants
   cheap pre-check regex is compiled from ``zolai.zvs.rules.default_rules()``
   (same source; the pre-check is an exact union of the rule patterns, so a
   miss can never hide a violation).
-- ``suah`` is **never** rewritten (rules_data → ``chuak`` vs AGENTS →
-  ``suahtakna``: two canonical docs disagree → review-needs / needs-founder).
+- The context-dependent token behind ``suah_hits`` is **never** rewritten
+  (rules_data → ``chuak`` vs AGENTS → ``suahtakna``: two canonical docs
+  disagree → review-needs / needs-founder).
 - UNIQUE-index collisions are never written: a cleaned value already owned by
   another row would merge two rows (a destructive dedupe) → refused and
   counted as the ``unique`` review-need instead (row counts never change).
@@ -336,7 +337,8 @@ def _ws_step(text: str, kind: Kind) -> str:
 
 
 def _match_case(src: str, repl: str) -> str:
-    """Case-preserving replacement: ``Pathian`` → ``Pasian``, ``RAM`` → ``GAM``."""
+    """Case-preserving replacement: apply ``preferred`` keeping the source
+    token's capitalisation pattern (upper / Title / lower)."""
     if src.isupper():
         return repl.upper()
     if src[:1].isupper():
@@ -366,7 +368,8 @@ def _replace_right_to_left(
 def _zvs_step(
     text: str, registry: ExceptionRegistry, bible_ctx: Ctx
 ) -> tuple[str, int, int, int]:
-    """Run ``zolai.zvs.validate()``; rewrite violations except ``suah``.
+    """Run ``zolai.zvs.validate()``; rewrite violations except the
+    context-dependent token (review-need, plan §3).
 
     Returns ``(text, hits, suah_hits, applied)``.
     """
@@ -410,7 +413,7 @@ def _clean_json_node(
     the ``zo`` key **only** (other keys — ``en``, ``ref`` — stay byte-identical);
     lists recurse; scalars are untouched.
 
-    Returns ``(new_node, changed, html_fixed, ws_fixed, hits, suah, applied)``.
+    Returns ``(new_node, changed, html_fixed, ws_fixed, hits, suah_hits, applied)``.
     """
     if isinstance(node, str):
         cleaned, h, w, hits, suah, applied = _clean_string(node, "sentence", bible_ctx, registry)
@@ -438,10 +441,10 @@ def _clean_json_node(
             return node, False, False, False, 0, 0, 0
         new_zo, c, h, w, hi, su, ap = _clean_json_node(node["zo"], bible_ctx, registry)
         if not c:
-            # No write pending — but the zo value may still hold a `suah`
-            # review-need. Propagate the counters (they are the same ones the
-            # string path returns unconditionally) so JSON cells report suah
-            # exactly like sentence cells do.
+            # No write pending — but the zo value may still hold a deferred
+            # review-need (``suah_hits``). Propagate the counters (they are
+            # the same ones the string path returns unconditionally) so JSON
+            # cells report it exactly like sentence cells do.
             return node, False, False, False, hi, su, ap
         new_node = dict(node)
         new_node["zo"] = new_zo
