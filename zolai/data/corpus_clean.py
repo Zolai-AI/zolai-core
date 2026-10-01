@@ -438,7 +438,11 @@ def _clean_json_node(
             return node, False, False, False, 0, 0, 0
         new_zo, c, h, w, hi, su, ap = _clean_json_node(node["zo"], bible_ctx, registry)
         if not c:
-            return node, False, False, False, 0, 0, 0
+            # No write pending — but the zo value may still hold a `suah`
+            # review-need. Propagate the counters (they are the same ones the
+            # string path returns unconditionally) so JSON cells report suah
+            # exactly like sentence cells do.
+            return node, False, False, False, hi, su, ap
         new_node = dict(node)
         new_node["zo"] = new_zo
         return new_node, True, h, w, hi, su, ap

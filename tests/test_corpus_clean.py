@@ -117,6 +117,15 @@ def db(tmp_path: Path) -> Path:
     _insert(conn, "translations", source="mangai", target="hello", direction="en_to_my")
     # --- phrases / dictionary_en_zo / vocabulary ---------------------------
     _insert(conn, "phrases", zolai="a&nbsp;b", english="x &amp; y")
+    # JSON cell whose ONLY defect is `suah` (never rewritten → no write will
+    # ever be pending) — it must still be counted as a suah review-need.
+    _insert(
+        conn,
+        "phrases",
+        zolai="ka pai",
+        english="I go",
+        examples='[{"ref": "1JN 1:2", "zo": "hong suah cia", "en": "x"}]',
+    )
     _insert(
         conn,
         "dictionary_en_zo",
@@ -449,6 +458,25 @@ def test_unique_collision_is_skipped_and_counted(db: Path) -> None:
     audit2 = run_audit(db_path=db)
     assert audit2["totals"]["would_write"] == 0
     assert audit2["review_needs"]["unique"] == 1
+
+
+def test_review_needs_survive_apply(db: Path) -> None:
+    """Review-need counts are stable across apply — nothing silently resolves.
+
+    Regression: the JSON dict branch dropped suah/zvs counters when no write
+    was pending, so a JSON cell whose only defect was `suah` lost its
+    review-need flag as soon as apply ran (its other defects were cleaned →
+    no write pending → counters zeroed). `suah` is never rewritten, so the
+    cell still needs the founder decision after apply.
+    """
+    pre = run_audit(db_path=db)
+    stats = run_clean(db_path=db, apply=True)
+    post = run_audit(db_path=db)
+
+    assert post["review_needs"] == pre["review_needs"]
+    assert stats["totals"]["review_needs"] == post["review_needs"]
+    # the suah-only JSON fixture cell is counted (string + JSON parity)
+    assert post["review_needs"]["suah"] >= 2
 
 
 def test_duplicate_groups_counted_without_dropping_rows(db: Path) -> None:
