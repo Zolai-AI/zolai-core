@@ -24,7 +24,8 @@ Mode (:func:`engine_mode`, founder directive D2)
       key is present.
     - ``ai``       — LLM path when a key is present; **without a key it must
       degrade gracefully to the rule path** (same public contract, never a
-      500).  :func:`resolve_engine_path` is that degradation point.
+      500).  :func:`resolve_engine_path` is the registry path resolver
+      (consumers wired in C2).
 
     The gate every LLM call site consults is :func:`llm_allowed` — currently
     read by :class:`zolai.llm.fallback.FallbackChain` (the provider-chain path
