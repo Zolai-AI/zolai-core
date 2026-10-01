@@ -1221,6 +1221,7 @@ def append_apply_results(
     audit_after: dict[str, Any],
     idem_stats: dict[str, Any] | None = None,
     backup_note: str = "",
+    notes: Sequence[str] = (),
 ) -> Path:
     """Append the post-apply section to the audit report (plan §5)."""
     out = Path(path)
@@ -1272,7 +1273,7 @@ def append_apply_results(
         f'- review-needs: suah **{rn_after["suah"]}** · word-sanity **{rn_after["word_sanity"]}** · '
         f'json **{rn_after["json"]}** · unique **{rn_after["unique"]}** (total {rn_after["total"]})',
         f'- would-write cells remaining: **{audit_after["totals"]["would_write"]}**',
-        f'- duplicate groups: **{audit_after["duplicate_groups_total"]}** (unchanged — no deletes)',
+        f'- duplicate groups: **{audit_after["duplicate_groups_total"]}** (count-only — no deletes)',
         f'- html remaining: {audit_after["totals"]["html"]} · whitespace remaining: '
         f'{audit_after["totals"]["whitespace"]} · ZVS cells remaining: {audit_after["totals"]["zvs_cells"]}',
         "",
@@ -1292,6 +1293,15 @@ def append_apply_results(
         "",
         *_render_needs_founder(),
         "",
+    ]
+    if notes:
+        lines += [
+            "### Report notes",
+            "",
+            *[f"- {n}" for n in notes],
+            "",
+        ]
+    lines += [
         "> `suah` / word-sanity / json / unique / duplicate counts above are the deliberate "
         "remainder — **cleaned ≠ zero defects**.",
         "",
