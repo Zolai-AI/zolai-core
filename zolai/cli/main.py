@@ -1260,6 +1260,153 @@ def apikey_revoke(
                f"({revoked['name']}, {revoked['key_prefix']}) at {revoked['revoked_at']}")
 
 
+# ============================================================
+# CORPUS CLEAN (C1 — audit + dry-run/apply clean)
+# ============================================================
+
+corpus_app = typer.Typer(
+    name="corpus",
+    help="🧹 C1 corpus audit (read-only) and ZVS/whitespace/HTML clean.",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(corpus_app, name="corpus")
+
+
+def _corpus_matrix(columns) -> Table:
+    table = Table(title="Corpus defect matrix", border_style="blue")
+    for head, justify in (
+        ("Table", "left"), ("Column", "left"), ("Kind", "left"), ("Ctx", "left"),
+        ("Cells", "right"), ("HTML", "right"), ("WS", "right"), ("ZVS", "right"),
+        ("Suah", "right"), ("Sanity", "right"), ("Blocked", "right"),
+        ("Changed", "right"), ("Would-write", "right"),
+    ):
+        table.add_column(head, justify=justify)
+    for st in columns:
+        table.add_row(
+            st["table"], f'`{st["column"]}`', st["kind"], st["ctx"],
+            str(st["cells"]), str(st["html"]), str(st["whitespace"]),
+            str(st["zvs_cells"]), str(st["suah_cells"]), str(st["word_sanity"]),
+            str(st["blocked"]), str(st["changed_cells"]),
+            str(st["would_write"]) if st["writable"] else "— audit",
+        )
+    return table
+
+
+def _corpus_needs_line(review: dict, label: str = "review-needs") -> str:
+    return (
+        f"[yellow]{label}:[/yellow] suah {review['suah']} · "
+        f"word-sanity {review['word_sanity']} · json {review['json']} "
+        f"· total {review['total']}"
+    )
+
+
+@corpus_app.command("audit")
+def corpus_audit(
+    report: Path = typer.Option(None, "--report", help="Also write the markdown report to PATH"),
+    table: str = typer.Option(None, "--table", "-t", help="Restrict the scan to one table"),
+    db: Path = typer.Option(None, "--db", help="SQLite store (default: canonical data/zolai.db)"),
+    json_out: bool = typer.Option(False, "--json", help="Print the raw audit as JSON"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """🔎 Read-only corpus defect audit — never writes to the database."""
+    _setup_logging(verbose)
+    from ..data.corpus_clean import run_audit, write_report
+
+    audit = run_audit(db_path=db, tables=[table] if table else None)
+
+    if report is not None:
+        path = write_report(audit, report)
+        if not json_out:
+            rprint(f"[green]✓ report →[/green] {path}")
+
+    if json_out:
+        import json as _json
+
+        # Raw echo (not rich): audit lines can exceed the console width and
+        # wrapping would corrupt the JSON payload.
+        typer.echo(_json.dumps(audit, indent=2, default=str))
+        raise typer.Exit(code=0)
+
+    totals = audit["totals"]
+    console.print(_corpus_matrix(audit["columns"]))
+    rprint(_corpus_needs_line(audit["review_needs"]))
+    rprint(
+        f"[cyan]totals:[/cyan] cells {totals['cells']} · would-write {totals['would_write']} · "
+        f"changed {totals['changed_cells']} · html {totals['html']} · ws {totals['whitespace']} · "
+        f"zvs {totals['zvs_cells']} ({totals['zvs_hits']} hits)"
+    )
+    rprint(f"[cyan]duplicate groups:[/cyan] {audit['duplicate_groups_total']} "
+           f"(counted only — dedupe is a founder decision)")
+    if audit["skipped_tables"]:
+        rprint(f"[yellow]skipped (not present):[/yellow] {', '.join(audit['skipped_tables'])}")
+    rprint(f"[dim]{audit['scanned_tables'] and len(audit['scanned_tables'])} tables scanned in "
+           f"{audit['duration_s']}s · db {audit['db']}[/dim]")
+
+
+@corpus_app.command("clean")
+def corpus_clean(
+    table: str = typer.Option(None, "--table", "-t", help="Restrict to one table"),
+    apply: bool = typer.Option(False, "--apply", help="Write changes (default: dry-run)"),
+    batch_size: int = typer.Option(5000, "--batch-size", help="Rows per transaction"),
+    state: Path = typer.Option(None, "--state", help="Resume-state file (default: next to db)"),
+    db: Path = typer.Option(None, "--db", help="SQLite store (default: canonical data/zolai.db)"),
+    json_out: bool = typer.Option(False, "--json", help="Print the raw stats as JSON"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """🧹 ZVS/whitespace/HTML clean — DRY-RUN unless `--apply` is given.
+
+    Dry-run reports what would change and writes nothing (no database, no
+    resume-state file). `--apply` batches updates transactionally, appends one
+    `data_audit_log` row per changed cell, and persists a resume cursor.
+    """
+    _setup_logging(verbose)
+    from ..data.corpus_clean import run_clean
+
+    stats = run_clean(
+        db_path=db,
+        tables=[table] if table else None,
+        apply=apply,
+        batch_size=batch_size,
+        state_path=state,
+    )
+
+    if json_out:
+        import json as _json
+
+        typer.echo(_json.dumps(stats, indent=2, default=str))
+        raise typer.Exit(code=0)
+
+    mode = "[bold green]APPLY[/bold green]" if apply else "[bold yellow]DRY-RUN[/bold yellow]"
+    rprint(f"{mode} · batch {stats['batch_size']} · {stats['duration_s']}s · {stats['db']}")
+
+    t = Table(title="Corpus clean — per table", border_style="blue")
+    for head in ("Table", "Rows before", "Rows after", "Cells changed", "Audit rows", "HTML", "WS", "ZVS", "JSON"):
+        t.add_column(head, justify="right" if head != "Table" else "left")
+    for name, st in stats["tables"].items():
+        t.add_row(
+            name, str(st["rows_before"]), str(st["rows_after"]),
+            str(st["cells_changed"]), str(st["audit_rows"]),
+            str(st["classes"]["html"]), str(st["classes"]["whitespace"]),
+            str(st["classes"]["zvs"]), str(st["classes"]["json"]),
+        )
+    console.print(t)
+
+    totals = stats["totals"]
+    rprint(_corpus_needs_line(totals["review_needs"],
+                              label="left for review" if apply else "will stay untouched"))
+    if apply:
+        rprint(f"[cyan]written:[/cyan] {totals['cells_changed']} cells · "
+               f"{totals['audit_rows']} audit rows · "
+               f"log total {stats['audit_log_total_after']}")
+        rprint(f"[dim]state → {stats['state_path']}[/dim]")
+
+    if apply and totals["rows_before"] != totals["rows_after"]:
+        rprint(f"[red]✗ row counts changed: {totals['rows_before']} → "
+               f'{totals["rows_after"]} (must never happen)[/red]')
+        raise typer.Exit(code=1)
+
+
 def main() -> None:
     app()
 
