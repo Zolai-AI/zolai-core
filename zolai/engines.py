@@ -245,8 +245,8 @@ ENGINES: tuple[EngineSpec, ...] = (
     EngineSpec(
         name="online_search",
         target="zolai.learning.online_search:OnlineSearch",
-        capabilities=Capabilities(network=True, deterministic=False, writes=False),
-        summary="Web-backed contextual search — the only network engine; excluded from offline runs.",
+        capabilities=Capabilities(network=False, deterministic=True, writes=False),
+        summary="DB-backed search over vocabulary/grammar/Bible (historically named 'online'; no network I/O).",
     ),
     EngineSpec(
         name="tokenizer",
