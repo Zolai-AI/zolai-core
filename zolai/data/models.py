@@ -1130,6 +1130,122 @@ class KnowledgeVersionRecord(Base):
 
 
 # ---------------------------------------------------------------------------
+# Phase 2 — Observation Engine (Master Prompt §36)
+# ---------------------------------------------------------------------------
+
+
+class ObservationRecord(Base):
+    """One raw observed unit (tokenized text + context + source ref).
+
+    Storage twin of the ``zolai.shared.contracts.Observation`` contract — DDL
+    deferred in Phase 1, created by ``migrations.create_observation_tables``.
+    ``source_ref`` carries the UNIQUE idempotency key (one row per extracted
+    sentence), so the build pipeline can re-run safely with INSERT OR IGNORE.
+    """
+
+    __tablename__ = "observations"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    text: str = Column(String, nullable=False)
+    tokens: str = Column(Text, nullable=False, default="[]", server_default=sa_sql_text("'[]'"))
+    context: str = Column(String, nullable=False, default="", server_default=sa_sql_text("''"))
+    source_ref: str = Column(String, nullable=False)
+    source_id: str | None = Column(String, nullable=True)
+    document_id: str | None = Column(String, nullable=True)
+    sentence_id: str | None = Column(String, nullable=True)
+    method: str = Column(String, nullable=False, default="", server_default=sa_sql_text("''"))
+    extractor: str = Column(String, nullable=False, default="", server_default=sa_sql_text("''"))
+    metadata_: str = Column(
+        "metadata", Text, nullable=False, default="{}", server_default=sa_sql_text("'{}'")
+    )
+    created_at: str = Column(
+        String,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        server_default=sa_sql_text("datetime('now')"),
+    )
+
+    __table_args__ = (
+        # Mirrors migrations.OBSERVATION_TABLE_INDEXES — same names, same key.
+        Index("ux_obs_source_ref", "source_ref", unique=True),
+        Index("ix_obs_sentence", "sentence_id"),
+        Index("ix_obs_document", "document_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ObservationRecord(source_ref={self.source_ref!r})>"
+
+
+class WordObservationStatsRecord(Base):
+    """Per-word derived roll-up computed by the observation pipeline.
+
+    ``normalized_form`` is the PK (not ``vocabulary.id``) so words absent from
+    the legacy vocabulary table are still covered — deviation 1 of the plan.
+    The five scalars are recomputable from ``observations``; the JSON columns
+    are the downstream surfaces (contexts / neighbors / collocations).
+    """
+
+    __tablename__ = "word_observation_stats"
+
+    normalized_form: str = Column(String, primary_key=True)
+    frequency: int = Column(Integer, nullable=False, default=0, server_default=sa_sql_text("0"))
+    doc_freq: int = Column(Integer, nullable=False, default=0, server_default=sa_sql_text("0"))
+    sent_freq: int = Column(Integer, nullable=False, default=0, server_default=sa_sql_text("0"))
+    source_count: int = Column(Integer, nullable=False, default=0, server_default=sa_sql_text("0"))
+    diversity: float = Column(Float, nullable=False, default=0.0, server_default=sa_sql_text("0"))
+    surface_forms: str = Column(
+        Text, nullable=False, default="[]", server_default=sa_sql_text("'[]'")
+    )
+    contexts: str = Column(Text, nullable=False, default="{}", server_default=sa_sql_text("'{}'"))
+    neighbors: str = Column(
+        Text, nullable=False, default="[]", server_default=sa_sql_text("'[]'")
+    )
+    collocations: str = Column(
+        Text, nullable=False, default="[]", server_default=sa_sql_text("'[]'")
+    )
+    attestation: str = Column(
+        Text, nullable=False, default="{}", server_default=sa_sql_text("'{}'")
+    )
+    first_seen: str | None = Column(String, nullable=True)
+    last_seen: str | None = Column(String, nullable=True)
+    pipeline_version: str | None = Column(String, nullable=True)
+    updated_at: str = Column(
+        String,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        server_default=sa_sql_text("datetime('now')"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<WordObservationStatsRecord(normalized_form={self.normalized_form!r})>"
+
+
+class AttestationIndexRecord(Base):
+    """(word, source) pair materialized from the attestation loader queries.
+
+    Built by ``zolai observation refresh-index`` from the *same* queries the
+    in-memory sets use, so the index and loader paths agree by construction
+    (§27 cold-start fix).  ``source`` ∈ {bible, dict, corpus, extra}.
+    """
+
+    __tablename__ = "attestation_index"
+
+    word: str = Column(String, nullable=False, primary_key=True)
+    source: str = Column(String, nullable=False, primary_key=True)
+    created_at: str = Column(
+        String,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        server_default=sa_sql_text("datetime('now')"),
+    )
+
+    __table_args__ = (Index("ix_attestation_source", "source"),)
+
+    def __repr__(self) -> str:
+        return f"<AttestationIndexRecord(word={self.word!r}, source={self.source!r})>"
+
+
+# ---------------------------------------------------------------------------
 # Model registry for migration/export
 # ---------------------------------------------------------------------------
 MODEL_REGISTRY: dict[str, type[Base]] = {
@@ -1181,4 +1297,8 @@ MODEL_REGISTRY: dict[str, type[Base]] = {
     "knowledge_claims": KnowledgeClaimRecord,
     "claim_evidence": ClaimEvidenceRecord,
     "knowledge_versions": KnowledgeVersionRecord,
+    # Phase 2 — observation engine (§36)
+    "observations": ObservationRecord,
+    "word_observation_stats": WordObservationStatsRecord,
+    "attestation_index": AttestationIndexRecord,
 }

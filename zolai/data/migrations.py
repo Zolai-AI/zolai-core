@@ -1882,6 +1882,158 @@ def create_knowledge_tables(mgr: DatabaseManager) -> dict[str, Any]:
     return {"created": created, "skipped": skipped, "errors": errors}
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 — Observation Engine (Master Prompt §36) — additive only.
+#
+# Three derived tables, all `CREATE TABLE IF NOT EXISTS` plus index DDL guarded
+# with `IF NOT EXISTS`.  No existing table gains or loses a column, and no row
+# in a pre-existing table is touched — the observation layer is a rebuildable
+# derivative of the canonical corpus.
+#
+# Reverse (rollback) SQL — safe to run at any time:
+#     DROP TABLE IF EXISTS word_observation_stats;
+#     DROP TABLE IF EXISTS attestation_index;
+#     DROP TABLE IF EXISTS observations;
+# ---------------------------------------------------------------------------
+
+#: ``observations`` — the §36 raw observed unit (contract 11 fields + id).
+#: ``source_ref`` is the idempotency key: one stable reference per extracted
+#: sentence (``{table}:{field}:{row_id}``), so a re-run inserts nothing new —
+#: enforced by the named UNIQUE index ``ux_obs_source_ref`` (declared in
+#: :data:`OBSERVATION_TABLE_INDEXES`, matching the ORM side exactly).
+OBSERVATIONS_DDL = """
+CREATE TABLE IF NOT EXISTS observations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    text TEXT NOT NULL,
+    tokens TEXT NOT NULL DEFAULT '[]',
+    context TEXT NOT NULL DEFAULT '',
+    source_ref TEXT NOT NULL,
+    source_id TEXT,
+    document_id TEXT,
+    sentence_id TEXT,
+    method TEXT NOT NULL DEFAULT '',
+    extractor TEXT NOT NULL DEFAULT '',
+    metadata TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+#: ``word_observation_stats`` — per-word derived roll-up (§8-9): the five
+#: scalars are computed by the streaming aggregation, the five JSON columns are
+#: the surfaces consumed downstream (contexts / neighbors / collocations are
+#: policy defaults, not gold numbers — R8).  ``normalized_form`` is the PK so
+#: words absent from ``vocabulary`` are covered without ALTERing legacy tables.
+WORD_OBSERVATION_STATS_DDL = """
+CREATE TABLE IF NOT EXISTS word_observation_stats (
+    normalized_form TEXT PRIMARY KEY,
+    frequency INTEGER NOT NULL DEFAULT 0,
+    doc_freq INTEGER NOT NULL DEFAULT 0,
+    sent_freq INTEGER NOT NULL DEFAULT 0,
+    source_count INTEGER NOT NULL DEFAULT 0,
+    diversity REAL NOT NULL DEFAULT 0.0,
+    surface_forms TEXT NOT NULL DEFAULT '[]',
+    contexts TEXT NOT NULL DEFAULT '{}',
+    neighbors TEXT NOT NULL DEFAULT '[]',
+    collocations TEXT NOT NULL DEFAULT '[]',
+    attestation TEXT NOT NULL DEFAULT '{}',
+    first_seen TEXT,
+    last_seen TEXT,
+    pipeline_version TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+#: ``attestation_index`` — (word, source) pairs materialized by the *same*
+#: loader queries the in-memory attestation sets use, so index and loader
+#: paths agree by construction (§27 cold-start fix).
+ATTESTATION_INDEX_DDL = """
+CREATE TABLE IF NOT EXISTS attestation_index (
+    word TEXT NOT NULL,
+    source TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (word, source)
+)
+"""
+
+#: (index name, ddl) for the Phase 2 tables.  ``ux_obs_source_ref`` is the
+#: idempotency contract (one observation per extracted sentence);
+#: ``ix_attestation_source`` makes the per-source loader read a prefix lookup
+#: instead of a full index scan, while the PRIMARY KEY (word, source) stays
+#: the uniqueness contract.
+OBSERVATION_TABLE_INDEXES: tuple[tuple[str, str], ...] = (
+    (
+        "ux_obs_source_ref",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_obs_source_ref ON observations(source_ref)",
+    ),
+    (
+        "ix_obs_sentence",
+        "CREATE INDEX IF NOT EXISTS ix_obs_sentence ON observations(sentence_id)",
+    ),
+    (
+        "ix_obs_document",
+        "CREATE INDEX IF NOT EXISTS ix_obs_document ON observations(document_id)",
+    ),
+    (
+        "ix_attestation_source",
+        "CREATE INDEX IF NOT EXISTS ix_attestation_source ON attestation_index(source)",
+    ),
+)
+
+
+def create_observation_tables(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create the Phase 2 observation tables and their indexes.
+
+    ``observations`` (raw observed units), ``word_observation_stats`` (per-word
+    derived roll-up) and ``attestation_index`` (§27 word/source lookup).  Every
+    statement is ``IF NOT EXISTS`` and only tables absent from the store are
+    reported as created, so a second run changes nothing.
+
+    Returns:
+        Dict with 'created', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+
+    statements: tuple[tuple[str, str], ...] = (
+        ("observations", OBSERVATIONS_DDL),
+        ("word_observation_stats", WORD_OBSERVATION_STATS_DDL),
+        ("attestation_index", ATTESTATION_INDEX_DDL),
+    )
+
+    try:
+        with mgr.engine.connect() as conn:
+            for name, ddl in statements:
+                conn.execute(text(ddl))
+                if name in existing_tables:
+                    skipped.append(f"{name} (already exists)")
+                else:
+                    created.append(name)
+            for index_name, ddl in OBSERVATION_TABLE_INDEXES:
+                exists = conn.execute(
+                    text(
+                        "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = :n"
+                    ),
+                    {"n": index_name},
+                ).first()
+                if exists is not None:
+                    skipped.append(f"{index_name} (already exists)")
+                    continue
+                conn.execute(text(ddl))
+                created.append(index_name)
+            conn.commit()
+    except Exception as exc:
+        errors.append(f"observation_tables: {exc}")
+        return {"created": created, "skipped": skipped, "errors": errors}
+
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
 def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
     """Run all constraint and index migrations including Foundation tables.
 
@@ -1913,6 +2065,7 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "contract_columns": add_contract_columns(mgr),
         "contract_indexes": create_contract_indexes(mgr),
         "knowledge_tables": create_knowledge_tables(mgr),
+        "observation_tables": create_observation_tables(mgr),
     }
 
 
