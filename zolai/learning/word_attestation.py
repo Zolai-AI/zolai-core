@@ -7,9 +7,10 @@ Set ZOLAI_LOAD_CORPUS=1 to include  corpus (~208MB, slow load).
 """
 import json
 import os
-import re
 from pathlib import Path
 from typing import Optional
+
+from ..shared.text import tokenize_words
 
 DATA_DIR = Path(__file__).parent.parent.parent.parent / "data"
 
@@ -42,7 +43,7 @@ class WordAttestation:
         repos = get_repositories()
         for r in repos["bible"].all_records(["zo_tdb77", "zo_tedim2010"]):
             zo = (r.get("zo_tdb77") or r.get("zo_tedim2010") or "")
-            words = re.findall(r"\b[a-zA-Z\u0100-\u024F'-]+\b", zo.lower())
+            words = tokenize_words(zo)
             self.bible_words.update(w for w in words if len(w) >= 2)
 
     def _load_dict(self) -> None:
@@ -60,7 +61,7 @@ class WordAttestation:
         repos = get_repositories()
         for r in repos["translation"].all_records(["target"]):
             zo = r.get("target") or ""
-            words = re.findall(r"\b[a-zA-Z\u0100-\u024F'-]+\b", zo.lower())
+            words = tokenize_words(zo)
             self.corpus_words.update(w for w in words if len(w) >= 2)
 
     def _load_corpus(self) -> None:
@@ -125,7 +126,7 @@ class WordAttestation:
     def attest_sentence(self, sentence: str) -> dict:
         """Check if all words in a sentence are attested."""
         self._ensure_loaded()
-        words = re.findall(r"\b[a-zA-Z\u0100-\u024F'-]+\b", sentence.lower())
+        words = tokenize_words(sentence)
 
         results: list[dict] = []
         unattested: list[str] = []
