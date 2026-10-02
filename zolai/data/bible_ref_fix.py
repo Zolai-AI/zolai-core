@@ -504,6 +504,10 @@ def _scan(
     doomed_refs = {a["source_ref"] for a in actions}
     downstream: dict[str, dict[str, int]] = {}
     live_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if ARCHIVE_TABLE in live_tables:
+        # Post-apply the doomed rows live only in the archive; their downstream
+        # copies are still pending remap, so keep them in the doomed set.
+        doomed_refs |= {r[0] for r in conn.execute(f"SELECT ref FROM {ARCHIVE_TABLE}")}
     for table, column in DOWNSTREAM:
         if table not in live_tables or column not in _columns(conn, table):
             downstream[table] = {
