@@ -40,6 +40,7 @@ from .foundation import (
     get_foundation_repositories,
 )
 from .grammar import GrammarRepository, WordCollocationRepository
+from .knowledge import ClaimRepository, HypothesisRepository, KnowledgeVersionRepository
 from .phrase import PhraseRepository
 from .provenance import AuditRepository, ProvenanceRepository
 from .translation import TranslationRepository, WordAlignmentRepository
@@ -51,6 +52,7 @@ __all__ = [
     "BaseRepository",
     "BibleAnalysisRepository",
     "BibleRepository",
+    "ClaimRepository",
     "CorrectionRepository",
     "DictionaryEnZoRepository",
     "DictionaryRepository",
@@ -77,7 +79,9 @@ __all__ = [
     "get_repositories",
     "GrammarInstructionRepository",
     "GrammarRepository",
+    "HypothesisRepository",
     "KnowledgeVectorRepository",
+    "KnowledgeVersionRepository",
     "NgramRepository",
     "ParticleRepository",
     "PhraseRepository",
@@ -134,6 +138,9 @@ def get_repositories(db_path=None) -> dict[str, BaseRepository]:
         "simbu": SimbuRepository(engine),
         "grammar_instructions": GrammarInstructionRepository(engine),
         "corrections": CorrectionRepository(engine),
+        "claims": ClaimRepository(engine),
+        "hypotheses": HypothesisRepository(engine),
+        "knowledge_versions": KnowledgeVersionRepository(engine),
     }
     # Add foundation repositories
     repos.update(get_foundation_repositories(engine))
