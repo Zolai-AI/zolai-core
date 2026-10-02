@@ -1554,6 +1554,334 @@ def create_api_keys_table(mgr: DatabaseManager) -> dict[str, Any]:
         return {"created": [], "skipped": [], "errors": [f"api_keys: {exc}"]}
 
 
+# ---------------------------------------------------------------------------
+# Phase 1 — knowledge contracts (Master Prompt §36) — additive only.
+#
+# Two groups of DDL, both idempotent:
+#   1. ALTER TABLE ... ADD COLUMN for the contract columns that ride on
+#      existing tables (vocabulary, foundation_evidence, grammar_patterns,
+#      provenance) plus their two indexes.
+#   2. CREATE TABLE IF NOT EXISTS for the three new knowledge tables
+#      (hypotheses, knowledge_claims + claim_evidence, knowledge_versions).
+#
+# No legacy table is rebuilt or altered in place beyond guarded ADD COLUMN,
+# and every existing row is preserved untouched.
+#
+# Reverse (rollback) SQL — safe to run at any time:
+#     DROP INDEX IF EXISTS ix_vocabulary_status;
+#     DROP INDEX IF EXISTS ix_fev_document;
+#     DROP INDEX IF EXISTS ux_kc_claim_key;
+#     ALTER TABLE vocabulary        DROP COLUMN status;   -- SQLite >= 3.35
+#     ALTER TABLE foundation_evidence DROP COLUMN source_id;  -- … +5 more
+#     ALTER TABLE grammar_patterns  DROP COLUMN status;   -- … +5 more
+#     ALTER TABLE provenance        DROP COLUMN source_type;  -- +2 more
+#     DROP TABLE IF EXISTS knowledge_versions;
+#     DROP TABLE IF EXISTS claim_evidence;
+#     DROP TABLE IF EXISTS knowledge_claims;
+#     DROP TABLE IF EXISTS hypotheses;
+# ---------------------------------------------------------------------------
+
+#: (table, column, column DDL) for the Phase 1 contract columns.
+#: Guarded by column presence — a column that already exists is skipped, so
+#: the migration stays idempotent on both legacy and current stores.
+CONTRACT_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    # Word — knowledge lifecycle status (distinct from review_status)
+    ("vocabulary", "status", "TEXT NOT NULL DEFAULT 'OBSERVED'"),
+    # Evidence — §11 provenance superset
+    ("foundation_evidence", "source_id", "TEXT"),
+    ("foundation_evidence", "document_id", "TEXT"),
+    ("foundation_evidence", "sentence_id", "TEXT"),
+    ("foundation_evidence", "observed_text", "TEXT"),
+    ("foundation_evidence", "method", "TEXT"),
+    ("foundation_evidence", "extractor", "TEXT"),
+    # GrammarPattern — normalized form + evidence-backed confidence
+    ("grammar_patterns", "normalized", "TEXT"),
+    ("grammar_patterns", "components", "TEXT NOT NULL DEFAULT '[]'"),
+    ("grammar_patterns", "sources", "TEXT NOT NULL DEFAULT '[]'"),
+    ("grammar_patterns", "evidence_ids", "TEXT NOT NULL DEFAULT '[]'"),
+    ("grammar_patterns", "confidence", "REAL"),
+    ("grammar_patterns", "status", "TEXT NOT NULL DEFAULT 'OBSERVED'"),
+    # Source — pipeline provenance
+    ("provenance", "source_type", "TEXT"),
+    ("provenance", "pipeline_version", "TEXT"),
+    ("provenance", "extractor_version", "TEXT"),
+)
+
+#: (index_name, table, column, ddl) for the Phase 1 contract indexes.
+#: Each entry carries the column the index needs, so the index creation can
+#: be skipped (with a reason) when ``add_contract_columns`` has not run yet.
+CONTRACT_INDEXES: tuple[tuple[str, str, str, str], ...] = (
+    (
+        "ix_vocabulary_status",
+        "vocabulary",
+        "status",
+        "CREATE INDEX IF NOT EXISTS ix_vocabulary_status ON vocabulary(status)",
+    ),
+    (
+        "ix_fev_document",
+        "foundation_evidence",
+        "document_id",
+        "CREATE INDEX IF NOT EXISTS ix_fev_document ON foundation_evidence(document_id)",
+    ),
+)
+
+#: ``hypotheses`` — polymorphic storage for POSHypothesis (kind='pos') and
+#: MorphologicalRelation (kind='morph_relation'), plus generic rows.
+HYPOTHESES_DDL = """
+CREATE TABLE IF NOT EXISTS hypotheses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL DEFAULT 'generic',
+    subject TEXT NOT NULL,
+    predicate TEXT NOT NULL,
+    object TEXT,
+    probability REAL NOT NULL DEFAULT 0.0,
+    confidence REAL,
+    evidence_count INTEGER NOT NULL DEFAULT 0,
+    source_count INTEGER NOT NULL DEFAULT 0,
+    evidence_ids TEXT NOT NULL DEFAULT '[]',
+    extras TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'OBSERVED',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+#: ``knowledge_claims`` — S/P/O claim with evidence-derived confidence.
+KNOWLEDGE_CLAIMS_DDL = """
+CREATE TABLE IF NOT EXISTS knowledge_claims (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    claim_type TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    predicate TEXT NOT NULL,
+    object TEXT,
+    confidence REAL NOT NULL DEFAULT 0.0,
+    status TEXT NOT NULL DEFAULT 'OBSERVED',
+    evidence_ids TEXT NOT NULL DEFAULT '[]',
+    source_ids TEXT NOT NULL DEFAULT '[]',
+    notes TEXT NOT NULL DEFAULT '',
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+#: ``claim_evidence`` — link rows to ``foundation_evidence`` (UNIQUE pair).
+CLAIM_EVIDENCE_DDL = """
+CREATE TABLE IF NOT EXISTS claim_evidence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    claim_id INTEGER NOT NULL REFERENCES knowledge_claims(id) ON DELETE CASCADE,
+    evidence_id INTEGER NOT NULL REFERENCES foundation_evidence(id),
+    role TEXT NOT NULL DEFAULT 'supports',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+#: ``knowledge_versions`` — release snapshot (eval_run_id → eval_runs.id).
+#: ``row_version`` is the BaseRepository optimistic-lock counter; ``version``
+#: is the unique TEXT release identifier.
+KNOWLEDGE_VERSIONS_DDL = """
+CREATE TABLE IF NOT EXISTS knowledge_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    version TEXT NOT NULL UNIQUE,
+    git_commit TEXT,
+    source_versions TEXT NOT NULL DEFAULT '{}',
+    pipeline_version TEXT,
+    schema_version TEXT,
+    row_counts TEXT NOT NULL DEFAULT '{}',
+    quality TEXT NOT NULL DEFAULT '{}',
+    eval_run_id INTEGER REFERENCES eval_runs(id),
+    manifest_hash TEXT,
+    status TEXT NOT NULL DEFAULT 'OBSERVED',
+    row_version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+#: Indexes for the new knowledge tables.  ``ux_kc_claim_key`` is an
+#: expression-unique index over (claim_type, subject, predicate,
+#: COALESCE(object, '')) — NULL objects fold together instead of
+#: defeating the uniqueness rule.
+KNOWLEDGE_TABLE_INDEXES: tuple[tuple[str, str], ...] = (
+    (
+        "ix_hyp_kind_subject",
+        "CREATE INDEX IF NOT EXISTS ix_hyp_kind_subject ON hypotheses(kind, subject)",
+    ),
+    ("ix_hyp_status", "CREATE INDEX IF NOT EXISTS ix_hyp_status ON hypotheses(status)"),
+    (
+        "ux_kc_claim_key",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_kc_claim_key ON knowledge_claims"
+        "(claim_type, subject, predicate, COALESCE(object, ''))",
+    ),
+    (
+        "ux_claim_evidence_pair",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_claim_evidence_pair "
+        "ON claim_evidence(claim_id, evidence_id)",
+    ),
+    (
+        "ix_claim_ev_evidence",
+        "CREATE INDEX IF NOT EXISTS ix_claim_ev_evidence ON claim_evidence(evidence_id)",
+    ),
+)
+
+
+def add_contract_columns(mgr: DatabaseManager) -> dict[str, Any]:
+    """Add the Phase 1 contract columns to the 4 wrapped legacy tables.
+
+    ``ALTER TABLE ... ADD COLUMN`` only, each guarded by a column-presence
+    check so a second run adds nothing.  Tables missing from the database are
+    skipped (same contract as :func:`add_lexicon_pos_columns`).
+
+    Returns:
+        Dict with 'added', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+
+    added: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+
+    # Cache per-table column sets (tables appear multiple times in the spec).
+    table_columns: dict[str, set[str]] = {}
+    for table_name in {t for t, _, _ in CONTRACT_COLUMNS}:
+        if table_name in existing_tables:
+            table_columns[table_name] = {c["name"] for c in inspector.get_columns(table_name)}
+        else:
+            skipped.append(f"{table_name} (table missing)")
+
+    with mgr.engine.connect() as conn:
+        for table_name, col_name, col_def in CONTRACT_COLUMNS:
+            if table_name not in existing_tables:
+                skipped.append(f"{table_name}.{col_name} (table missing)")
+                continue
+            if col_name in table_columns[table_name]:
+                skipped.append(f"{table_name}.{col_name} (already exists)")
+                continue
+            try:
+                conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def}"))
+                conn.commit()
+            except Exception as exc:  # noqa: BLE001 - collect and continue
+                errors.append(f"{table_name}.{col_name}: {exc}")
+                continue
+            table_columns[table_name].add(col_name)
+            added.append(f"{table_name}.{col_name}")
+
+    return {"added": added, "skipped": skipped, "errors": errors}
+
+
+def create_contract_indexes(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create the Phase 1 contract indexes (``ix_vocabulary_status``,
+    ``ix_fev_document``) unless they already exist.
+
+    Returns:
+        Dict with 'created', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+
+    table_columns: dict[str, set[str]] = {}
+    for table_name in {t for _, t, _, _ in CONTRACT_INDEXES}:
+        if table_name in existing_tables:
+            table_columns[table_name] = {c["name"] for c in inspector.get_columns(table_name)}
+
+    with mgr.engine.connect() as conn:
+        for index_name, table_name, column_name, ddl in CONTRACT_INDEXES:
+            if table_name not in existing_tables:
+                skipped.append(f"{index_name} ({table_name} missing)")
+                continue
+            if column_name not in table_columns.get(table_name, set()):
+                skipped.append(
+                    f"{index_name} (no {column_name} column — run add_contract_columns)"
+                )
+                continue
+            exists = conn.execute(
+                text(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = :n"
+                ),
+                {"n": index_name},
+            ).first()
+            if exists is not None:
+                skipped.append(f"{index_name} (already exists)")
+                continue
+            try:
+                conn.execute(text(ddl))
+                conn.commit()
+            except Exception as exc:  # noqa: BLE001 - collect and continue
+                errors.append(f"{index_name}: {exc}")
+                continue
+            created.append(index_name)
+
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+def create_knowledge_tables(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create the Phase 1 knowledge tables and their indexes.
+
+    ``hypotheses`` (polymorphic), ``knowledge_claims`` + ``claim_evidence``
+    (evidence-gated claims) and ``knowledge_versions`` (release snapshots).
+    All statements are ``IF NOT EXISTS``, and only tables absent from the
+    store are reported as created, so a second run changes nothing.
+
+    ``claim_evidence`` is created after ``knowledge_claims`` so its foreign
+    keys resolve; ``knowledge_versions.eval_run_id`` references ``eval_runs``
+    (ensured by :func:`create_monitoring_tables` when the full migration runs).
+
+    Returns:
+        Dict with 'created', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+
+    statements: tuple[tuple[str, str], ...] = (
+        ("hypotheses", HYPOTHESES_DDL),
+        ("knowledge_claims", KNOWLEDGE_CLAIMS_DDL),
+        ("claim_evidence", CLAIM_EVIDENCE_DDL),
+        ("knowledge_versions", KNOWLEDGE_VERSIONS_DDL),
+    )
+
+    try:
+        with mgr.engine.connect() as conn:
+            for name, ddl in statements:
+                conn.execute(text(ddl))
+                if name in existing_tables:
+                    skipped.append(f"{name} (already exists)")
+                else:
+                    created.append(name)
+            for index_name, ddl in KNOWLEDGE_TABLE_INDEXES:
+                exists = conn.execute(
+                    text(
+                        "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = :n"
+                    ),
+                    {"n": index_name},
+                ).first()
+                if exists is not None:
+                    skipped.append(f"{index_name} (already exists)")
+                    continue
+                conn.execute(text(ddl))
+                created.append(index_name)
+            conn.commit()
+    except Exception as exc:
+        errors.append(f"knowledge_tables: {exc}")
+        return {"created": created, "skipped": skipped, "errors": errors}
+
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
 def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
     """Run all constraint and index migrations including Foundation tables.
 
@@ -1582,6 +1910,9 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "lexicon_pos_indexes": create_lexicon_pos_indexes(mgr),
         "monitoring_tables": create_monitoring_tables(mgr),
         "api_keys_table": create_api_keys_table(mgr),
+        "contract_columns": add_contract_columns(mgr),
+        "contract_indexes": create_contract_indexes(mgr),
+        "knowledge_tables": create_knowledge_tables(mgr),
     }
 
 

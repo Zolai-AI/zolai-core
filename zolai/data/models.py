@@ -137,6 +137,14 @@ class GrammarPattern(Base):
     examples: str = Column(Text, nullable=False, default="[]")
     frequency: int = Column(Integer, nullable=False, default=0)
 
+    # Phase 1 — knowledge contract columns (additive; §36)
+    normalized: str | None = Column(String, nullable=True)
+    components: str = Column(Text, nullable=False, default="[]", server_default="[]")
+    sources: str = Column(Text, nullable=False, default="[]", server_default="[]")
+    evidence_ids: str = Column(Text, nullable=False, default="[]", server_default="[]")
+    confidence: float | None = Column(Float, nullable=True)
+    status: str = Column(String, nullable=False, default="OBSERVED", server_default="OBSERVED")
+
     def __repr__(self) -> str:
         return f"<GrammarPattern(pattern={self.pattern!r})>"
 
@@ -191,6 +199,10 @@ class VocabularyEntry(Base):
     processing_version: str | None = Column(String, nullable=True)
     review_status: str | None = Column(String, nullable=True, server_default="unknown")
     confidence: float | None = Column(Float, nullable=True)
+    # Phase 1 — knowledge lifecycle status (additive; distinct from review_status)
+    status: str = Column(String, nullable=False, default="OBSERVED", server_default="OBSERVED")
+
+    __table_args__ = (Index("ix_vocabulary_status", "status"),)
 
     def __repr__(self) -> str:
         return f"<VocabularyEntry(headword={self.headword!r})>"
@@ -298,6 +310,11 @@ class ProvenanceFile(Base):
     status: str = Column(String, nullable=False, default="active")
     updated_at: str = Column(String, nullable=False, default="")
     change_log: str = Column(Text, nullable=False, default="[]")  # JSON array
+
+    # Phase 1 — Source contract columns (additive; §36)
+    source_type: str | None = Column(String, nullable=True)
+    pipeline_version: str | None = Column(String, nullable=True)
+    extractor_version: str | None = Column(String, nullable=True)
 
     def __repr__(self) -> str:
         return f"<ProvenanceFile(filename={self.filename!r})>"
@@ -680,11 +697,20 @@ class FoundationEvidence(Base):
     payload: str = Column(Text, nullable=False, default="{}")  # JSON: source-specific evidence detail
     created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
 
+    # Phase 1 — §11 provenance superset (additive)
+    source_id: str | None = Column(String, nullable=True)
+    document_id: str | None = Column(String, nullable=True)
+    sentence_id: str | None = Column(String, nullable=True)
+    observed_text: str | None = Column(Text, nullable=True)
+    method: str | None = Column(String, nullable=True)
+    extractor: str | None = Column(String, nullable=True)
+
     __table_args__ = (
         Index("ix_fev_fact", "fact_type", "fact_key"),
         Index("ix_fev_tier", "tier"),
         Index("ix_fev_source", "source"),
         Index("ix_fev_provenance", "provenance_hash"),
+        Index("ix_fev_document", "document_id"),
     )
 
     def __repr__(self) -> str:
@@ -977,6 +1003,133 @@ class DbIntegrityRun(Base):
 
 
 # ---------------------------------------------------------------------------
+# Phase 1 — knowledge contracts (Master Prompt §36)
+#
+# New tables created by zolai/data/migrations.py via CREATE TABLE IF NOT
+# EXISTS (additive only).  ``hypotheses`` is polymorphic: kind='pos' holds
+# POSHypothesis rows, kind='morph_relation' holds MorphologicalRelation rows.
+# ---------------------------------------------------------------------------
+
+
+class HypothesisRecord(Base):
+    """Polymorphic hypothesis rows (POS + morphological relations + generic)."""
+
+    __tablename__ = "hypotheses"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    kind: str = Column(String, nullable=False, default="generic", server_default="generic")
+    subject: str = Column(String, nullable=False)
+    predicate: str = Column(String, nullable=False)
+    object: str | None = Column(String, nullable=True)
+    probability: float = Column(Float, nullable=False, default=0.0, server_default=sa_sql_text("0"))
+    confidence: float | None = Column(Float, nullable=True)
+    evidence_count: int = Column(Integer, nullable=False, default=0, server_default=sa_sql_text("0"))
+    source_count: int = Column(Integer, nullable=False, default=0, server_default=sa_sql_text("0"))
+    evidence_ids: str = Column(Text, nullable=False, default="[]", server_default="[]")
+    extras: str = Column(Text, nullable=False, default="{}", server_default="{}")
+    status: str = Column(String, nullable=False, default="OBSERVED", server_default="OBSERVED")
+    version: int = Column(Integer, nullable=False, default=1, server_default=sa_sql_text("1"))
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
+
+    __table_args__ = (
+        Index("ix_hyp_kind_subject", "kind", "subject"),
+        Index("ix_hyp_status", "status"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<HypothesisRecord(kind={self.kind!r}, subject={self.subject!r})>"
+
+
+class KnowledgeClaimRecord(Base):
+    """S/P/O knowledge claim with evidence-derived confidence (§36)."""
+
+    __tablename__ = "knowledge_claims"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    claim_type: str = Column(String, nullable=False)
+    subject: str = Column(String, nullable=False)
+    predicate: str = Column(String, nullable=False)
+    object: str | None = Column(String, nullable=True)
+    confidence: float = Column(Float, nullable=False, default=0.0, server_default=sa_sql_text("0"))
+    status: str = Column(String, nullable=False, default="OBSERVED", server_default="OBSERVED")
+    evidence_ids: str = Column(Text, nullable=False, default="[]", server_default="[]")
+    source_ids: str = Column(Text, nullable=False, default="[]", server_default="[]")
+    notes: str = Column(Text, nullable=False, default="", server_default=sa_sql_text("''"))
+    version: int = Column(Integer, nullable=False, default=1, server_default=sa_sql_text("1"))
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
+
+    __table_args__ = (
+        # Expression-unique S/P/O key (object NULL folded to '') — mirrors the
+        # unique index created by migrations.create_knowledge_tables.
+        Index(
+            "ux_kc_claim_key",
+            "claim_type",
+            "subject",
+            "predicate",
+            sa_sql_text("COALESCE(object, '')"),
+            unique=True,
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return f"<KnowledgeClaimRecord(claim_type={self.claim_type!r}, subject={self.subject!r})>"
+
+
+class ClaimEvidenceRecord(Base):
+    """Link rows between ``knowledge_claims`` and ``foundation_evidence``."""
+
+    __tablename__ = "claim_evidence"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    claim_id: int = Column(
+        Integer,
+        ForeignKey("knowledge_claims.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    evidence_id: int = Column(
+        Integer,
+        ForeignKey("foundation_evidence.id"),
+        nullable=False,
+    )
+    role: str = Column(String, nullable=False, default="supports", server_default="supports")
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
+
+    __table_args__ = (
+        Index("ux_claim_evidence_pair", "claim_id", "evidence_id", unique=True),
+        Index("ix_claim_ev_evidence", "evidence_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ClaimEvidenceRecord(claim_id={self.claim_id}, evidence_id={self.evidence_id})>"
+
+
+class KnowledgeVersionRecord(Base):
+    """Release snapshot of the knowledge base (version, counts, quality, eval)."""
+
+    __tablename__ = "knowledge_versions"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    version: str = Column(String, nullable=False, unique=True)
+    git_commit: str | None = Column(String, nullable=True)
+    source_versions: str = Column(Text, nullable=False, default="{}", server_default="{}")
+    pipeline_version: str | None = Column(String, nullable=True)
+    schema_version: str | None = Column(String, nullable=True)
+    row_counts: str = Column(Text, nullable=False, default="{}", server_default="{}")
+    quality: str = Column(Text, nullable=False, default="{}", server_default="{}")
+    eval_run_id: int | None = Column(Integer, ForeignKey("eval_runs.id"), nullable=True)
+    manifest_hash: str | None = Column(String, nullable=True)
+    status: str = Column(String, nullable=False, default="OBSERVED", server_default="OBSERVED")
+    # Optimistic-lock counter — deliberately distinct from the TEXT `version`.
+    row_version: int = Column(Integer, nullable=False, default=1, server_default=sa_sql_text("1"))
+    created_at: str = Column(String, nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
+
+    def __repr__(self) -> str:
+        return f"<KnowledgeVersionRecord(version={self.version!r}, status={self.status!r})>"
+
+
+# ---------------------------------------------------------------------------
 # Model registry for migration/export
 # ---------------------------------------------------------------------------
 MODEL_REGISTRY: dict[str, type[Base]] = {
@@ -1023,4 +1176,9 @@ MODEL_REGISTRY: dict[str, type[Base]] = {
     "eval_runs": EvalRun,
     "monitoring_annotations": MonitoringAnnotation,
     "db_integrity_runs": DbIntegrityRun,
+    # Phase 1 — knowledge contracts (§36)
+    "hypotheses": HypothesisRecord,
+    "knowledge_claims": KnowledgeClaimRecord,
+    "claim_evidence": ClaimEvidenceRecord,
+    "knowledge_versions": KnowledgeVersionRecord,
 }
