@@ -25,8 +25,9 @@ playwright-report/
 test-results/
 *.pem
 
-# Orchestra session-claims runtime artifact
+# Orchestra session runtime artifacts
 .pcore-claims/
+.cursor/
 
 # ZVS scan reports
 report/zvs-scan*

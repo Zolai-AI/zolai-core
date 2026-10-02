@@ -9,6 +9,7 @@ layer is introduced either way.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from pydantic import Field, model_validator
@@ -16,6 +17,10 @@ from pydantic import Field, model_validator
 from .base import KnowledgeContract
 
 __all__ = ["Hypothesis", "MorphologicalRelation", "POSHypothesis"]
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class Hypothesis(KnowledgeContract):
@@ -32,8 +37,8 @@ class Hypothesis(KnowledgeContract):
     source_count: int = Field(default=0, ge=0)
     extras: dict[str, Any] = Field(default_factory=dict)
     version: int = Field(default=1, ge=1)
-    created_at: str | None = None
-    updated_at: str | None = None
+    created_at: str = Field(default_factory=_now)
+    updated_at: str = Field(default_factory=_now)
 
 
 class POSHypothesis(Hypothesis):
