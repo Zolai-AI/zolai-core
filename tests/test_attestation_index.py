@@ -5,8 +5,8 @@ from these rows, never re-executed through the loaders under test:
 
 ====================  ==================================================
 bible_verses:1  GEN   ``Pasian in vantung leh leitung a piangsak hi.`` (7 tok ≥2)
-bible_verses:2  GEN   ``Gam ka lak hi.`` (4 tok)
-bible_verses:3  EXO   tedim only: ``Pathian a pai ta hi.`` (3 tok, ``a`` excl)
+bible_verses:2  TEST  ``Gam ka lak hi.`` (4 tok)
+bible_verses:3  EXO   tedim only: ``testword a pai ta hi.`` (3 tok, ``a`` excl)
 dictionary:           pasian / vantung / gam (whole-field, 3)
 translations:1  zo→en target ``Gam ka mu hi.`` (4 tok)
 translations:2  en→zo target ``Vanlai a piang hi.`` (3 tok, ``a`` excl)
@@ -49,7 +49,7 @@ from zolai.learning.word_attestation import (
 BIBLE_WORDS = {
     "pasian", "in", "vantung", "leh", "leitung", "piangsak", "hi",
     "gam", "ka", "lak",
-    "pathian", "pai", "ta",
+    "testword", "pai", "ta",
 }  # 13
 DICT_WORDS = {"pasian", "vantung", "gam"}  # 3
 CORPUS_WORDS = {"gam", "ka", "mu", "hi", "vanlai", "piang"}  # 6
@@ -75,14 +75,15 @@ def _seed_sources(engine: Engine) -> None:
                     "zo_tedim2010": None,
                 },
                 {
-                    "id": 2, "ref": "GEN 1:2", "book": "GEN", "chapter": 1, "verse": 2,
+                    # Synthetic verse — test seed only, not a real Bible ref.
+                    "id": 2, "ref": "TEST 1:2", "book": "TEST", "chapter": 1, "verse": 2,
                     "zo_tdb77": "Gam ka lak hi.",
                     "zo_tedim2010": None,
                 },
                 {
                     "id": 3, "ref": "EXO 1:1", "book": "EXO", "chapter": 1, "verse": 1,
                     "zo_tdb77": None,
-                    "zo_tedim2010": "Pathian a pai ta hi.",
+                    "zo_tedim2010": "testword a pai ta hi.",
                 },
             ],
         )
@@ -215,7 +216,7 @@ def test_attest_word_shape_and_casing_parity(att_db: DatabaseManager) -> None:
     queries = _queries_instance(att_db)
     indexed = _index_instance(att_db)
 
-    for probe in ("PATHIAN", "  Pasian ", "MU", "Kei", "zzznope"):
+    for probe in ("TESTWORD", "  Pasian ", "MU", "Kei", "zzznope"):
         from_queries = queries.attest_word(probe)
         from_index = indexed.attest_word(probe)
         assert from_index == from_queries, probe
@@ -244,8 +245,8 @@ def test_verdicts_hand_computed_both_paths(att_db: DatabaseManager) -> None:
         r = att.attest_word("kei")
         assert (r["confidence"], r["in_"], r["source_count"]) == ("ATTESTED", True, 1)
 
-        # Surface form exists in the corpus text (attestation ≠ ZVS validation).
-        r = att.attest_word("pathian")
+        # Seed-only EXO surface — in bible, absent from every other source.
+        r = att.attest_word("testword")
         assert (r["confidence"], r["in_bible"]) == ("ATTESTED", True)
 
         r = att.attest_word("zzznotaword")
@@ -381,7 +382,7 @@ def test_bloom_never_changes_verdicts(
     path = _db_path(att_db)
     build_attestation_index(path)
     build_attestation_bloom(path)
-    probes = ("pasian", "mu", "kei", "pathian", "zzznope")
+    probes = ("pasian", "mu", "kei", "testword", "zzznope")
 
     with_bloom = WordAttestation(db_path=path)
     baseline = {p: with_bloom.attest_word(p) for p in probes}

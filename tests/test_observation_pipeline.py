@@ -5,7 +5,7 @@ hand, never re-executed through the pipeline):
 
 ====================  ==================================================
 bible_verses:1  GEN   ``Pasian in vantung leh leitung a piangsak hi.`` (8 tok)
-bible_verses:2  GEN   ``Gam ka lak hi.`` (4 tok)
+bible_verses:2  TEST  ``Gam ka lak hi.`` (4 tok)
 bible_verses:3  EXO   tedim only: ``Pathian a pai ta hi.`` (5 tok, ZVS)
 translations:1  zo→en ``Gam ka mu hi.`` (4 tok)
 translations:2  en→zo ``Gam ka mu hi.`` (4 tok)
@@ -13,7 +13,7 @@ translations:3  en→my Myanmar target — **must be skipped** (§19 Zolai-only)
 phrases:1             ``vanlai in leitung a piangsak hi`` (6 tok)
 ====================  ==================================================
 
-Totals: 6 observations · 31 tokens · 5 documents · 15 distinct words ·
+Totals: 6 observations · 31 tokens · 6 documents · 15 distinct words ·
 44 within-window pair occurrences (window ±2, no self-pairs).
 """
 
@@ -63,9 +63,10 @@ def _seed_sources(engine: Engine) -> None:
                     "zo_tedim2010": None,
                 },
                 {
+                    # Synthetic verse — test seed only, not a real Bible ref.
                     "id": 2,
-                    "ref": "GEN 1:2",
-                    "book": "GEN",
+                    "ref": "TEST 1:2",
+                    "book": "TEST",
                     "chapter": 1,
                     "verse": 2,
                     "zo_tdb77": "Gam ka lak hi.",
@@ -161,7 +162,7 @@ def test_build_summary_shape(summary: dict) -> None:
     assert summary["observations"] == 6
     assert summary["observations_inserted"] == 6
     assert summary["tokens"] == 31
-    assert summary["documents"] == 5
+    assert summary["documents"] == 6
     assert summary["words"] == 15
     assert summary["stats_rows"] == 15
     assert summary["pair_occurrences"] == 44
@@ -263,13 +264,14 @@ def test_stats_scalars_hand_computed(obs_db: DatabaseManager) -> None:
                 )
             )
         }
-    # gam: bible GEN 1:2 + both translation directions → 3/3/3, docs GEN +
-    # zo_to_en + en_to_zo (3 of 5), sources bible + translations (2 of 4).
-    assert rows["gam"] == (3, 3, 3, 2, 0.6)
-    # pasian: GEN (surface 'pasian') + EXO (surface 'pathian'), docs GEN/EXO.
-    assert rows["pasian"] == (2, 2, 2, 2, 0.4)
-    # hi: every sentence → 6 occurrences, 5 documents, all 4 sources.
-    assert rows["hi"] == (6, 5, 6, 4, 1.0)
+    # gam: bible TEST 1:2 + both translation directions → 3/3/3, docs TEST +
+    # zo_to_en + en_to_zo (3 of 6), sources bible + translations (2 of 4).
+    assert rows["gam"] == (3, 3, 3, 2, 0.5)
+    # pasian: GEN (surface 'pasian') + EXO (surface 'pathian'), docs GEN/EXO
+    # (2 of 6 → diversity rounded to 4 dp).
+    assert rows["pasian"] == (2, 2, 2, 2, 0.3333)
+    # hi: every sentence → 6 occurrences, 6 documents, all 4 sources.
+    assert rows["hi"] == (6, 6, 6, 4, 1.0)
 
 
 def test_surface_forms_carry_zvs_variants(obs_db: DatabaseManager) -> None:
