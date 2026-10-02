@@ -1595,7 +1595,10 @@ def bible_ref_fix(
         )
     rprint(_bible_ref_needs_line(stats["needs_founder_counts"]))
     if apply and stats["unresolvable"]:
-        rprint(f"[yellow]unresolvable (left untouched):[/yellow] {stats['unresolvable']}")
+        rprint(
+            f"[yellow]unresolvable (archived, no target to restore):[/yellow] "
+            f"{stats['unresolvable']}"
+        )
 
 
 @bible_ref_app.command("revert")

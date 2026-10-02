@@ -550,6 +550,19 @@ def test_null_en_is_report_only_unless_flagged(db: Path) -> None:
     conn.close()
 
 
+def test_audit_counts_archived_refs_as_pending_remap(db: Path) -> None:
+    """After fix, downstream copies of archived refs stay 'pending remap'."""
+    kjv = _kjv(db)
+    run_fix(db, kjv_path=kjv, apply=True)
+
+    audit = run_audit(db, kjv_path=kjv)
+
+    assert audit["archive"]["count"] == 3
+    for table in ("word_alignments", "translations"):
+        assert audit["downstream"][table]["remap_rows"] == 1
+        assert audit["downstream"][table]["bad_refs"] == 1
+
+
 def test_remap_rewrites_downstream_refs(db: Path) -> None:
     kjv = _kjv(db)
     run_fix(db, kjv_path=kjv, apply=True)
