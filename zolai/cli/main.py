@@ -1465,6 +1465,209 @@ def corpus_revert_c1(
         raise typer.Exit(code=1)
 
 
+# ============================================================
+# BIBLE REF FIX (C2 — audit + archive/fix + revert + remap)
+# ============================================================
+
+bible_ref_app = typer.Typer(
+    name="bible-ref",
+    help="📖 Bible verse ref audit (read-only), archive+fix, revert and downstream remap.",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(bible_ref_app, name="bible-ref")
+
+
+def _bible_ref_classes(classes: dict) -> Table:
+    table = Table(title="Bible ref classification", border_style="blue")
+    table.add_column("Class", justify="left")
+    table.add_column("Rows", justify="right")
+    for name, value in classes.items():
+        table.add_row(f"`{name}`", str(value))
+    return table
+
+
+def _bible_ref_needs_line(counts: dict) -> str:
+    inner = " · ".join(f"{k} {v}" for k, v in counts.items() if v)
+    return f"[yellow]needs-founder (report only):[/yellow] {inner or 'none'}"
+
+
+@bible_ref_app.command("audit")
+def bible_ref_audit(
+    report: Path = typer.Option(None, "--report", help="Also write the markdown report to PATH"),
+    db: Path = typer.Option(None, "--db", help="SQLite store (default: canonical data/zolai.db)"),
+    kjv: Path = typer.Option(None, "--kjv", help="KJV JSON ground truth (default: data/reference/kjv_en.json)"),
+    json_out: bool = typer.Option(False, "--json", help="Print the raw audit as JSON"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """🔎 Read-only verse-ref audit — never writes (not even DDL)."""
+    _setup_logging(verbose)
+    from ..data.bible_ref_fix import run_audit, write_report
+
+    audit = run_audit(db_path=db, kjv_path=kjv)
+
+    if report is not None:
+        path = write_report(audit, report)
+        if not json_out:
+            rprint(f"[green]✓ report →[/green] {path}")
+
+    if json_out:
+        import json as _json
+
+        typer.echo(_json.dumps(audit, indent=2, default=str))
+        raise typer.Exit(code=0)
+
+    console.print(_bible_ref_classes(audit["classes"]))
+    rprint(_bible_ref_needs_line(audit["needs_founder_counts"]))
+    rprint(
+        f"[cyan]structure:[/cyan] rows {audit['db_rows']} · ref-formula mismatch "
+        f"{audit['ref_formula_mismatches']} · duplicate triples {audit['duplicate_ref_triples']} · "
+        f"target {audit['target_row_count']}"
+    )
+    rprint(
+        "[cyan]pairs:[/cyan] " + " · ".join(f"{k} {v}" for k, v in audit["pair_quality"].items())
+        + f" · EN-restorable {audit['en_restore_candidates']}"
+    )
+    rprint(
+        "[cyan]downstream:[/cyan] "
+        + " · ".join(f"{k} {v['bad_refs']}/{v['rows']}" for k, v in audit["downstream"].items())
+    )
+    rprint(
+        f"[cyan]kjv:[/cyan] {'loaded' if audit['kjv_loaded'] else 'MISSING (structural-only)'} · "
+        f"archive rows {audit['archive']['count']}"
+    )
+    rprint(f"[dim]scanned {audit['db_rows']} rows in {audit['duration_s']}s · db {audit['db']}[/dim]")
+
+
+@bible_ref_app.command("fix")
+def bible_ref_fix(
+    apply: bool = typer.Option(False, "--apply", help="Write changes (default: dry-run)"),
+    fill_null_en: bool = typer.Option(False, "--fill-null-en", help="Founder-gated: fill NULL en_kJV from KJV"),
+    db: Path = typer.Option(None, "--db", help="SQLite store (default: canonical data/zolai.db)"),
+    kjv: Path = typer.Option(None, "--kjv", help="KJV JSON ground truth (default: data/reference/kjv_en.json)"),
+    json_out: bool = typer.Option(False, "--json", help="Print the raw stats as JSON"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """🗄️ Archive + remove impossible refs — DRY-RUN unless `--apply`.
+
+    Per impossible ref: resolve the (chapter-1, verse) target, copy the
+    KJV-verified EN into a demonstrably-wrong target cell, copy the full row
+    into `bible_verses_archive`, audit it and DELETE it from the canonical
+    table. No ZO/label writes; needs-founder rows stay untouched.
+    """
+    _setup_logging(verbose)
+    from ..data.bible_ref_fix import run_fix
+
+    stats = run_fix(db_path=db, kjv_path=kjv, apply=apply, fill_null_en=fill_null_en)
+
+    if json_out:
+        import json as _json
+
+        typer.echo(_json.dumps(stats, indent=2, default=str))
+        raise typer.Exit(code=0)
+
+    mode = "[bold green]APPLY[/bold green]" if apply else "[bold yellow]DRY-RUN[/bold yellow]"
+    rprint(f"{mode} · bible ref fix · {stats['duration_s']}s · {stats['db']}")
+    rprint(
+        f"[cyan]rows:[/cyan] {stats['rows_before']} → {stats['rows_after']} "
+        f"(target {stats['row_target']}) · actions {stats['actions']}/"
+        f"{stats['actions_pending']} · already {stats['already_archived']} · "
+        f"refused {stats['refused_duplicate']}"
+    )
+    if apply:
+        writes = stats["archived"] + stats["en_restored"] + stats["fill_null_en"]
+        rprint(
+            f"[cyan]written:[/cyan] archived {stats['archived']} · EN restored "
+            f"{stats['en_restored']} · NULL filled {stats['fill_null_en']} · "
+            f"audit rows {stats['audit_rows_written']} · archive total "
+            f"{stats['archive_count']}"
+        )
+        if stats["audit_rows_written"] != writes:
+            rprint("[red]✗ audit rows != writes[/red]")
+            raise typer.Exit(code=1)
+        if stats["rows_before"] - stats["rows_after"] != stats["archived"]:
+            rprint("[red]✗ row delta != archived count[/red]")
+            raise typer.Exit(code=1)
+    else:
+        rprint(
+            f"[cyan]would archive:[/cyan] {stats['actions']} rows · EN restores "
+            f"{stats['en_restore_candidates']}"
+        )
+    rprint(_bible_ref_needs_line(stats["needs_founder_counts"]))
+    if apply and stats["unresolvable"]:
+        rprint(f"[yellow]unresolvable (left untouched):[/yellow] {stats['unresolvable']}")
+
+
+@bible_ref_app.command("revert")
+def bible_ref_revert(
+    apply: bool = typer.Option(False, "--apply", help="Write reverts (default: dry-run)"),
+    db: Path = typer.Option(None, "--db", help="SQLite store (default: canonical data/zolai.db)"),
+    json_out: bool = typer.Option(False, "--json", help="Print the raw stats as JSON"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """↩️ Reinsert archived rows byte-identically and undo EN restores.
+
+    DRY-RUN unless `--apply`. Reinserts by `source_row_id` (refuses any id/ref
+    that is already live), reverses KJV-verified EN restores from the audit
+    log and appends `bible_ref_fix_revert by cli` rows — the original
+    `bible_ref_fix_v1` rows are kept.
+    """
+    _setup_logging(verbose)
+    from ..data.bible_ref_fix import run_revert
+
+    stats = run_revert(db_path=db, apply=apply)
+
+    if json_out:
+        import json as _json
+
+        typer.echo(_json.dumps(stats, indent=2, default=str))
+        raise typer.Exit(code=0)
+
+    mode = "[bold green]APPLY[/bold green]" if apply else "[bold yellow]DRY-RUN[/bold yellow]"
+    rprint(f"{mode} · bible ref revert · {stats['duration_s']}s · {stats['db']}")
+    rprint(
+        f"[cyan]archive:[/cyan] {stats['archive_rows']} rows · restored "
+        f"{stats['restored']} · refused {stats['refused_duplicate']} · "
+        f"EN reversals {stats['en_restores_reversed']}/{stats['en_restores_seen']} "
+        f"(conflicts {stats['en_restores_conflict']})"
+    )
+    if apply:
+        rprint(f"[cyan]audit rows appended:[/cyan] {stats['audit_rows_written']}")
+        rprint(f"[cyan]archive left:[/cyan] {stats['archive_rows_after']}")
+
+
+@bible_ref_app.command("remap")
+def bible_ref_remap(
+    apply: bool = typer.Option(False, "--apply", help="Write changes (default: dry-run)"),
+    db: Path = typer.Option(None, "--db", help="SQLite store (default: canonical data/zolai.db)"),
+    json_out: bool = typer.Option(False, "--json", help="Print the raw stats as JSON"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """🔗 Phase 2 — remap archived→target refs in word_alignments/translations.
+
+    DRY-RUN unless `--apply`. Every rewritten row gets a
+    `bible_ref_fix_v1: downstream_remap by cli` audit row.
+    """
+    _setup_logging(verbose)
+    from ..data.bible_ref_fix import run_remap
+
+    stats = run_remap(db_path=db, apply=apply)
+
+    if json_out:
+        import json as _json
+
+        typer.echo(_json.dumps(stats, indent=2, default=str))
+        raise typer.Exit(code=0)
+
+    mode = "[bold green]APPLY[/bold green]" if apply else "[bold yellow]DRY-RUN[/bold yellow]"
+    rprint(f"{mode} · bible ref remap · {stats['duration_s']}s · {stats['db']}")
+    rprint(f"[cyan]mapping:[/cyan] {stats['mapping_size']} archived refs")
+    for table, info in stats["downstream"].items():
+        rprint(f"[cyan]{table}:[/cyan] {info['remapped']} remapped of {info['scanned']} scanned")
+    if apply:
+        rprint(f"[cyan]audit rows appended:[/cyan] {stats['audit_rows_written']}")
+
+
 def main() -> None:
     app()
 
