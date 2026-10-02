@@ -329,6 +329,42 @@ def _update_en(conn: sqlite3.Connection, row_id: Any, value: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _archive_ddl(conn: sqlite3.Connection) -> str:
+    """``CREATE TABLE`` for the archive, mirroring the source column *types*.
+
+    Column names alone are not enough: SQLite accepts untyped columns, but a
+    reflected SQLAlchemy ``Column`` then carries ``NullType`` and any later
+    ``create_all`` refuses to compile the DDL (``CompileError``). Copy the
+    declared type / NOT NULL / DEFAULT / PRIMARY KEY from ``bible_verses`` so
+    the archive reflects like every other table.
+    """
+    src = conn.execute(f"PRAGMA table_info({TABLE})").fetchall()
+    if not src:
+        raise LookupError(f"cannot build archive DDL: {TABLE} has no columns")
+    defs = []
+    for _cid, name, coltype, notnull, dflt, pk in src:
+        if name not in BIBLE_COLUMNS:
+            continue
+        parts = [f'"{name}"', (coltype or "TEXT").strip() or "TEXT"]
+        if notnull:
+            parts.append("NOT NULL")
+        if dflt is not None:
+            # SQLite only accepts function defaults in parentheses
+            # (``DEFAULT datetime('now')`` is a syntax error, ``DEFAULT
+            # (datetime('now'))`` is not) — the source SQL may carry either.
+            dflt = str(dflt)
+            parts.append(f"DEFAULT {dflt}" if dflt.startswith("(") else f"DEFAULT ({dflt})")
+        if pk:
+            parts.append("PRIMARY KEY")
+        defs.append(" ".join(parts))
+    defs += [
+        "source_row_id INTEGER NOT NULL UNIQUE",
+        "archive_reason TEXT",
+        "archived_at TEXT",
+    ]
+    return f"CREATE TABLE IF NOT EXISTS {ARCHIVE_TABLE} (\n    " + ",\n    ".join(defs) + "\n)"
+
+
 def _ensure_archive_table(conn: sqlite3.Connection) -> bool:
     """Create ``bible_verses_archive`` if absent (the only DDL this module runs)."""
     present = ARCHIVE_TABLE in {
@@ -336,15 +372,7 @@ def _ensure_archive_table(conn: sqlite3.Connection) -> bool:
     }
     if present:
         return False
-    cols = ",\n    ".join(f'"{c}"' for c in BIBLE_COLUMNS)
-    conn.execute(
-        f"CREATE TABLE IF NOT EXISTS {ARCHIVE_TABLE} (\n"
-        f"    {cols},\n"
-        "    source_row_id INTEGER NOT NULL UNIQUE,\n"
-        "    archive_reason TEXT,\n"
-        "    archived_at TEXT\n"
-        ")"
-    )
+    conn.execute(_archive_ddl(conn))
     conn.execute(f'CREATE INDEX IF NOT EXISTS ix_archive_ref ON {ARCHIVE_TABLE} (ref)')
     conn.commit()
     return True

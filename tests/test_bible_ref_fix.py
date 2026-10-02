@@ -653,6 +653,45 @@ def test_archive_ddl_is_create_only_and_additive(db: Path) -> None:
     assert not re.search(r"DROP TABLE", source)
 
 
+def test_archive_columns_declare_types_so_sqlalchemy_can_compile(db: Path) -> None:
+    """Regression: the archive must reflect with real types, never NullType.
+
+    An earlier version of the DDL copied bare column names, which SQLite
+    accepts but SQLAlchemy reflects as ``NullType`` — every reflect +
+    ``create_all`` path then raised ``CompileError: Can't generate DDL for
+    NullType()`` against the live DB (201 test errors on 2026-10-03).
+    """
+    run_fix(db, kjv_path=_kjv(db), apply=True)
+
+    conn = sqlite3.connect(db)
+    src_types = {
+        r[1]: (r[2] or "")
+        for r in conn.execute(f"PRAGMA table_info({brf.TABLE})").fetchall()
+    }
+    infos = conn.execute(f"PRAGMA table_info({ARCHIVE_TABLE})").fetchall()
+    conn.close()
+
+    untyped = [r[1] for r in infos if not (r[2] or "").strip()]
+    assert untyped == []
+    # the 18 shared columns mirror the source table's declared types
+    arc_types = {r[1]: (r[2] or "") for r in infos}
+    for col in BIBLE_COLUMNS:
+        assert arc_types[col] == src_types[col], col
+
+    from sqlalchemy import MetaData, create_engine
+    from sqlalchemy.schema import CreateTable
+
+    engine = create_engine(f"sqlite:///{db}")
+    try:
+        metadata = MetaData()
+        metadata.reflect(bind=engine)
+        ddl = str(CreateTable(metadata.tables[ARCHIVE_TABLE]).compile(engine))
+    finally:
+        engine.dispose()
+    assert ddl.strip().startswith("CREATE TABLE bible_verses_archive")
+    assert "id INTEGER" in ddl
+
+
 def test_second_fix_run_never_creates_a_second_archive_row(db: Path) -> None:
     kjv = _kjv(db)
     run_fix(db, kjv_path=kjv, apply=True)
