@@ -41,6 +41,11 @@ from .foundation import (
 )
 from .grammar import GrammarRepository, WordCollocationRepository
 from .knowledge import ClaimRepository, HypothesisRepository, KnowledgeVersionRepository
+from .observation import (
+    AttestationIndexRepository,
+    ObservationRepository,
+    WordStatsRepository,
+)
 from .phrase import PhraseRepository
 from .provenance import AuditRepository, ProvenanceRepository
 from .translation import TranslationRepository, WordAlignmentRepository
@@ -48,6 +53,7 @@ from .vocabulary import VocabularyRepository, WordUsageRepository
 
 __all__ = [
     "AlignmentRepository",
+    "AttestationIndexRepository",
     "AuditRepository",
     "BaseRepository",
     "BibleAnalysisRepository",
@@ -83,6 +89,7 @@ __all__ = [
     "KnowledgeVectorRepository",
     "KnowledgeVersionRepository",
     "NgramRepository",
+    "ObservationRepository",
     "ParticleRepository",
     "PhraseRepository",
     "ProvenanceRepository",
@@ -93,6 +100,7 @@ __all__ = [
     "VocabularyRepository",
     "WordAlignmentRepository",
     "WordCollocationRepository",
+    "WordStatsRepository",
     "WordUsageRepository",
 ]
 
@@ -141,6 +149,9 @@ def get_repositories(db_path=None) -> dict[str, BaseRepository]:
         "claims": ClaimRepository(engine),
         "hypotheses": HypothesisRepository(engine),
         "knowledge_versions": KnowledgeVersionRepository(engine),
+        "observations": ObservationRepository(engine),
+        "word_observation_stats": WordStatsRepository(engine),
+        "attestation_index": AttestationIndexRepository(engine),
     }
     # Add foundation repositories
     repos.update(get_foundation_repositories(engine))
