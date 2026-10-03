@@ -342,6 +342,20 @@ def _probe_rag() -> Callable[[], Any]:
         return {"word": pack.word, "confidence": pack.confidence}
     return run
 
+
+def _probe_publishing() -> Callable[[], Any]:
+    """Probe publishing engine (network=True, dry-run)."""
+    from sqlalchemy import create_engine
+    from zolai.publishing.release import release_knowledge
+
+    def run():
+        engine = create_engine("sqlite:////home/peter/Documents/Projects/zolai-ai/data/zolai.db")
+        # Dry-run validation only
+        from zolai.publishing.release import _validate_pre_release
+        passed, errors, warnings = _validate_pre_release(engine, "2026.10.0")
+        return {"passed": passed, "errors": len(errors), "warnings": len(warnings)}
+    return run
+
 PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
     "dictionary_lookup": _probe_dictionary,
     "translation_fallback": _probe_translation_fallback,
@@ -364,6 +378,7 @@ PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
     "knowledge": _probe_knowledge,
     "incremental": _probe_incremental,
     "rag": _probe_rag,
+    "publishing": _probe_publishing,
     "knowledge": _probe_knowledge,
 }
 
@@ -373,7 +388,7 @@ PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
 
 class TestRegistry:
     def test_registry_has_at_least_eighteen_engines(self) -> None:
-        assert len(ENGINES) >= 21
+        assert len(ENGINES) >= 22
 
     def test_observation_is_registered_offline_deterministic_writes(self) -> None:
         """Phase 2 §36 — the observation engine is a rule-mode write surface."""
@@ -403,6 +418,14 @@ class TestRegistry:
         """Phase 6 §36 — the RAG engine is a network-mode read surface."""
         spec = get_engine_spec("rag")
         assert spec.target == "zolai.rag.retrieve:UnifiedRetriever"
+        assert spec.capabilities == Capabilities(
+            network=True, deterministic=False, writes=False
+        )
+
+    def test_publishing_is_registered_network_nondeterministic_writes(self) -> None:
+        """Phase 7 §36 — the publishing engine is a network-mode write surface (orchestration)."""
+        spec = get_engine_spec("publishing")
+        assert spec.target == "zolai.publishing.release:release_knowledge"
         assert spec.capabilities == Capabilities(
             network=True, deterministic=False, writes=False
         )
