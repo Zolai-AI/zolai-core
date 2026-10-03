@@ -15,6 +15,7 @@ from ..config import config
 from ..dictionary.manager import DictionaryManager
 from .observation import observation_app
 from .discovery import discovery_app
+from .knowledge import app as knowledge_app
 
 app = typer.Typer(
     name="zolai",
@@ -29,6 +30,7 @@ app.add_typer(observation_app, name="observation")
 
 # Phase 3 §36 — discovery engine (build)
 app.add_typer(discovery_app, name="discovery")
+app.add_typer(knowledge_app, name="knowledge")
 
 
 def _setup_logging(verbose: bool = False):

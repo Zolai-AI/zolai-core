@@ -277,6 +277,15 @@ ENGINES: tuple[EngineSpec, ...] = (
             "sentence patterns, grammar phenomena → hypotheses + grammar_patterns."
         ),
     ),
+    EngineSpec(
+        name="knowledge",
+        target="zolai.knowledge.promotion:promote_hypotheses_to_claims",
+        capabilities=Capabilities(network=False, deterministic=True, writes=True),
+        summary=(
+            "Knowledge promotion: hypotheses → claims with evidence linking, "
+            "consensus confidence, review queue, versioning."
+        ),
+    ),
 )
 
 #: Name → spec, for O(1) lookup in tests and call sites.
