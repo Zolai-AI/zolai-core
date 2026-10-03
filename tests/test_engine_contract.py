@@ -259,6 +259,41 @@ def _probe_context_validator() -> Callable[[], Any]:
     return lambda: validator.validate_context("Pasian in vantung a piangsak hi.")
 
 
+def _probe_observation() -> Callable[[], Any]:
+    """Read-only capability stages (tokenize → normalize → stats).
+
+    The build *write* path is covered by ``test_observation_pipeline``; the
+    probe itself must stay side-effect free (the contract runs it twice against
+    the canonical DB — no rows may be inserted).
+    """
+    from zolai.foundation.observation import (
+        StatsAggregator,
+        normalize_tokens,
+        tokenize_sentence,
+    )
+
+    text = "Pasian in vantung leh leitung a piangsak hi."
+
+    def run() -> Any:
+        tokens = tokenize_sentence(text)
+        normalized, zvs_corrected = normalize_tokens(tokens)
+        stats = StatsAggregator()
+        stats.observe(
+            normalized,
+            tokens,
+            document_id="probe:GEN 1:1",
+            source_id="bible_verses:zo_tdb77",
+        )
+        return {
+            "tokens": tokens,
+            "normalized": normalized,
+            "zvs_corrected": zvs_corrected,
+            "scalars": stats.scalars(normalized[0]) if normalized else {},
+        }
+
+    return run
+
+
 PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
     "dictionary_lookup": _probe_dictionary,
     "translation_fallback": _probe_translation_fallback,
@@ -276,6 +311,7 @@ PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
     "online_search": _probe_online_search,
     "tokenizer": _probe_tokenizer,
     "context_validator": _probe_context_validator,
+    "observation": _probe_observation,
 }
 
 
@@ -283,8 +319,16 @@ PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
 
 
 class TestRegistry:
-    def test_registry_has_at_least_fourteen_engines(self) -> None:
-        assert len(ENGINES) >= 14
+    def test_registry_has_at_least_seventeen_engines(self) -> None:
+        assert len(ENGINES) >= 17
+
+    def test_observation_is_registered_offline_deterministic_writes(self) -> None:
+        """Phase 2 §36 — the observation engine is a rule-mode write surface."""
+        spec = get_engine_spec("observation")
+        assert spec.target == "zolai.foundation.observation.pipeline:ObservationPipeline"
+        assert spec.capabilities == Capabilities(
+            network=False, deterministic=True, writes=True
+        )
 
     def test_names_unique_and_indexed(self) -> None:
         names = engine_names()
