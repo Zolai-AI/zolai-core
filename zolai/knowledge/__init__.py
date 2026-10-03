@@ -1,44 +1,21 @@
-"""Zolai Knowledge Brain — pure-Python RAG layer (embeddings-first, no fine-tuning).
+"""Phase 4 — Knowledge Engine (Master Prompt §36).
 
-Modules:
-  ingest      : chunk wiki/*.md (+ optional txt) into newline-delimited JSONL with embeddings
-  retrieve    : cosine retrieval over the JSONL index (no external vector DB required)
-  ngram       : word-frequency + bigram prediction tables from wordlists/dictionary
-  pdf         : PDF OCR ingestion into the same vector index
-  rag_contract: structured layered retrieval (vocabulary, grammar, phrases, Bible, ZVS)
+Promotes machine-discovered hypotheses into audited, evidence-backed knowledge claims
+with consensus-driven confidence, human review queues, and versioned snapshots.
 
-Primary artifact layout (gitignored, local-only):
-  data/knowledge/*.jsonl   — indexed knowledge chunks + embeddings + ngram tables
+All writes go through repositories; no LLM→canonical direct writes.
 """
-from .ingest import index_pdfs, index_wiki, iter_sources
-from .ngram import (
-    build_ngram_tables,
-    load_ngram_tables,
-    predict_completion,
-    predict_next,
-    suggest_corrections,
-)
-from .pdf import extract_pdf_text, iter_ocr_markdown
-from .rag_contract import Evidence, EvidencePack, ZolaiRAG
-from .rag_contract import retrieve as rag_retrieve
-from .retrieve import format_context, load_index, retrieve
+
+from .promotion import promote_hypotheses_to_claims
+from .consensus import compute_claim_consensus
+from .review import ReviewQueue
+from .versioning import create_knowledge_version, list_knowledge_versions, get_knowledge_version
 
 __all__ = [
-    "index_wiki",
-    "index_pdfs",
-    "iter_sources",
-    "extract_pdf_text",
-    "iter_ocr_markdown",
-    "load_index",
-    "retrieve",
-    "format_context",
-    "build_ngram_tables",
-    "load_ngram_tables",
-    "predict_next",
-    "predict_completion",
-    "suggest_corrections",
-    "Evidence",
-    "EvidencePack",
-    "ZolaiRAG",
-    "rag_retrieve",
+    "promote_hypotheses_to_claims",
+    "compute_claim_consensus",
+    "ReviewQueue",
+    "create_knowledge_version",
+    "list_knowledge_versions",
+    "get_knowledge_version",
 ]

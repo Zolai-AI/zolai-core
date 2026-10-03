@@ -303,6 +303,18 @@ def _probe_discovery() -> Callable[[], Any]:
     return lambda: {"class": "DiscoveryPipeline", "capabilities": ["pos", "morphology", "collocation", "sentence_patterns", "grammar"]}
 
 
+
+def _probe_knowledge() -> Callable[[], Any]:
+    """Probe knowledge promotion engine (offline, dry-run)."""
+    from sqlalchemy import create_engine
+    from zolai.knowledge.promotion import promote_hypotheses_to_claims
+
+    def run():
+        engine = create_engine("sqlite:////home/peter/Documents/Projects/zolai-ai/data/zolai.db")
+        # Dry-run promotion with small limits
+        return promote_hypotheses_to_claims(engine, kinds=["pos"], dry_run=True)
+    return run
+
 PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
     "dictionary_lookup": _probe_dictionary,
     "translation_fallback": _probe_translation_fallback,
@@ -322,6 +334,7 @@ PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
     "context_validator": _probe_context_validator,
     "observation": _probe_observation,
     "discovery": _probe_discovery,
+    "knowledge": _probe_knowledge,
 }
 
 
@@ -330,12 +343,20 @@ PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
 
 class TestRegistry:
     def test_registry_has_at_least_eighteen_engines(self) -> None:
-        assert len(ENGINES) >= 18
+        assert len(ENGINES) >= 19
 
     def test_observation_is_registered_offline_deterministic_writes(self) -> None:
         """Phase 2 §36 — the observation engine is a rule-mode write surface."""
         spec = get_engine_spec("observation")
         assert spec.target == "zolai.foundation.observation.pipeline:ObservationPipeline"
+        assert spec.capabilities == Capabilities(
+            network=False, deterministic=True, writes=True
+        )
+
+    def test_knowledge_is_registered_offline_deterministic_writes(self) -> None:
+        """Phase 4 §36 — the knowledge engine is a rule-mode write surface."""
+        spec = get_engine_spec("knowledge")
+        assert spec.target == "zolai.knowledge.promotion:promote_hypotheses_to_claims"
         assert spec.capabilities == Capabilities(
             network=False, deterministic=True, writes=True
         )
