@@ -75,7 +75,7 @@ def rank_evidence(items: list[EvidenceItem]) -> list[EvidenceItem]:
     def score(item: EvidenceItem) -> float:
         tier_weight = EVIDENCE_TIER_WEIGHTS.get(item.tier, 0.5)
         return tier_weight * item.confidence
-    
+
     return sorted(items, key=score, reverse=True)
 
 
@@ -83,26 +83,26 @@ def evidence_to_pack(word: str, evidence_items: list[EvidenceItem]) -> EvidenceP
     """Convert ranked evidence items into structured EvidencePack (§20)."""
     if not evidence_items:
         return EvidencePack(word=word)
-    
+
     ranked = rank_evidence(evidence_items)
-    
+
     # Aggregate
     pack = EvidencePack(word=word)
     seen_sources = set()
     tier_weights = []
-    
+
     for item in ranked:
         pack.sources.append(item.source)
         seen_sources.add(item.source_type)
         tier_weights.append(EVIDENCE_TIER_WEIGHTS.get(item.tier, 0.5))
-        
+
         # Extract structured info from metadata
         meta = item.metadata
-        
+
         # Forms
         if "forms" in meta:
             pack.forms.extend(meta["forms"])
-        
+
         # Frequency
         freq = meta.get("frequency")
         if freq is not None:
@@ -110,37 +110,71 @@ def evidence_to_pack(word: str, evidence_items: list[EvidenceItem]) -> EvidenceP
         doc_freq = meta.get("document_frequency")
         if doc_freq is not None:
             pack.document_frequency = max(pack.document_frequency, doc_freq)
-        
+
         # POS
-        if "pos" in meta:
-            pack.pos.append(meta["pos"])
-        
+        if "pos" in meta and meta["pos"] is not None:
+            pos_val = meta["pos"]
+            if isinstance(pos_val, list):
+                pack.pos.extend([p for p in pos_val if p is not None])
+            else:
+                pack.pos.append(pos_val)
+
         # Morphology
         if "morphology" in meta:
             pack.morphology.update(meta["morphology"])
-        
+
         # Examples
         if item.text:
             pack.examples.append(item.text)
-        
-        # Collocations
-        if "collocations" in meta:
-            pack.collocations.extend(meta["collocations"])
-        
+
+        # Collocations \u2014 normalize to {word1, word2, pmi, freq}
+        for coll in meta.get("collocations") or []:
+            if not isinstance(coll, dict):
+                continue
+            if "token" in coll:
+                pack.collocations.append({
+                    "word1": word,
+                    "word2": coll.get("token", ""),
+                    "pmi": coll.get("pmi", 0.0),
+                    "freq": coll.get("count", 0),
+                })
+            elif "word1" in coll:
+                pack.collocations.append({
+                    "word1": coll.get("word1", ""),
+                    "word2": coll.get("word2", ""),
+                    "pmi": coll.get("pmi", 0.0),
+                    "freq": coll.get("freq", coll.get("frequency", 0)),
+                })
+
         # Grammar usage
         if "grammar" in meta:
             pack.grammar_usage.extend(meta["grammar"])
-    
-    # Deduplicate
-    pack.forms = list(dict.fromkeys(pack.forms))
-    pack.pos = list(dict.fromkeys(pack.pos))
-    pack.examples = list(dict.fromkeys(pack.examples))
-    pack.sources = list(dict.fromkeys(pack.sources))
-    
+
+    # Deduplicate (lists may contain dicts -> not hashable, so key on JSON)
+    def _dedupe(seq):
+        seen, uniq = set(), []
+        for v in seq:
+            try:
+                k = json.dumps(v, sort_keys=True, default=str) if isinstance(v, (dict, list)) else str(v)
+            except (TypeError, ValueError):
+                k = repr(v)
+            if k not in seen:
+                seen.add(k)
+                uniq.append(v)
+        return uniq
+
+    pack.forms = _dedupe(pack.forms)
+    pack.pos = _dedupe(pack.pos)
+    pack.examples = _dedupe(pack.examples)
+    pack.sources = _dedupe(pack.sources)
+    pack.collocations = _dedupe(pack.collocations)
+    pack.grammar_usage = _dedupe(pack.grammar_usage)
+
     # Confidence = weighted average of evidence confidences
     if tier_weights:
-        pack.confidence = round(sum(w * item.confidence for w, item in zip(tier_weights, ranked)) / sum(tier_weights), 2)
-    
+        weighted = sum(w * item.confidence for w, item in zip(tier_weights, ranked))
+        pack.confidence = round(weighted / sum(tier_weights), 2)
+
     pack.evidence_items = ranked
     return pack
 
@@ -148,7 +182,7 @@ def evidence_to_pack(word: str, evidence_items: list[EvidenceItem]) -> EvidenceP
 def build_word_evidence_items(engine: Engine, word: str, limit: int = 50) -> list[EvidenceItem]:
     """Build evidence items for a word from all canonical sources."""
     items = []
-    
+
     # 1. Dictionary
     with engine.connect() as conn:
         rows = conn.execute(
@@ -161,7 +195,7 @@ def build_word_evidence_items(engine: Engine, word: str, limit: int = 50) -> lis
             """),
             {"word": word},
         ).fetchall()
-        
+
         for row in rows:
             items.append(EvidenceItem(
                 source_type="dictionary",
@@ -177,7 +211,7 @@ def build_word_evidence_items(engine: Engine, word: str, limit: int = 50) -> lis
                     "frequency": row[4] if row[4] is not None else 0,
                 },
             ))
-    
+
     # 2. Bible attestations (attestation_index)
     with engine.connect() as conn:
         rows = conn.execute(
@@ -190,7 +224,7 @@ def build_word_evidence_items(engine: Engine, word: str, limit: int = 50) -> lis
             """),
             {"word": word},
         ).fetchall()
-        
+
         for row in rows:
             items.append(EvidenceItem(
                 source_type="bible",
@@ -206,16 +240,25 @@ def build_word_evidence_items(engine: Engine, word: str, limit: int = 50) -> lis
                     "ref": row[3],
                 },
             ))
-    
+
     # 3. Word observation stats (contexts, collocations, frequency)
     with engine.connect() as conn:
         row = conn.execute(
             text("SELECT * FROM word_observation_stats WHERE normalized_form = :word"),
             {"word": word},
         ).first()
-        
+
         if row:
             r = dict(row._mapping)
+
+            def _jload(val, default):
+                if isinstance(val, str):
+                    try:
+                        return json.loads(val)
+                    except (json.JSONDecodeError, TypeError):
+                        return default
+                return val if val is not None else default
+
             items.append(EvidenceItem(
                 source_type="corpus",
                 source="word_observation_stats",
@@ -224,14 +267,16 @@ def build_word_evidence_items(engine: Engine, word: str, limit: int = 50) -> lis
                 confidence=0.7,
                 text=f"Freq: {r.get('frequency', 0)}",
                 metadata={
-                    "frequency": r.get("frequency", 0),
-                    "document_frequency": r.get("document_frequency", 0),
-                    "sentence_frequency": r.get("sentence_frequency", 0),
-                    "contexts": r.get("contexts"),
-                    "collocations": r.get("collocations"),
+                    "frequency": r.get("frequency") or 0,
+                    "document_frequency": r.get("doc_freq") or 0,
+                    "sentence_frequency": r.get("sent_freq") or 0,
+                    "contexts": _jload(r.get("contexts"), {}),
+                    "collocations": _jload(r.get("collocations"), []),
+                    "surface_forms": _jload(r.get("surface_forms"), []),
+                    "attestation": _jload(r.get("attestation"), {}),
                 },
             ))
-    
+
     # 4. Knowledge claims
     with engine.connect() as conn:
         rows = conn.execute(
@@ -242,7 +287,7 @@ def build_word_evidence_items(engine: Engine, word: str, limit: int = 50) -> lis
             """),
             {"word_pat": f"word:{word}%"},
         ).fetchall()
-        
+
         for row in rows:
             items.append(EvidenceItem(
                 source_type="knowledge",
@@ -258,7 +303,7 @@ def build_word_evidence_items(engine: Engine, word: str, limit: int = 50) -> lis
                     "status": row[4],
                 },
             ))
-    
+
     # 5. KG nodes
     with engine.connect() as conn:
         rows = conn.execute(
@@ -268,7 +313,7 @@ def build_word_evidence_items(engine: Engine, word: str, limit: int = 50) -> lis
             """),
             {"word": word},
         ).fetchall()
-        
+
         for row in rows:
             items.append(EvidenceItem(
                 source_type="kg",
@@ -279,5 +324,5 @@ def build_word_evidence_items(engine: Engine, word: str, limit: int = 50) -> lis
                 text=f"KG node: {row[0]} ({row[1]})",
                 metadata=json.loads(row[2]) if isinstance(row[2], str) else row[2],
             ))
-    
+
     return items

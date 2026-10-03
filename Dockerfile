@@ -19,7 +19,6 @@ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/wh
 
 # Copy project (data/ is gitignored — mount at runtime)
 COPY scripts/ scripts/
-COPY wiki/ wiki/
 COPY config/ config/
 COPY .env.example .env.example
 
