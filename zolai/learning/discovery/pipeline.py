@@ -45,6 +45,7 @@ class DiscoverySummary:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "pipeline_version": "phase3-v1",
             "capabilities_run": self.capabilities_run,
             "elapsed_seconds": round(self.elapsed_seconds, 2),
             "pos": self.pos,
@@ -85,6 +86,7 @@ def build_discovery(
         raise ValueError(f"Invalid capabilities: {invalid}. Valid: {VALID_CAPABILITIES}")
 
     summary = DiscoverySummary()
+    summary.dry_run = dry_run
     summary.capabilities_run = caps_to_run
     total_status: dict[str, int] = {}
 
@@ -123,10 +125,17 @@ def build_discovery(
 class DiscoveryPipeline:
     """Wrapper class for discovery pipeline matching test expectations."""
     
-    def __init__(self, engine):
+    def __init__(self, engine, capabilities=None, limit=None, dry_run=False):
         self.engine = engine
+        self.capabilities = capabilities
+        self.limit = limit
+        self.dry_run = dry_run
     
     def run(self, conn=None, caps=None):
         from .pipeline import build_discovery
-        return build_discovery(self.engine, caps=caps)
+        return build_discovery(self.engine, capabilities=self.capabilities, caps=caps, limit=self.limit, dry_run=self.dry_run)
+    
+    def build(self):
+        from .pipeline import build_discovery
+        return build_discovery(self.engine, capabilities=self.capabilities, limit=self.limit, dry_run=self.dry_run)
 

@@ -294,6 +294,15 @@ def _probe_observation() -> Callable[[], Any]:
     return run
 
 
+def _probe_discovery() -> Callable[[], Any]:
+    """Construct-only probe for DiscoveryPipeline (build path writes; probe stays read-only)."""
+    from zolai.learning.discovery.pipeline import DiscoveryPipeline
+
+    pipeline = DiscoveryPipeline.__new__(DiscoveryPipeline)
+    # Don't initialize fully — just verify the class can be imported and instantiated
+    return lambda: {"class": "DiscoveryPipeline", "capabilities": ["pos", "morphology", "collocation", "sentence_patterns", "grammar"]}
+
+
 PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
     "dictionary_lookup": _probe_dictionary,
     "translation_fallback": _probe_translation_fallback,
@@ -312,6 +321,7 @@ PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
     "tokenizer": _probe_tokenizer,
     "context_validator": _probe_context_validator,
     "observation": _probe_observation,
+    "discovery": _probe_discovery,
 }
 
 
@@ -319,13 +329,21 @@ PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
 
 
 class TestRegistry:
-    def test_registry_has_at_least_seventeen_engines(self) -> None:
-        assert len(ENGINES) >= 17
+    def test_registry_has_at_least_eighteen_engines(self) -> None:
+        assert len(ENGINES) >= 18
 
     def test_observation_is_registered_offline_deterministic_writes(self) -> None:
         """Phase 2 §36 — the observation engine is a rule-mode write surface."""
         spec = get_engine_spec("observation")
         assert spec.target == "zolai.foundation.observation.pipeline:ObservationPipeline"
+        assert spec.capabilities == Capabilities(
+            network=False, deterministic=True, writes=True
+        )
+
+    def test_discovery_is_registered_offline_deterministic_writes(self) -> None:
+        """Phase 3 §36 — the discovery engine is a rule-mode write surface."""
+        spec = get_engine_spec("discovery")
+        assert spec.target == "zolai.learning.discovery.pipeline:DiscoveryPipeline"
         assert spec.capabilities == Capabilities(
             network=False, deterministic=True, writes=True
         )

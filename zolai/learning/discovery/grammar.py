@@ -312,6 +312,7 @@ def build_grammar_hypotheses(
         "status_counts": status_counts,
         "skipped": skipped,
         "candidates_considered": len(all_phenomena),
+            "phenomena_found": patterns_written,
     }
 class GrammarDiscovery:
     """Wrapper class for grammar discovery matching test expectations."""
