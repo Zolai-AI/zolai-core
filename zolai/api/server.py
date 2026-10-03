@@ -22,6 +22,7 @@ from ..api.desktop_router import router as desktop_router
 from ..api.foundation_router import router as foundation_router
 from ..api.jsonl_router import router as jsonl_router
 from ..api.lexicon_router import router as lexicon_router
+from ..api.rag_router import router as rag_router
 from ..api.linguistics_router import router as linguistics_router
 from ..api.metrics_router import router as metrics_router
 from ..api.record_review_router import router as record_review_router
@@ -395,6 +396,7 @@ def create_app() -> FastAPI:
     app.include_router(records_router)
     app.include_router(record_review_router)
     app.include_router(word_engine_router)
+    app.include_router(rag_router, prefix="")
 
     # --- Static File Serving for Desktop App ---
     from fastapi.responses import FileResponse
