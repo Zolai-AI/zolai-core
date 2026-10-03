@@ -20,12 +20,15 @@ from pydantic import BaseModel, Field, model_validator
 
 __all__ = [
     "ALLOWED_TRANSITIONS",
+    "DISCOVERY_STATUSES",
     "GATED_STATUSES",
+    "DiscoveryStatusError",
     "EvidenceGateError",
     "InvalidTransition",
     "KnowledgeContract",
     "KnowledgeStatus",
     "confidence_from_evidence",
+    "require_discovery_status",
     "validate_transition",
 ]
 
@@ -77,6 +80,52 @@ class InvalidTransition(ValueError):
 
 class EvidenceGateError(ValueError):
     """Raised when a gated status is set without at least one evidence link."""
+
+
+#: Statuses a *machine* discovery writer may emit (Master Prompt §34).
+#:
+#: Discovery proposes — it never promotes.  ``SUPPORTED``/``VERIFIED`` are
+#: reached only through the Phase 4 human review queue, ``REJECTED``/
+#: ``DEPRECATED`` only through a review decision.
+DISCOVERY_STATUSES: frozenset[KnowledgeStatus] = frozenset(
+    {KnowledgeStatus.OBSERVED, KnowledgeStatus.CANDIDATE}
+)
+
+
+class DiscoveryStatusError(ValueError):
+    """Raised when a discovery writer is handed a status it may not emit."""
+
+
+def require_discovery_status(status: KnowledgeStatus | str) -> KnowledgeStatus:
+    """Validate a machine-discovered row status against :data:`DISCOVERY_STATUSES`.
+
+    Every discovery write path (``hypotheses`` and the ``disc_*``
+    ``grammar_patterns`` namespaces) funnels through this guard so that a bug
+    can never silently mint a ``SUPPORTED``/``VERIFIED`` row — promotion is a
+    human act (§34), never a build's.
+
+    Returns:
+        The coerced :class:`KnowledgeStatus`.
+
+    Raises:
+        DiscoveryStatusError: When ``status`` is outside
+            ``{OBSERVED, CANDIDATE}``.
+    """
+    try:
+        resolved = KnowledgeStatus(status)
+    except ValueError as exc:
+        raise DiscoveryStatusError(
+            f"unknown knowledge status {status!r}; discovery may only write "
+            f"{'/'.join(sorted(s.value for s in DISCOVERY_STATUSES))}"
+        ) from exc
+    if resolved not in DISCOVERY_STATUSES:
+        raise DiscoveryStatusError(
+            f"discovery refuses status {resolved.value}: machine writers may only "
+            "emit "
+            f"{'/'.join(sorted(s.value for s in DISCOVERY_STATUSES))} — "
+            "SUPPORTED/VERIFIED require the Phase 4 human review queue"
+        )
+    return resolved
 
 
 def validate_transition(

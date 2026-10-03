@@ -268,6 +268,15 @@ ENGINES: tuple[EngineSpec, ...] = (
         summary="Observation build: tokenize → normalize → freq/contexts/PMI/attestation "
         "into rebuildable derived tables.",
     ),
+    EngineSpec(
+        name="discovery",
+        target="zolai.learning.discovery.pipeline:DiscoveryPipeline",
+        capabilities=Capabilities(network=False, deterministic=True, writes=True),
+        summary=(
+            "Linguistic discovery: POS, morphology, collocations, "
+            "sentence patterns, grammar phenomena → hypotheses + grammar_patterns."
+        ),
+    ),
 )
 
 #: Name → spec, for O(1) lookup in tests and call sites.

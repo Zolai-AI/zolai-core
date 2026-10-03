@@ -16,7 +16,7 @@ from pydantic import Field, model_validator
 
 from .base import KnowledgeContract
 
-__all__ = ["Hypothesis", "MorphologicalRelation", "POSHypothesis"]
+__all__ = ["CollocationHypothesis", "Hypothesis", "MorphologicalRelation", "POSHypothesis"]
 
 
 def _now() -> str:
@@ -98,4 +98,32 @@ class MorphologicalRelation(Hypothesis):
         if self.object is None:
             self.object = self.root
         self.extras = {**self.extras, "type": self.relation_type, "function": self.function}
+        return self
+
+
+class CollocationHypothesis(Hypothesis):
+    """Collocation hypothesis — ``hypotheses`` row with ``kind='collocation'``.
+
+    The two words are encoded in the canonical slots:
+    ``subject=word:{word1}``, ``predicate=collocates_with``,
+    ``object=word:{word2}``.  ``extras`` carries ``pmi``, ``count``, ``window``.
+    """
+
+    kind: Literal["collocation"] = "collocation"
+    word1: str = Field(min_length=1, description="First word in the collocation pair")
+    word2: str = Field(min_length=1, description="Second word in the collocation pair")
+    pmi: float = Field(default=0.0, ge=0.0, description="Pointwise mutual information score")
+    count: int = Field(default=0, ge=0, description="Window co-occurrence count")
+    window: int = Field(default=2, ge=1, description="Half-window size used for extraction")
+    # Encoded canonical slots — recomputed by the validator below.
+    subject: str = Field(default="", description="Encoded 'word:{word1}'")
+    predicate: str = Field(default="", description="Encoded 'collocates_with'")
+    object: str = Field(default="", description="Encoded 'word:{word2}'")
+
+    @model_validator(mode="after")
+    def _encode_spo(self) -> CollocationHypothesis:
+        self.subject = f"word:{self.word1}"
+        self.predicate = "collocates_with"
+        self.object = f"word:{self.word2}"
+        self.extras = {**self.extras, "pmi": self.pmi, "count": self.count, "window": self.window}
         return self

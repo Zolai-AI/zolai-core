@@ -25,7 +25,7 @@ from .base import (
 )
 from .claim import KnowledgeClaim
 from .evidence import Evidence, Observation
-from .hypothesis import Hypothesis, MorphologicalRelation, POSHypothesis
+from .hypothesis import CollocationHypothesis, Hypothesis, MorphologicalRelation, POSHypothesis
 from .lexicon import Word, WordForm
 from .pattern import GrammarPattern
 from .source import Source
@@ -34,6 +34,7 @@ from .version import KnowledgeVersion
 __all__ = [
     "ALLOWED_TRANSITIONS",
     "GATED_STATUSES",
+    "CollocationHypothesis",
     "Evidence",
     "EvidenceGateError",
     "GrammarPattern",
