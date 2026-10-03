@@ -406,3 +406,48 @@ def track_operation(name: str) -> Iterator[None]:
         yield
     finally:
         ANALYSIS_LATENCY.labels(operation=name).observe(time.perf_counter() - started)
+
+# --- Phase 8 Production Metrics (§32) ---
+
+def record_pipeline_run(pipeline: str, success: bool, error_type: str | None = None) -> None:
+    """Record a pipeline run for Phase 8 metrics."""
+    from zolai.monitoring.production_metrics import record_pipeline_run as _record
+    return _record(pipeline, success, error_type)
+
+def observe_engine_call(engine: str, latency: float, success: bool) -> None:
+    from zolai.monitoring.production_metrics import observe_engine_call as _observe
+    return _observe(engine, latency, success)
+
+def observe_rag_query(endpoint: str, latency: float, success: bool) -> None:
+    from zolai.monitoring.production_metrics import observe_rag_query as _observe
+    return _observe(endpoint, latency, success)
+
+def observe_incremental_change(change_type: str) -> None:
+    from zolai.monitoring.production_metrics import observe_incremental_change as _observe
+    return _observe(change_type)
+
+def observe_incremental_processing(latency: float) -> None:
+    from zolai.monitoring.production_metrics import observe_incremental_processing as _observe
+    return _observe(latency)
+
+def observe_publish_artifact_size(size_bytes: int) -> None:
+    from zolai.monitoring.production_metrics import observe_publish_artifact_size as _observe
+    return _observe(size_bytes)
+
+def observe_publish_sync(target: str, latency: float) -> None:
+    from zolai.monitoring.production_metrics import observe_publish_sync as _observe
+    return _observe(target, latency)
+
+def record_publish_release(success: bool) -> None:
+    from zolai.monitoring.production_metrics import record_publish_release as _record
+    return _record(success)
+
+# Re-export context managers and decorators
+from zolai.monitoring.production_metrics import (
+    time_engine_call,
+    time_rag_query,
+    time_incremental_processing,
+    track_engine_call,
+    track_rag_query,
+    track_rag_query_sync,
+)
