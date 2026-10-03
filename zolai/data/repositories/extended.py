@@ -1,308 +1,336 @@
-"""Extended repositories for DB-first tables introduced by the migration.
-
-These back the runtime serving modules that previously read raw JSONL. Each
-repository subclasses :class:`BaseRepository` and exposes the query helpers the
-serving layer needs.
-
-To wire one up: construct with an engine (use ``get_engine()``) and pass to the
-serving module in place of ``json_lines.open(...)``.
-"""
+"""Extended repositories for Phase 6+ (KG, Vector search, etc.)."""
 
 from __future__ import annotations
 
 import json
-from typing import Any, Iterable
+import logging
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from .base import BaseRepository
 
-
-class NgramRepository(BaseRepository):
-    """Repository over the ``ngram`` table (unigram + bigram counts).
-
-    Mirrors the previous ``ngrams.jsonl`` shape so ``knowledge.ngram`` can read
-    prediction data straight from SQLite.
-    """
-
-    def __init__(self, engine: Engine) -> None:
-        super().__init__(engine, "ngram", id_column="id")
-
-    def as_tables(self) -> dict[str, dict]:
-        """Return ``{"unigrams": {word: count}, "bigrams": {(a, b): count}}``."""
-        unigrams: dict[str, int] = {}
-        bigrams: dict[tuple[str, str], int] = {}
-        with self._engine.connect() as conn:
-            rows = conn.execute(
-                self.table.select().with_only_columns(
-                    self.table.c.ngram_type,
-                    self.table.c.word,
-                    self.table.c.a,
-                    self.table.c.b,
-                    self.table.c.count,
-                )
-            ).fetchall()
-        for r in rows:
-            if r.ngram_type == "bigram":
-                bigrams[(r.a, r.b)] = r.count
-            elif r.ngram_type == "unigram":
-                unigrams[r.word] = r.count
-        return {"unigrams": unigrams, "bigrams": bigrams}
-
-    def top_unigrams(self, limit: int = 100) -> list[dict[str, Any]]:
-        return self.find(
-            filters={"ngram_type": "unigram"},
-            limit=limit,
-            order_by="-count",
-        )
-
-    def save_tables(self, tables: dict[str, dict], batch_id: str = "manual") -> int:
-        """Persist unigram/bigram tables (wipes previous rows for this source)."""
-        with self._engine.begin() as conn:
-            conn.execute(self.table.delete())
-            count = 0
-            for (a, b), c in tables.get("bigrams", {}).items():
-                conn.execute(
-                    self.table.insert(),
-                    {
-                        "ngram_type": "bigram",
-                        "a": a,
-                        "b": b,
-                        "count": int(c),
-                        "import_batch_id": batch_id,
-                        "source_file": "ngram:memory",
-                        "version": 1,
-                    },
-                )
-                count += 1
-            for w, c in tables.get("unigrams", {}).items():
-                conn.execute(
-                    self.table.insert(),
-                    {
-                        "ngram_type": "unigram",
-                        "word": w,
-                        "count": int(c),
-                        "import_batch_id": batch_id,
-                        "source_file": "ngram:memory",
-                        "version": 1,
-                    },
-                )
-                count += 1
-        return count
+log = logging.getLogger(__name__)
 
 
-class KnowledgeVectorRepository(BaseRepository):
-    """Repository over the ``knowledge_vectors`` table.
+class KGRepository(BaseRepository):
+    """Repository for Knowledge Graph (kg_nodes + kg_edges)."""
 
-    Mirrors the ``knowledge_vectors.jsonl`` record shape (id, text, metadata,
-    embedding) so ``knowledge.retrieve`` can load the index from SQLite.
-    """
+    # Valid relation types per §21
+    VALID_RELATIONS = {
+        "has_form",
+        "has_pos",
+        "derived_from",
+        "contains_morpheme",
+        "occurs_with",
+        "occurs_in",
+        "participates_in",
+        "similar_to",
+        "variant_of",
+        "attested_by",
+    }
 
     def __init__(self, engine: Engine) -> None:
-        super().__init__(engine, "knowledge_vectors", id_column="id")
+        super().__init__(engine, "kg_nodes", id_column="id")
+        self._edges_table = self._engine.dialect.identifier_preparer.quote("kg_edges")
 
-    def all_rows(self) -> list[dict[str, Any]]:
-        return self.find(limit=1_000_000)
-
-    def ids(self) -> list[str]:
-        with self._engine.connect() as conn:
-            rows = conn.execute(
-                self.table.select().with_only_columns(self.table.c.id)
-            ).fetchall()
-        return [r.id for r in rows]
-
-    def texts(self) -> list[str]:
-        with self._engine.connect() as conn:
-            rows = conn.execute(
-                self.table.select().with_only_columns(self.table.c.text)
-            ).fetchall()
-        return [r.text for r in rows]
-
-    def embedding_bytes(self) -> list[str]:
-        with self._engine.connect() as conn:
-            rows = conn.execute(
-                self.table.select().with_only_columns(self.table.c.embedding)
-            ).fetchall()
-        return [r.embedding or "[]" for r in rows]
-
-    def upsert_batch(
-        self, records: Iterable[dict[str, Any]], batch_id: str = "manual"
-    ) -> int:
-        """Insert-or-replace knowledge vector rows, overwriting by ``id``."""
-        count = 0
-        with self._engine.begin() as conn:
-            for rec in records:
-                row = {
-                    k: rec[k]
-                    for k in ("id", "text", "metadata", "embedding",
-                              "source_type", "source")
-                    if k in rec
-                }
-                row["metadata"] = json.dumps(
-                    rec.get("metadata") or {}, ensure_ascii=False
-                )
-                row["embedding"] = json.dumps(
-                    rec.get("embedding") or [], ensure_ascii=False
-                )
-                row.update(
-                    {
-                        "import_batch_id": batch_id,
-                        "version": 1,
-                        "source_file": "knowledge:ingest",
-                    }
-                )
-                conn.execute(
-                    text(
-                        "INSERT INTO knowledge_vectors (id, text, metadata, "
-                        "embedding, source_type, source, import_batch_id, "
-                        "source_file, version, imported_at) "
-                        "VALUES (:id, :text, :metadata, :embedding, "
-                        ":source_type, :source, :import_batch_id, "
-                        ":source_file, :version, :imported_at) "
-                        "ON CONFLICT(id) DO UPDATE SET "
-                        "text=excluded.text, metadata=excluded.metadata, "
-                        "embedding=excluded.embedding, source_type=excluded.source_type, "
-                        "source=excluded.source, version=excluded.version"
-                    ),
-                    row,
-                )
-                count += 1
-        return count
-
-
-class ParticleRepository(BaseRepository):
-    """Repository over the ``particle_database`` table."""
-
-    def __init__(self, engine: Engine) -> None:
-        super().__init__(engine, "particle_database", id_column="id")
-
-    def get_by_particle(self, particle: str) -> list[dict[str, Any]]:
-        return self.find({"particle": particle})
-
-    def get_by_function(self, function: str) -> list[dict[str, Any]]:
-        return self.find({"function": function})
-
-    def search(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
-        pattern = f"%{query}%"
-        with self._engine.connect() as conn:
-            rows = conn.execute(
-                self.table.select()
-                .where(self.table.c.particle.ilike(pattern))
-                .limit(limit)
-            ).fetchall()
-        return [self._row_to_dict(r) for r in rows]
-
-
-class VerbRepository(BaseRepository):
-    """Repository over the ``verb_database`` table."""
-
-    def __init__(self, engine: Engine) -> None:
-        super().__init__(engine, "verb_database", id_column="id")
-
-    def get_by_verb(self, verb: str) -> list[dict[str, Any]]:
-        return self.find({"verb": verb})
-
-    def get_by_class(self, verb_class: str) -> list[dict[str, Any]]:
-        return self.find({"verb_class": verb_class}, limit=200)
-
-    def search(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
-        pattern = f"%{query}%"
-        with self._engine.connect() as conn:
-            rows = conn.execute(
-                self.table.select()
-                .where(self.table.c.verb.ilike(pattern))
-                .limit(limit)
-            ).fetchall()
-        return [self._row_to_dict(r) for r in rows]
-
-
-class TrainingValidationRepository(BaseRepository):
-    """Repository over the ``training_validation`` table."""
-
-    def __init__(self, engine: Engine) -> None:
-        super().__init__(engine, "training_validation", id_column="id")
-
-    def record_evaluation(
+    # --- Node operations ---------------------------------------------------
+    def upsert_node(
         self,
-        exercise_id: int | None,
-        level: str | None,
-        prompt: str,
-        expected: str,
-        predicted: str,
+        node_type: str,
+        label: str,
+        properties: dict[str, Any],
+        source: str | None = None,
+        source_id: str | None = None,
+        confidence: float = 0.0,
+        user: str = "system",
     ) -> int:
-        """Store one model-vs-gold prediction check; returns the row id."""
-        import datetime
+        """Upsert a node (idempotent on node_type+label+source+source_id)."""
+        import json
+        
+        props_json = json.dumps(properties, ensure_ascii=False)
+        now = self._get_timestamp()
+        
+        with self._engine.begin() as conn:
+            # Check existing
+            existing = conn.execute(
+                text("""
+                    SELECT id FROM kg_nodes 
+                    WHERE node_type = :nt AND label = :lbl 
+                    AND COALESCE(source, '') = COALESCE(:src, '') 
+                    AND COALESCE(source_id, '') = COALESCE(:sid, '')
+                """),
+                {"nt": node_type, "lbl": label, "src": source or "", "sid": source_id or ""},
+            ).first()
+            
+            if existing:
+                node_id = existing[0]
+                conn.execute(
+                    text("""
+                        UPDATE kg_nodes SET
+                            properties = :props,
+                            confidence = :conf,
+                            updated_at = :now,
+                            version = version + 1
+                        WHERE id = :id
+                    """),
+                    {"props": props_json, "conf": confidence, "now": now, "id": node_id},
+                )
+                self._log_audit(conn, node_id, "update", None, json.dumps({"properties": properties}), user)
+                return node_id
+            else:
+                result = conn.execute(
+                    text("""
+                        INSERT INTO kg_nodes (node_type, label, properties, source, source_id, confidence, created_at, updated_at)
+                        VALUES (:nt, :lbl, :props, :src, :sid, :conf, :now, :now)
+                    """),
+                    {"nt": node_type, "lbl": label, "props": props_json, "src": source, "sid": source_id, "conf": confidence, "now": now},
+                )
+                node_id = result.lastrowid
+                self._log_audit(conn, node_id, "create", None, json.dumps({"node_type": node_type, "label": label}), user)
+                return node_id
 
-        return self.create(
-            {
-                "exercise_id": exercise_id,
-                "level": level,
-                "prompt": prompt,
-                "expected": expected,
-                "predicted": predicted,
-                "is_valid": 1 if expected.strip() == predicted.strip() else 0,
-                "error_codes": "[]",
-                "checked_at": datetime.datetime.now(
-                    datetime.timezone.utc
-                ).isoformat(),
-            }
-        )
+    def get_node(self, node_id: int) -> dict[str, Any] | None:
+        """Get node by ID."""
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT * FROM kg_nodes WHERE id = :id"),
+                {"id": node_id},
+            ).first()
+        return self._row_to_dict(row) if row else None
 
-    def recent(self, limit: int = 50) -> list[dict[str, Any]]:
-        return self.find(limit=limit, order_by="-id")
-
-
-class SimbuRepository(BaseRepository):
-    """Repository over the ``simbu`` table (song/poetry text corpus)."""
-
-    def __init__(self, engine: Engine) -> None:
-        super().__init__(engine, "simbu", id_column="id")
-
-    def get_by_type(self, type_: str, limit: int = 100) -> list[dict[str, Any]]:
-        return self.find({"type": type_}, limit=limit)
-
-    def count_by_type(self) -> dict[str, int]:
+    def find_nodes(
+        self,
+        node_type: str | None = None,
+        label: str | None = None,
+        source: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Find nodes by filters."""
+        conditions = []
+        params = {"limit": limit}
+        if node_type:
+            conditions.append("node_type = :node_type")
+            params["node_type"] = node_type
+        if label:
+            conditions.append("label LIKE :label")
+            params["label"] = f"%{label}%"
+        if source:
+            conditions.append("source = :source")
+            params["source"] = source
+        
+        where = "WHERE " + " AND ".join(conditions) if conditions else ""
+        
         with self._engine.connect() as conn:
             rows = conn.execute(
-                text(
-                    "SELECT COALESCE(type, '') AS t, COUNT(*) AS c "
-                    "FROM simbu GROUP BY t"
-                )
+                text(f"SELECT * FROM kg_nodes {where} ORDER BY id LIMIT :limit"),
+                params,
             ).fetchall()
-        return {r.t: r.c for r in rows}
+        return [self._row_to_dict(r) for r in rows]
+
+    # --- Edge operations ---------------------------------------------------
+    def upsert_edge(
+        self,
+        source_id: int,
+        target_id: int,
+        relation: str,
+        properties: dict[str, Any] | None = None,
+        confidence: float = 0.0,
+        source: str | None = None,
+        user: str = "system",
+    ) -> int:
+        """Upsert an edge (idempotent on source_id+target_id+relation)."""
+        import json
+        
+        if relation not in self.VALID_RELATIONS:
+            raise ValueError(f"Invalid relation: {relation}. Valid: {self.VALID_RELATIONS}")
+        
+        props_json = json.dumps(properties or {}, ensure_ascii=False)
+        now = self._get_timestamp()
+        
+        with self._engine.begin() as conn:
+            existing = conn.execute(
+                text("""
+                    SELECT id FROM kg_edges 
+                    WHERE source_id = :sid AND target_id = :tid AND relation = :rel
+                """),
+                {"sid": source_id, "tid": target_id, "rel": relation},
+            ).first()
+            
+            if existing:
+                edge_id = existing[0]
+                conn.execute(
+                    text("""
+                        UPDATE kg_edges SET
+                            properties = :props,
+                            confidence = :conf,
+                            updated_at = :now,
+                            version = version + 1
+                        WHERE id = :id
+                    """),
+                    {"props": json.dumps(properties or {}), "conf": 0.0, "now": self._get_timestamp(), "id": existing[0]},
+                )
+                self._log_audit(conn, edge_id, "update", None, json.dumps({"relation": relation}), "system")
+                return edge_id
+            else:
+                result = conn.execute(
+                    text("""
+                        INSERT INTO kg_edges (source_id, target_id, relation, properties, confidence, source, created_at, updated_at)
+                        VALUES (:sid, :tid, :rel, :props, :conf, :src, :now, :now)
+                    """),
+                    {
+                        "sid": source_id, "tid": target_id, "rel": relation,
+                        "props": json.dumps(properties or {}), "conf": 0.0,
+                        "src": source or "auto", "now": self._get_timestamp(),
+                    },
+                )
+                edge_id = result.lastrowid
+                self._log_audit(conn, edge_id, "create", None, json.dumps({"source_id": source_id, "target_id": target_id, "relation": relation}), "system")
+                return edge_id
+
+    def get_edge(self, edge_id: int) -> dict[str, Any] | None:
+        """Get edge by ID."""
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT * FROM kg_edges WHERE id = :id"),
+                {"id": edge_id},
+            ).first()
+        if row:
+            d = self._row_to_dict(row)
+            d["properties"] = json.loads(d["properties"]) if d["properties"] else {}
+            return d
+        return None
+
+    # --- Traversal ---------------------------------------------------------
+    def traverse(
+        self,
+        start_node_id: int,
+        relations: list[str] | None = None,
+        direction: str = "out",  # "out" | "in" | "both"
+        max_depth: int = 3,
+        max_nodes: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Traverse graph from start node (BFS)."""
+        if relations:
+            rel_filter = "AND relation IN (" + ",".join("?" * len(relations)) + ")"
+            rel_params = list(relations)
+        else:
+            rel_filter = ""
+            rel_params = []
+        
+        if direction == "out":
+            edge_sql = "source_id = :current AND target_id = next_id"
+        elif direction == "in":
+            edge_sql = "target_id = :current AND source_id = next_id"
+        else:  # both
+            edge_sql = "(source_id = :current AND target_id = next_id) OR (target_id = :current AND source_id = next_id)"
+        
+        visited = set()
+        queue = [(start_node_id, 0, [])]  # (node_id, depth, path)
+        results = []
+        
+        while queue and len(results) < max_nodes:
+            current_id, depth, path = queue.pop(0)
+            if current_id in visited or depth > max_depth:
+                continue
+            visited.add(current_id)
+            
+            # Get neighbors
+            with self._engine.connect() as conn:
+                if direction == "out":
+                    rows = conn.execute(
+                        text(f"SELECT target_id as next_id, relation, properties, confidence FROM kg_edges WHERE source_id = :current"),
+                        {"current": current_id},
+                    ).fetchall()
+                elif direction == "in":
+                    rows = conn.execute(
+                        text(f"SELECT source_id as next_id, relation, properties, confidence FROM kg_edges WHERE target_id = :current"),
+                        {"current": current_id},
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        text(f"""
+                            SELECT target_id as next_id, relation, properties, confidence FROM kg_edges WHERE source_id = :current
+                            UNION ALL
+                            SELECT source_id as next_id, relation, properties, confidence FROM kg_edges WHERE target_id = :current
+                        """),
+                        {"current": current_id},
+                    ).fetchall()
+            
+            for row in rows:
+                next_id = row[0]
+                if next_id not in visited:
+                    new_path = path + [{"node_id": current_id, "relation": row[1], "edge_props": row[2], "edge_conf": row[3]}]
+                    queue.append((next_id, depth + 1, new_path))
+        
+        return results
+
+    def get_neighbors(self, node_id: int, relation: str | None = None) -> list[dict[str, Any]]:
+        """Get direct neighbors of a node."""
+        with self._engine.connect() as conn:
+            if relation:
+                rows = conn.execute(
+                    text("""
+                        SELECT e.*, n.label as target_label, n.node_type as target_type
+                        FROM kg_edges e
+                        JOIN kg_nodes n ON n.id = e.target_id
+                        WHERE e.source_id = :id AND e.relation = :rel
+                    """),
+                    {"id": node_id, "rel": relation},
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    text("""
+                        SELECT e.*, n.label as target_label, n.node_type as target_type
+                        FROM kg_edges e
+                        JOIN kg_nodes n ON n.id = e.target_id
+                        WHERE e.source_id = :id
+                    """),
+                    {"id": node_id},
+                ).fetchall()
+        return [self._row_to_dict(r) for r in rows]
 
 
-class GrammarInstructionRepository(BaseRepository):
-    """Repository over the ``grammar_instructions`` table."""
-
-    def __init__(self, engine: Engine) -> None:
-        super().__init__(engine, "grammar_instructions", id_column="id")
-
-    def get_by_instruction(self, instruction: str) -> dict[str, Any] | None:
-        return self.find_one({"instruction": instruction})
+def get_extended_repositories(engine):
+    """Get extended repositories including KG."""
+    from .knowledge import ClaimRepository, HypothesisRepository, KnowledgeVersionRepository
+    return {
+        "claims": ClaimRepository(engine),
+        "hypotheses": HypothesisRepository(engine),
+        "knowledge_versions": KnowledgeVersionRepository(engine),
+        "kg": KGRepository(engine),
+    }
 
 
 class CorrectionRepository(BaseRepository):
-    """Repository over the ``corrections`` (user proposal) table."""
+    def __init__(self, engine):
+        super().__init__(engine, "corrections")
 
-    def __init__(self, engine: Engine) -> None:
-        super().__init__(engine, "corrections", id_column="id")
+class GrammarInstructionRepository(BaseRepository):
+    def __init__(self, engine):
+        super().__init__(engine, "grammar_instructions")
 
-    def pending(self, limit: int = 100) -> list[dict[str, Any]]:
-        return self.find({"status": "pending"}, limit=limit, order_by="proposed_at")
+class KnowledgeVectorRepository(BaseRepository):
+    def __init__(self, engine):
+        super().__init__(engine, "knowledge_vectors")
 
-    def for_table(self, table_name: str, limit: int = 100) -> list[dict[str, Any]]:
-        return self.find({"table_name": table_name}, limit=limit, order_by="-id")
+class NgramRepository(BaseRepository):
+    def __init__(self, engine):
+        super().__init__(engine, "ngram")
 
+class ParticleRepository(BaseRepository):
+    def __init__(self, engine):
+        super().__init__(engine, "particle_database")
 
-_REPO_CLASSES = {
-    "ngram": NgramRepository,
-    "knowledge_vectors": KnowledgeVectorRepository,
-    "particle_database": ParticleRepository,
-    "verb_database": VerbRepository,
-    "training_validation": TrainingValidationRepository,
-    "simbu": SimbuRepository,
-    "grammar_instructions": GrammarInstructionRepository,
-    "corrections": CorrectionRepository,
-}
+class SimbuRepository(BaseRepository):
+    def __init__(self, engine):
+        super().__init__(engine, "simbu")
+
+class TrainingValidationRepository(BaseRepository):
+    def __init__(self, engine):
+        super().__init__(engine, "training_validation")
+
+class VerbRepository(BaseRepository):
+    def __init__(self, engine):
+        super().__init__(engine, "verb_database")
