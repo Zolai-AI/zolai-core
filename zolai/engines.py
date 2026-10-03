@@ -286,6 +286,15 @@ ENGINES: tuple[EngineSpec, ...] = (
             "consensus confidence, review queue, versioning."
         ),
     ),
+    EngineSpec(
+        name="incremental",
+        target="zolai.learning.incremental.pipeline:run_incremental_pipeline",
+        capabilities=Capabilities(network=False, deterministic=True, writes=True),
+        summary=(
+            "Incremental learning: change detection → processing → "
+            "knowledge update → regression → versioning."
+        ),
+    ),
 )
 
 #: Name → spec, for O(1) lookup in tests and call sites.
