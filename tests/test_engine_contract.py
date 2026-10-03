@@ -356,6 +356,18 @@ def _probe_publishing() -> Callable[[], Any]:
         return {"passed": passed, "errors": len(errors), "warnings": len(warnings)}
     return run
 
+
+def _probe_production() -> Callable[[], Any]:
+    """Probe production monitoring (offline)."""
+    from sqlalchemy import create_engine
+    from zolai.monitoring.metrics import record_pipeline_run
+
+    def run():
+        engine = create_engine("sqlite:////home/peter/Documents/Projects/zolai-ai/data/zolai.db")
+        record_pipeline_run("test", True)
+        return {"status": "ok"}
+    return run
+
 PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
     "dictionary_lookup": _probe_dictionary,
     "translation_fallback": _probe_translation_fallback,
@@ -379,6 +391,7 @@ PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
     "incremental": _probe_incremental,
     "rag": _probe_rag,
     "publishing": _probe_publishing,
+    "production": _probe_production,
     "knowledge": _probe_knowledge,
 }
 
@@ -388,7 +401,7 @@ PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
 
 class TestRegistry:
     def test_registry_has_at_least_eighteen_engines(self) -> None:
-        assert len(ENGINES) >= 22
+        assert len(ENGINES) >= 23
 
     def test_observation_is_registered_offline_deterministic_writes(self) -> None:
         """Phase 2 §36 — the observation engine is a rule-mode write surface."""
@@ -428,6 +441,14 @@ class TestRegistry:
         assert spec.target == "zolai.publishing.release:release_knowledge"
         assert spec.capabilities == Capabilities(
             network=True, deterministic=False, writes=False
+        )
+
+    def test_production_is_registered_offline_deterministic_reads(self) -> None:
+        """Phase 8 §36 — the production engine is an offline read surface (monitoring)."""
+        spec = get_engine_spec("production")
+        assert spec.target == "zolai.monitoring.metrics:record_pipeline_run"
+        assert spec.capabilities == Capabilities(
+            network=False, deterministic=True, writes=False
         )
 
     def test_discovery_is_registered_offline_deterministic_writes(self) -> None:

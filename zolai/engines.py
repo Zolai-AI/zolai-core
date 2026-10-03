@@ -312,6 +312,14 @@ ENGINES: tuple[EngineSpec, ...] = (
             "Cloud publishing: artifact build, R2/D1 sync, release orchestration, git tagging."
         ),
     ),
+    EngineSpec(
+        name="production",
+        target="zolai.monitoring.metrics:record_pipeline_run",
+        capabilities=Capabilities(network=False, deterministic=True, writes=False),
+        summary=(
+            "Production monitoring: metrics, alerting, health checks, profiling."
+        ),
+    ),
 )
 
 #: Name → spec, for O(1) lookup in tests and call sites.
