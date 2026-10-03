@@ -261,6 +261,13 @@ ENGINES: tuple[EngineSpec, ...] = (
         capabilities=Capabilities(network=False, deterministic=True, writes=False),
         summary="Sentence-pair plausibility against Bible/conversation context (DB-backed, read-only).",
     ),
+    EngineSpec(
+        name="observation",
+        target="zolai.foundation.observation.pipeline:ObservationPipeline",
+        capabilities=Capabilities(network=False, deterministic=True, writes=True),
+        summary="Observation build: tokenize → normalize → freq/contexts/PMI/attestation "
+        "into rebuildable derived tables.",
+    ),
 )
 
 #: Name → spec, for O(1) lookup in tests and call sites.

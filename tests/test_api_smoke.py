@@ -222,3 +222,16 @@ def test_records_read_only_shape(client: TestClient, seed_db: Path) -> None:
     assert len(body["items"]) == 3
     for item in body["items"]:
         assert item["id"] >= 1
+
+
+def test_r17_observation_pipeline_router_not_mounted(client: TestClient) -> None:
+    """R17 (Phase 2 §36): the observation/pipeline surface stays engine/CLI-only.
+
+    The observation engine writes derived tables, so it must never be reachable
+    over HTTP without an audit path — no ``/observation*`` or ``/pipeline*``
+    route may be mounted on the API server (Phase 6 decides HTTP exposure).
+    """
+    paths = {getattr(route, "path", "") for route in client.app.routes}
+    offenders = sorted(p for p in paths if "observation" in p or "pipeline" in p)
+    assert offenders == [], f"observation/pipeline routes mounted: {offenders}"
+

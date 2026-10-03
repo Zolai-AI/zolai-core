@@ -13,6 +13,7 @@ from rich.table import Table
 
 from ..config import config
 from ..dictionary.manager import DictionaryManager
+from .observation import observation_app
 
 app = typer.Typer(
     name="zolai",
@@ -21,6 +22,9 @@ app = typer.Typer(
     rich_markup_mode="rich",
 )
 console = Console()
+
+# Phase 2 §36 — observation engine (build | refresh-index | bloom)
+app.add_typer(observation_app, name="observation")
 
 
 def _setup_logging(verbose: bool = False):
