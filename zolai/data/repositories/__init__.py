@@ -10,6 +10,7 @@ from .bible import BibleAnalysisRepository, BibleRepository
 from .dictionary import DictionaryEnZoRepository, DictionaryRepository
 from .exercise import ExerciseRepository
 from .extended import (
+    KGRepository,
     CorrectionRepository,
     GrammarInstructionRepository,
     KnowledgeVectorRepository,
@@ -152,6 +153,7 @@ def get_repositories(db_path=None) -> dict[str, BaseRepository]:
         "observations": ObservationRepository(engine),
         "word_observation_stats": WordStatsRepository(engine),
         "attestation_index": AttestationIndexRepository(engine),
+        "kg": KGRepository(engine),
     }
     # Add foundation repositories
     repos.update(get_foundation_repositories(engine))

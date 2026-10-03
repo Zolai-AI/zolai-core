@@ -2105,3 +2105,65 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# Phase 6 — Knowledge Graph tables (additive IF NOT EXISTS)
+def create_kg_tables(engine: Engine) -> list[str]:
+    """Create knowledge graph tables (nodes + edges) — additive only."""
+    from sqlalchemy import inspect as sa_inspect
+    from sqlalchemy import text
+    
+    inspector = sa_inspect(engine)
+    existing = set(inspector.get_table_names())
+    created: list[str] = []
+    
+    with engine.begin() as conn:
+        # kg_nodes
+        if "kg_nodes" not in existing:
+            conn.execute(text("""
+                CREATE TABLE kg_nodes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    node_type TEXT NOT NULL,           -- 'word' | 'pattern' | 'morpheme' | 'claim' | 'concept'
+                    label TEXT NOT NULL,               -- canonical label (e.g., word form, pattern_id)
+                    properties TEXT NOT NULL DEFAULT '{}',  -- JSON: {word, pos, frequency, etc.}
+                    source TEXT,                       -- origin table: 'dictionary', 'bible_verses', 'hypotheses', etc.
+                    source_id TEXT,                    -- PK in source table
+                    confidence REAL DEFAULT 0.0,
+                    version INTEGER DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    UNIQUE(node_type, label, source, source_id)
+                )
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_kg_nodes_type ON kg_nodes(node_type)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_kg_nodes_label ON kg_nodes(label)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_kg_nodes_source ON kg_nodes(source, source_id)"))
+            created.append("kg_nodes")
+        
+        # kg_edges
+        if "kg_edges" not in existing:
+            conn.execute(text("""
+                CREATE TABLE kg_edges (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_id INTEGER NOT NULL,
+                    target_id INTEGER NOT NULL,
+                    relation TEXT NOT NULL,            -- 'has_form' | 'has_pos' | 'derived_from' | 'contains_morpheme' | 'occurs_with' | 'occurs_in' | 'participates_in' | 'similar_to' | 'variant_of' | 'attested_by'
+                    properties TEXT NOT NULL DEFAULT '{}',  -- JSON: {frequency, confidence, evidence_ids, etc.}
+                    confidence REAL DEFAULT 0.0,
+                    source TEXT,                       -- 'auto_discovery' | 'human' | 'bible_parallel' | 'dictionary'
+                    version INTEGER DEFAULT 1,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    FOREIGN KEY (source_id) REFERENCES kg_nodes(id),
+                    FOREIGN KEY (target_id) REFERENCES kg_nodes(id),
+                    UNIQUE(source_id, target_id, relation)
+                )
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_kg_edges_source ON kg_edges(source_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_kg_edges_target ON kg_edges(target_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_kg_edges_relation ON kg_edges(relation)"))
+            created.append("kg_edges")
+    
+    return created
+
+# Register in run_all_migrations
+_run_migration_funcs.append(create_kg_tables)

@@ -42,6 +42,28 @@ _EXTRA_TABLES: dict[str, list[str]] = {
         "source_type TEXT",
         "source TEXT",
     ],
+    "kg_nodes": [
+        "id INTEGER PRIMARY KEY AUTOINCREMENT",
+        "node_type TEXT NOT NULL",
+        "label TEXT NOT NULL",
+        "properties TEXT NOT NULL DEFAULT '{}'",
+        "source TEXT",
+        "source_id TEXT",
+        "confidence REAL DEFAULT 0.0",
+        "created_at TEXT NOT NULL DEFAULT (datetime('now'))",
+        "updated_at TEXT NOT NULL DEFAULT (datetime('now'))",
+    ],
+    "kg_edges": [
+        "id INTEGER PRIMARY KEY AUTOINCREMENT",
+        "source_id INTEGER NOT NULL",
+        "target_id INTEGER NOT NULL",
+        "relation TEXT NOT NULL",
+        "properties TEXT NOT NULL DEFAULT '{}'",
+        "confidence REAL DEFAULT 0.0",
+        "source TEXT",
+        "created_at TEXT NOT NULL DEFAULT (datetime('now'))",
+        "updated_at TEXT NOT NULL DEFAULT (datetime('now'))",
+    ],
     "ngram": [
         "id INTEGER PRIMARY KEY AUTOINCREMENT",
         "ngram_type TEXT NOT NULL",  # 'unigram' | 'bigram'
