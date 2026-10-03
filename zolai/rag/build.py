@@ -12,7 +12,6 @@ import time
 from typing import Any
 
 from sqlalchemy import text
-from sqlalchemy.engine import Engine
 
 log = logging.getLogger(__name__)
 
@@ -46,37 +45,37 @@ def _get_embedder():
 def _build_text_for_source(table: str, row: dict[str, Any], source_config: tuple) -> str | None:
     """Build embeddable text from a row based on source type."""
     source_type = source_config[0]
-    
+
     if source_type == "dictionary":
         zolai = row.get(source_config[2], "")
         definition = row.get(source_config[3], "")
         return f"{zolai}: {definition}" if zolai and definition else zolai
-    
+
     elif source_type == "bible":
         text = row.get(source_config[2], "")
         ref = row.get(source_config[3], "")
         return f"{ref}: {text}" if text and ref else text
-    
+
     elif source_type == "phrases":
         zolai = row.get(source_config[2], "")
         return zolai
-    
+
     elif source_type == "grammar_patterns":
         pattern = row.get(source_config[2], "")
         pid = row.get(source_config[3], "")
         return f"{pid}: {pattern}" if pattern and pid else pattern
-    
+
     elif source_type == "observations":
         word = row.get(source_config[2], "")
         freq = row.get("frequency", 0)
         return f"{word} (freq: {freq})" if word else None
-    
+
     elif source_type == "knowledge_claims":
         subject = row.get("subject", "")
         predicate = row.get("predicate", "")
         obj = row.get("object", "")
         return f"{subject} {predicate} {obj}".strip()
-    
+
     return None
 
 
@@ -126,7 +125,7 @@ def build_knowledge_vectors(
         return {"error": "sentence-transformers not available", "built": 0}
 
     source_filter = set(sources) if sources else None
-    
+
     summary = {
         "built": 0,
         "skipped": 0,
@@ -183,7 +182,7 @@ def build_knowledge_vectors(
             # Process in batches
             for i in range(0, len(rows), batch_size):
                 batch = rows[i:i+batch_size]
-                
+
                 # Build texts
                 texts = []
                 ids = []
@@ -210,18 +209,12 @@ def build_knowledge_vectors(
                 # Write to knowledge_vectors
                 for idx, (text, emb) in enumerate(zip(texts, embeddings)):
                     vec_id = hashlib.sha256(f"{table}:{ids[idx]}:{text[:50]}".encode()).hexdigest()[:32]
-                    
-                    metadata = {
-                        "source_table": table,
-                        "source_id": ids[idx],
-                        "source_config": source_config[0],
-                    }
 
                     if not dry_run:
                         try:
                             conn.execute(
                                 text("""
-                                    INSERT OR REPLACE INTO knowledge_vectors 
+                                    INSERT OR REPLACE INTO knowledge_vectors
                                     (id, text, metadata, embedding, source_type, source, version, imported_at)
                                     VALUES (:id, :text, :meta, :emb, :stype, :src, 1, datetime('now'))
                                 """),
@@ -238,7 +231,7 @@ def build_knowledge_vectors(
                             log.error("Insert failed: %s", e)
                             summary["errors"].append(f"{table} insert: {e}")
                             continue
-                    
+
                     built_count += 1
 
             summary["built"] += built_count

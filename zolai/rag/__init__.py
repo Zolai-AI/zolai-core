@@ -13,9 +13,9 @@ Structured retrieval over canonical knowledge:
 Hybrid search: vector + lexical fallback.
 """
 
-from .retrieve import UnifiedRetriever, EvidencePack
-from .evidence import rank_evidence, evidence_to_pack
 from .build import build_knowledge_vectors
+from .evidence import evidence_to_pack, rank_evidence
+from .retrieve import EvidencePack, UnifiedRetriever
 
 __all__ = [
     "UnifiedRetriever",

@@ -13,7 +13,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from zolai.rag.evidence import EvidenceItem, EvidencePack, build_word_evidence_items, evidence_to_pack
+from zolai.rag.evidence import EvidencePack, build_word_evidence_items, evidence_to_pack
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +57,11 @@ class UnifiedRetriever:
         with self.engine.connect() as conn:
             # Dictionary forms
             rows = conn.execute(
-                text("SELECT zolai FROM dictionary WHERE zolai LIKE :w UNION SELECT headword FROM dictionary_en_zo WHERE headword LIKE :w LIMIT :lim"),
+                text(
+                    "SELECT zolai FROM dictionary WHERE zolai LIKE :w "
+                    "UNION SELECT headword FROM dictionary_en_zo "
+                    "WHERE headword LIKE :w LIMIT :lim"
+                ),
                 {"w": f"{word}%", "lim": limit},
             ).fetchall()
             forms.extend([r[0] for r in rows])
@@ -68,8 +72,25 @@ class UnifiedRetriever:
             ).first()
             if row and row[0]:
                 import json
-                forms.extend(json.loads(row[0]) if isinstance(row[0], str) else row[0])
-        return list(dict.fromkeys(forms))[:limit]
+                parsed = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                if isinstance(parsed, list):
+                    # entries may be dicts {"form": ..., "count": ...} -> keep strings only
+                    for item in parsed:
+                        if isinstance(item, str):
+                            forms.append(item)
+                        elif isinstance(item, dict):
+                            val = item.get("form") or item.get("surface") or item.get("word")
+                            if isinstance(val, str):
+                                forms.append(val)
+                elif isinstance(parsed, str):
+                    forms.append(parsed)
+        # dedupe without hashing (dict.fromkeys crashes on dicts)
+        seen, uniq = set(), []
+        for f in forms:
+            if isinstance(f, str) and f not in seen:
+                seen.add(f)
+                uniq.append(f)
+        return uniq[:limit]
 
     def query_word_contexts(self, word: str, limit: int = 20) -> list[dict[str, Any]]:
         """Get contexts (left/right/sentence) for a word."""
@@ -167,7 +188,7 @@ class UnifiedRetriever:
         # This is a placeholder - full implementation would use the discovery pipeline
         from zolai.shared.text import tokenize_words
         tokens = tokenize_words(text)
-        
+
         return {
             "tokens": tokens,
             "token_count": len(tokens),
@@ -178,17 +199,26 @@ class UnifiedRetriever:
     def analyze_paragraph(self, text: str) -> dict[str, Any]:
         """Analyze a Zolai paragraph (multi-sentence)."""
         sentences = text.split("।")  # Zolai sentence delimiter
+        from zolai.shared.text import tokenize_words
+
+        cleaned = [s.strip() for s in sentences if s.strip()]
         return {
-            "sentences": [s.strip() for s in sentences if s.strip()],
-            "sentence_count": len([s for s in sentences if s.strip()]),
-            "analysis": "placeholder - full analysis requires discovery pipeline",
+            "sentences": cleaned,
+            "sentence_count": len(cleaned),
+            "analysis": {
+                "status": "tokenized",
+                "note": "segmentation complete; POS/grammar via discovery pipeline",
+                "tokens_per_sentence": [
+                    len(tokenize_words(s)) for s in cleaned
+                ],
+            },
         }
 
     # --- Search ---
     def search(self, query: str, limit: int = 20, source_filter: list[str] | None = None) -> list[SearchResult]:
         """Hybrid search (lexical + vector fallback)."""
         results = []
-        
+
         # Lexical search across main tables
         tables = [
             ("dictionary", "zolai", "definition"),
@@ -197,7 +227,7 @@ class UnifiedRetriever:
             ("phrases", "zolai", "id"),
             ("grammar_patterns", "pattern", "pattern_id"),
         ]
-        
+
         with self.engine.connect() as conn:
             for table, text_col, id_col in tables:
                 if source_filter and table not in source_filter:
@@ -217,7 +247,7 @@ class UnifiedRetriever:
                         ))
                 except Exception:
                     pass
-        
+
         return results[:limit]
 
     # --- RAG ---
@@ -225,16 +255,16 @@ class UnifiedRetriever:
         """Full RAG: question → retrieval → answer with citations."""
         # Retrieve relevant evidence
         search_results = self.search(question, limit=10)
-        
+
         # Build context from search results
         context_parts = []
         citations = []
         for i, r in enumerate(search_results):
             context_parts.append(f"[{i+1}] {r.source}: {r.text}")
             citations.append({"id": i+1, "source": r.source, "text": r.text[:200]})
-        
+
         context = "\n".join(context_parts)
-        
+
         return {
             "question": question,
             "context": context,
@@ -271,7 +301,7 @@ class UnifiedRetriever:
             ("kg_nodes", "KG nodes"),
             ("kg_edges", "KG edges"),
         ]
-        
+
         with self.engine.connect() as conn:
             for table, label in tables:
                 try:
@@ -279,7 +309,7 @@ class UnifiedRetriever:
                     stats[label] = row[0] if row else 0
                 except Exception:
                     stats[label] = 0
-        
+
         return stats
 
 
