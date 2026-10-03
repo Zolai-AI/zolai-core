@@ -98,6 +98,7 @@ VALID_ACTIONS: frozenset[str] = frozenset(
         "eval:run",
         "pipeline:read",
         "pipeline:run",
+        "rag:read",
         "catalog:read",
         "audit:read",
         "user:manage",

@@ -2166,4 +2166,3 @@ def create_kg_tables(engine: Engine) -> list[str]:
     return created
 
 # Register in run_all_migrations
-_run_migration_funcs.append(create_kg_tables)

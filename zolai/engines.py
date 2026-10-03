@@ -295,6 +295,15 @@ ENGINES: tuple[EngineSpec, ...] = (
             "knowledge update → regression → versioning."
         ),
     ),
+    EngineSpec(
+        name="rag",
+        target="zolai.rag.retrieve:UnifiedRetriever",
+        capabilities=Capabilities(network=True, deterministic=False, writes=False),
+        summary=(
+            "RAG retrieval: unified multi-source search, evidence packs, "
+            "word analysis, sentence/paragraph analysis, full RAG QA."
+        ),
+    ),
 )
 
 #: Name → spec, for O(1) lookup in tests and call sites.

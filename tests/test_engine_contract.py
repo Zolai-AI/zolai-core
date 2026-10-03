@@ -328,6 +328,20 @@ def _probe_incremental() -> Callable[[], Any]:
         return {"success": True, "dry_run": True}
     return run
 
+
+def _probe_rag() -> Callable[[], Any]:
+    """Probe RAG retrieval engine (network=True, offline probe)."""
+    from sqlalchemy import create_engine
+    from zolai.rag.retrieve import UnifiedRetriever
+
+    def run():
+        engine = create_engine("sqlite:////home/peter/Documents/Projects/zolai-ai/data/zolai.db")
+        retriever = UnifiedRetriever(engine)
+        # Test word query (offline, no network calls)
+        pack = retriever.query_word("pasian")
+        return {"word": pack.word, "confidence": pack.confidence}
+    return run
+
 PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
     "dictionary_lookup": _probe_dictionary,
     "translation_fallback": _probe_translation_fallback,
@@ -349,6 +363,7 @@ PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
     "discovery": _probe_discovery,
     "knowledge": _probe_knowledge,
     "incremental": _probe_incremental,
+    "rag": _probe_rag,
     "knowledge": _probe_knowledge,
 }
 
@@ -358,7 +373,7 @@ PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
 
 class TestRegistry:
     def test_registry_has_at_least_eighteen_engines(self) -> None:
-        assert len(ENGINES) >= 20
+        assert len(ENGINES) >= 21
 
     def test_observation_is_registered_offline_deterministic_writes(self) -> None:
         """Phase 2 §36 — the observation engine is a rule-mode write surface."""
@@ -382,6 +397,14 @@ class TestRegistry:
         assert spec.target == "zolai.learning.incremental.pipeline:run_incremental_pipeline"
         assert spec.capabilities == Capabilities(
             network=False, deterministic=True, writes=True
+        )
+
+    def test_rag_is_registered_network_nondeterministic_reads(self) -> None:
+        """Phase 6 §36 — the RAG engine is a network-mode read surface."""
+        spec = get_engine_spec("rag")
+        assert spec.target == "zolai.rag.retrieve:UnifiedRetriever"
+        assert spec.capabilities == Capabilities(
+            network=True, deterministic=False, writes=False
         )
 
     def test_discovery_is_registered_offline_deterministic_writes(self) -> None:

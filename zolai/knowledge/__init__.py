@@ -9,6 +9,7 @@ All writes go through repositories; no LLM→canonical direct writes.
 from .promotion import promote_hypotheses_to_claims
 from .consensus import compute_claim_consensus
 from .review import ReviewQueue
+from zolai.data.repositories.extended import KGRepository
 from .versioning import create_knowledge_version, list_knowledge_versions, get_knowledge_version
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "ReviewQueue",
     "create_knowledge_version",
     "list_knowledge_versions",
+    "KGRepository",
     "get_knowledge_version",
 ]
