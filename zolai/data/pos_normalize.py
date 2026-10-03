@@ -16,6 +16,10 @@ This module is **pure** (no I/O, no database): it maps one legacy label onto
 
 The original ``pos`` value is never modified — normalization is written to the
 additive ``pos_canonical`` / ``pos_candidates`` / ``pos_evidence`` columns.
+
+A second, equally pure mapping lives here: :func:`to_upos` bridges the rule
+tagger's subtag set (``N.PROPER``, ``POST.LOC``, ``PART.ERG``, …) onto the
+same 17-tag allowlist, so discovery never has to duplicate tag logic.
 """
 
 from __future__ import annotations
@@ -28,10 +32,12 @@ __all__ = [
     "CANDIDATE_CONFIDENCE",
     "EVIDENCE_VALUES",
     "PosDecision",
+    "TAGSET_TO_UPOS",
     "TOKEN_MAP",
     "UPOS_ALLOWLIST",
     "is_upos",
     "normalize_legacy_pos",
+    "to_upos",
 ]
 
 # ---------------------------------------------------------------------------
@@ -243,3 +249,93 @@ def normalize_legacy_pos(raw: str | None) -> PosDecision:
     if len(ordered) == 1:
         return PosDecision(raw=text, canonical=ordered[0], candidates=(), evidence="inferred")
     return PosDecision(raw=text, canonical=None, candidates=tuple(ordered), evidence="inferred")
+
+
+# ---------------------------------------------------------------------------
+# Rule-tagger tagset → UPOS bridge (Phase 3 §36)
+#
+# ``zolai.pos_tagger`` emits a Sino-Tibetan-flavoured tagset with subtags
+# (``N.PROPER``, ``PART.ERG``, ``POST.LOC``, ``V.TRANS``, …) that predates the
+# 17-tag UPOS allowlist.  Discovery writes ``POSHypothesis`` rows that are
+# validated against :data:`UPOS_ALLOWLIST`, so every tag must be bridged here
+# — single-sourced next to the allowlist it targets, never inside a writer.
+#
+# Deliberately **not** mapped: ``CONJ`` (the tagset collapses coordinating and
+# subordinating conjunctions into one label; UPOS splits them CCONJ/SCONJ and
+# the bridge cannot know which — Phase 4 disambiguates), and any legacy
+# dictionary label that the tagger passes through verbatim
+# (``_DICT_POS_MAP.get(pos, pos.upper())`` can yield ``ADJECTIVE`` …).
+# Unmapped tags are *skipped and counted* by the caller — see :func:`to_upos`,
+# which returns ``None`` instead of raising.
+# ---------------------------------------------------------------------------
+
+#: Rule-tagger tagset → UPOS (Phase 3 discovery bridge).
+#:
+#: Only unambiguous mappings live here: every ``V.*`` subtag is a verb form
+#: (``V.AUX`` included — the tagset's auxiliaries are still verbal in Zolai),
+#: every ``PART.*`` is a particle, every ``POST*`` is an adposition (UD folds
+#: postpositions into ADP), and ``N.PROPER`` is the tagset's proper-noun
+#: subtag.  Identity mappings (``NOUN`` → ``NOUN`` …) are handled by
+#: :func:`to_upos` against :data:`UPOS_ALLOWLIST`, not duplicated here.
+TAGSET_TO_UPOS: dict[str, str] = {
+    # -- nouns --------------------------------------------------------------
+    "N.PROPER": "PROPN",
+    "N.COMMON": "NOUN",
+    "N.COMPOUND": "NOUN",
+    # -- verbs (incl. the aux/copula subtags — see module note) -------------
+    "V.INTRANS": "VERB",
+    "V.TRANS": "VERB",
+    "V.DITRANS": "VERB",
+    "V.AUX": "VERB",
+    "V.COP": "VERB",
+    # -- adjectives ---------------------------------------------------------
+    "ADJ.QUAL": "ADJ",
+    "ADJ.QUANT": "ADJ",
+    # -- particles (negation/question/focus/topic/ergative) -----------------
+    "PART.NEG": "PART",
+    "PART.QUESTION": "PART",
+    "PART.FOCUS": "PART",
+    "PART.TOPIC": "PART",
+    "PART.ERG": "PART",
+    # -- postpositions → adpositions ---------------------------------------
+    "POST": "ADP",
+    "POST.LOC": "ADP",
+    "POST.DAT": "ADP",
+    "POST.GEN": "ADP",
+    "POST.INS": "ADP",
+}
+
+
+def to_upos(tag: str | None) -> str | None:
+    """Bridge one rule-tagger tag onto the 17-tag UPOS allowlist.
+
+    Resolution order (pure function — no I/O, never raises):
+
+    1. exact match in :data:`TAGSET_TO_UPOS` (subtags + ``POST``/``CONJ``-style
+       tagset labels);
+    2. identity when ``tag`` is already a member of :data:`UPOS_ALLOWLIST`
+       (case-corrected if needed — the tagger emits uppercase, callers may not);
+    3. ``None`` otherwise: the caller skips the token and counts it.  No
+       guessing, no silent fallback to a *different* normalizer.
+
+    Args:
+        tag: A tag produced by :class:`zolai.pos_tagger.ZolaiPOSTagger` (or
+            any UPOS string); ``None``/blank input returns ``None``.
+
+    Returns:
+        A member of :data:`UPOS_ALLOWLIST`, or ``None`` when unmapped.
+    """
+    if tag is None:
+        return None
+    key = str(tag).strip()
+    if not key:
+        return None
+    mapped = TAGSET_TO_UPOS.get(key)
+    if mapped is not None:
+        return mapped
+    if key in UPOS_ALLOWLIST:
+        return key
+    upper = key.upper()
+    if upper in UPOS_ALLOWLIST:
+        return upper
+    return None

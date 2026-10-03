@@ -14,6 +14,7 @@ from rich.table import Table
 from ..config import config
 from ..dictionary.manager import DictionaryManager
 from .observation import observation_app
+from .discovery import discovery_app
 
 app = typer.Typer(
     name="zolai",
@@ -25,6 +26,9 @@ console = Console()
 
 # Phase 2 §36 — observation engine (build | refresh-index | bloom)
 app.add_typer(observation_app, name="observation")
+
+# Phase 3 §36 — discovery engine (build)
+app.add_typer(discovery_app, name="discovery")
 
 
 def _setup_logging(verbose: bool = False):
