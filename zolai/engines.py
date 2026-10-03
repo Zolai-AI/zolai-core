@@ -304,6 +304,14 @@ ENGINES: tuple[EngineSpec, ...] = (
             "word analysis, sentence/paragraph analysis, full RAG QA."
         ),
     ),
+    EngineSpec(
+        name="publishing",
+        target="zolai.publishing.release:release_knowledge",
+        capabilities=Capabilities(network=True, deterministic=False, writes=False),
+        summary=(
+            "Cloud publishing: artifact build, R2/D1 sync, release orchestration, git tagging."
+        ),
+    ),
 )
 
 #: Name → spec, for O(1) lookup in tests and call sites.

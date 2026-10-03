@@ -18,6 +18,7 @@ from .discovery import discovery_app
 from .knowledge import app as knowledge_app
 from .incremental import app as incremental_app
 from .rag import app as rag_app
+from .publish import app as publish_app
 
 app = typer.Typer(
     name="zolai",
@@ -35,6 +36,7 @@ app.add_typer(discovery_app, name="discovery")
 app.add_typer(knowledge_app, name="knowledge")
 app.add_typer(incremental_app, name="incremental")
 app.add_typer(rag_app, name="rag")
+app.add_typer(publish_app, name="publish")
 
 
 def _setup_logging(verbose: bool = False):
