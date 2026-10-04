@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from ..analyzer.corpus import CorpusAnalyzer
 from ..api.admin_api_keys_router import router as admin_api_keys_router
+from ..api.ai_providers_router import router as ai_providers_router
 from ..api.auth_middleware import ApiKeyMiddleware
 from ..api.desktop_router import router as desktop_router
 from ..api.foundation_router import router as foundation_router
@@ -358,6 +359,16 @@ def create_app() -> FastAPI:
         except Exception:
             logger.exception("Failed to run database migrations on startup")
 
+        # P1: seed the AI provider catalog (idempotent — only missing rows are
+        # created; admin state on existing rows is never overwritten).
+        try:
+            from ..llm.catalog import seed_catalog
+
+            seed_result = seed_catalog()
+            logger.info("AI provider catalog seed: %s", seed_result)
+        except Exception:
+            logger.exception("AI provider catalog seed failed")
+
         # Monitoring: FK guard, build info and the background metrics sampler.
         _start_monitoring()
 
@@ -397,6 +408,9 @@ def create_app() -> FastAPI:
     app.include_router(record_review_router)
     app.include_router(word_engine_router)
     app.include_router(rag_router, prefix="")
+    # P1 admin AI-provider catalog — strict settings:* scope, registered before
+    # the catch-all (ce04c72 contract).
+    app.include_router(ai_providers_router)
 
     # --- Static File Serving for Desktop App ---
     from fastapi.responses import FileResponse

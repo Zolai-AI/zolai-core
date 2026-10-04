@@ -2066,6 +2066,7 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "contract_indexes": create_contract_indexes(mgr),
         "knowledge_tables": create_knowledge_tables(mgr),
         "observation_tables": create_observation_tables(mgr),
+        "ai_provider_tables": create_ai_provider_tables(mgr),
     }
 
 
@@ -2166,3 +2167,83 @@ def create_kg_tables(engine: Engine) -> list[str]:
     return created
 
 # Register in run_all_migrations
+
+
+# ---------------------------------------------------------------------------
+# P1 — AI provider catalog (seeded admin config) + per-assistant pins.
+# Additive only: CREATE TABLE IF NOT EXISTS + CREATE INDEX IF NOT EXISTS;
+# no DROP / RENAME / ALTER of existing tables (Master Prompt §36).
+# ---------------------------------------------------------------------------
+
+AI_PROVIDERS_DDL = """
+CREATE TABLE IF NOT EXISTS ai_providers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    catalog_id TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    adapter TEXT NOT NULL,
+    base_url TEXT NOT NULL DEFAULT '',
+    models TEXT NOT NULL DEFAULT '[]',
+    selected_model TEXT NOT NULL DEFAULT '',
+    docs TEXT NOT NULL DEFAULT '',
+    requires_key INTEGER NOT NULL DEFAULT 1,
+    api_key_ref TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    is_active INTEGER NOT NULL DEFAULT 0,
+    tier TEXT NOT NULL DEFAULT 'standard',
+    timeout_s INTEGER NOT NULL DEFAULT 60,
+    metadata TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+ASSISTANT_AI_PINS_DDL = """
+CREATE TABLE IF NOT EXISTS assistant_ai_pins (
+    assistant TEXT PRIMARY KEY,
+    catalog_id TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT ''
+)
+"""
+
+AI_PROVIDER_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_ai_providers_enabled ON ai_providers(enabled)",
+    "CREATE INDEX IF NOT EXISTS ix_ai_providers_active ON ai_providers(is_active)",
+]
+
+
+def create_ai_provider_tables(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create the P1 ``ai_providers`` + ``assistant_ai_pins`` tables.
+
+    Idempotent and additive: existing stores keep whatever they already have
+    (only new tables are created).  ``api_key_ref`` stores an ``env:NAME``
+    reference or an ``enc:v1:`` payload — never plaintext.
+
+    Returns:
+        Dict with 'created', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+
+    wanted = [
+        ("ai_providers", AI_PROVIDERS_DDL),
+        ("assistant_ai_pins", ASSISTANT_AI_PINS_DDL),
+    ]
+    try:
+        with mgr.engine.connect() as conn:
+            for table, ddl in wanted:
+                if table in existing_tables:
+                    skipped.append(f"{table} (already exists)")
+                    continue
+                conn.execute(text(ddl))
+                created.append(table)
+            for idx_sql in AI_PROVIDER_INDEXES:
+                conn.execute(text(idx_sql))
+            conn.commit()
+    except Exception as exc:
+        errors.append(f"ai_provider_tables: {exc}")
+    return {"created": created, "skipped": skipped, "errors": errors}
