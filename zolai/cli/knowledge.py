@@ -44,7 +44,7 @@ def promote(
         dry_run=dry_run,
     )
 
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    print(json.dumps(result.to_dict(), indent=2, ensure_ascii=False))
 
 
 @app.command("consensus")
@@ -57,7 +57,9 @@ def consensus(
     claim_ids_list = claim_ids if claim_ids else None
 
     result = compute_claim_consensus(engine, claim_ids=claim_ids_list, method=method)
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    # claim_id keys must become strings for JSON — int keys are allowed but
+    # the values are ClaimConsensus dataclasses, so serialize explicitly.
+    print(json.dumps({cid: r.to_dict() for cid, r in result.items()}, indent=2, ensure_ascii=False))
 
 
 @app.command("review")
