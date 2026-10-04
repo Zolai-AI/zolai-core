@@ -9,6 +9,11 @@ buffered.  Behaviour:
 - Mode ``warn`` (default) dual-accepts: a missing/invalid key is logged
   (rate limited) and the request continues unauthenticated.  Mode ``enforce``
   answers **401**.  Mode ``off`` bypasses entirely (rollback).
+- **Public paths never 401** (:func:`zolai.api.rbac.is_public_path` — the same
+  table ``require_scope`` reads).  An anonymous caller on a public path is
+  rate limited per **IP** instead: ``ZOLAI_PUBLIC_RATE_LIMIT_RPM`` (default
+  120/min), with ``POST /api/v1/assistant/chat`` on the stricter
+  ``ZOLAI_PUBLIC_CHAT_RATE_LIMIT_RPM`` bucket (default 10/min) → **429**.
 - Authenticated requests are rate limited with an in-memory token bucket per
   key id: **429** + ``Retry-After`` + ``X-RateLimit-*`` headers.
 - The matched key record is published on ``scope["state"]["api_key"]`` for the
@@ -23,6 +28,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import threading
 import time
 from typing import Any
@@ -30,6 +36,7 @@ from typing import Any
 from starlette.concurrency import run_in_threadpool
 
 from . import auth
+from .rbac import is_public_chat_path, is_public_path
 
 #: Only this prefix is gated (boundary-aware: ``/api/v1x`` is not gated).
 API_PREFIX = "/api/v1"
@@ -54,6 +61,44 @@ def is_protected_path(path: str) -> bool:
     if path in EXEMPT_PATHS:
         return False
     return path == API_PREFIX or path.startswith(API_PREFIX + "/")
+
+
+#: Defaults for the anonymous buckets (P2 — plan §B).
+DEFAULT_PUBLIC_RATE_LIMIT_RPM = 120
+DEFAULT_PUBLIC_CHAT_RATE_LIMIT_RPM = 10
+
+
+def _env_rpm(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    return max(1, value)
+
+
+def public_rate_limit_rpm() -> int:
+    """Anonymous requests/minute on public paths (``ZOLAI_PUBLIC_RATE_LIMIT_RPM``)."""
+    return _env_rpm("ZOLAI_PUBLIC_RATE_LIMIT_RPM", DEFAULT_PUBLIC_RATE_LIMIT_RPM)
+
+
+def public_chat_rate_limit_rpm() -> int:
+    """Anonymous chat requests/minute (``ZOLAI_PUBLIC_CHAT_RATE_LIMIT_RPM``)."""
+    return _env_rpm("ZOLAI_PUBLIC_CHAT_RATE_LIMIT_RPM", DEFAULT_PUBLIC_CHAT_RATE_LIMIT_RPM)
+
+
+def client_ip(scope: Any) -> str:
+    """Best-effort client IP for the anonymous bucket (``X-Forwarded-For`` first)."""
+    headers = scope.get("headers") or []
+    for name, value in headers:
+        if name == b"x-forwarded-for":
+            first = value.decode("latin-1").split(",")[0].strip()
+            if first:
+                return first
+    client = scope.get("client")
+    return client[0] if client and client[0] else "unknown"
 
 
 def extract_key(headers: Any) -> str | None:
@@ -189,6 +234,39 @@ class ApiKeyMiddleware:
             record = await run_in_threadpool(auth.resolve_key, token)
 
         if record is None:
+            # P2 public class: anonymous reads (and the public assistant) stay
+            # open in warn *and* enforce — rate limited per IP, never 401.
+            if is_public_path(scope.get("method"), path):
+                if token:
+                    # An *invalid* key was still worth logging (rate limited).
+                    auth.log_auth_failure(
+                        "invalid_key", path, token[: auth.PREFIX_LEN]
+                    )
+                chat = is_public_chat_path(scope.get("method"), path)
+                capacity = public_chat_rate_limit_rpm() if chat else public_rate_limit_rpm()
+                bucket = f"anon:{client_ip(scope)}" + (":chat" if chat else "")
+                allowed, remaining, reset, retry_after = await run_in_threadpool(
+                    limiter.hit, bucket, capacity
+                )
+                if not allowed:
+                    await _send_json(
+                        send,
+                        429,
+                        {
+                            "detail": {
+                                "error": "rate_limited",
+                                "scope": "public_chat" if chat else "public",
+                                "limit_rpm": capacity,
+                                "retry_after_s": retry_after,
+                            }
+                        },
+                        _rate_headers(capacity, remaining, reset)
+                        + [(b"retry-after", str(retry_after).encode("ascii"))],
+                    )
+                    return
+                await self.app(scope, receive, send)
+                return
+
             reason = "missing_key" if not token else "invalid_key"
             auth.log_auth_failure(reason, path, token[: auth.PREFIX_LEN] if token else None)
             if mode == "enforce":
