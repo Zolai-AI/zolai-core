@@ -70,8 +70,9 @@ FAILURE_LOG_LIMIT = 10
 DEFAULT_RATE_LIMIT_RPM = 60
 
 # ---------------------------------------------------------------------------
-# Frozen action vocabulary — docs/admin/permissions.md §2 (32 actions; the
-# human list stays frozen at 30, P2 adds the dated agent:* amendment).
+# Frozen action vocabulary — docs/admin/permissions.md §2 (33 actions: the §2
+# list's 30 + ``rag:read`` (key-scope) + the P2 ``agent:*`` amendment; the
+# human/Prisma list in §3 stays frozen at 30).
 # ---------------------------------------------------------------------------
 
 VALID_ACTIONS: frozenset[str] = frozenset(
@@ -107,7 +108,7 @@ VALID_ACTIONS: frozenset[str] = frozenset(
         "apikey:manage",
         "settings:read",
         "settings:write",
-        # P2 amendment (30 → 32): agent run/list surface (docs/admin/permissions.md §2).
+        # P2 amendment (31 → 33): agent run/list surface (docs/admin/permissions.md §2).
         "agent:read",
         "agent:run",
     }
@@ -194,7 +195,7 @@ def validate_scopes(scopes: list[str]) -> list[str]:
         elif suffix == "*" and resource in VALID_RESOURCES:
             cleaned.append(scope)
         else:
-            raise ValueError(f"unknown scope '{raw}' — not in the frozen 32-action vocabulary")
+            raise ValueError(f"unknown scope '{raw}' — not in the frozen 33-action vocabulary")
     if not cleaned:
         raise ValueError("scopes must not be empty")
     # Deduplicate, keep order.

@@ -9,7 +9,7 @@ Covers the plan's done-when:
   admin surface still 401;
 - ``GET /api/v1/auth/me`` reports ``anonymous`` / ``member`` / ``admin`` and
   never 401s;
-- scope vocabulary 30 → 32 (``agent:read`` / ``agent:run``) + rate-limit rows;
+- scope vocabulary 31 → 33 (``agent:read`` / ``agent:run``) + rate-limit rows;
 - anonymous public paths get their own IP buckets (120/min, chat 10/min).
 """
 
@@ -362,14 +362,15 @@ class TestRoles:
 
 
 # ---------------------------------------------------------------------------
-# Scope vocabulary (30 → 32)
+# Scope vocabulary (31 → 33)
 # ---------------------------------------------------------------------------
 
 
 class TestScopeVocabulary:
     def test_agent_scopes_are_in_the_vocabulary(self) -> None:
-        # 30 human actions (docs/admin/permissions.md §2) + ``rag:read`` (Phase 6,
-        # code-only) + the P2 ``agent:*`` amendment = 33.
+        # Baseline 31 = the 30 human actions (docs/admin/permissions.md §2) +
+        # ``rag:read`` (key-scope, never in the §3 matrix); the P2 ``agent:*``
+        # amendment adds 2 → 33. Every stated count in code/docs must match this.
         assert len(auth.VALID_ACTIONS) == 33
         assert "agent:read" in auth.VALID_ACTIONS
         assert "agent:run" in auth.VALID_ACTIONS
@@ -389,5 +390,8 @@ class TestScopeVocabulary:
         assert SCOPE_LIMITS["agent:read"] == 60
 
     def test_unknown_scope_still_rejected(self) -> None:
-        with pytest.raises(ValueError, match="32-action"):
+        # Derive the count from the vocabulary itself so the message can't drift.
+        expected = len(auth.VALID_ACTIONS)
+        assert expected == 33
+        with pytest.raises(ValueError, match=f"frozen {expected}-action"):
             auth.validate_scopes(["not:a-scope"])
