@@ -320,6 +320,15 @@ ENGINES: tuple[EngineSpec, ...] = (
             "Production monitoring: metrics, alerting, health checks, profiling."
         ),
     ),
+    EngineSpec(
+        name="agent",
+        target="zolai.agent.orchestrator:run_agent_goal",
+        capabilities=Capabilities(network=True, deterministic=False, writes=True),
+        summary=(
+            "Agent runtime: marker-protocol tool loop, research → build → review → "
+            "shipped run phases, learn→hypotheses (rule mode stays offline)."
+        ),
+    ),
 )
 
 #: Name → spec, for O(1) lookup in tests and call sites.

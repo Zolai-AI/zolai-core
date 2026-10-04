@@ -11,6 +11,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+from ..agent.cli import agent_app
 from ..config import config
 from ..dictionary.manager import DictionaryManager
 from .discovery import discovery_app
@@ -32,6 +33,9 @@ console = Console()
 
 # Phase 2 §36 — observation engine (build | refresh-index | bloom)
 app.add_typer(observation_app, name="observation")
+
+# P3 — agent runtime (run | list | show)
+app.add_typer(agent_app, name="agent")
 
 # Phase 3 §36 — discovery engine (build)
 app.add_typer(discovery_app, name="discovery")
