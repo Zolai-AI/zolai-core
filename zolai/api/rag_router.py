@@ -60,6 +60,19 @@ class WordEvidenceResponse(BaseModel):
     evidence: list[dict[str, Any]]
 
 
+class RelatedWord(BaseModel):
+    word: str
+    pos: str | None = None
+    frequency: int = 0
+    relation: str
+    shared_prefix: int = 0
+
+
+class WordRelatedResponse(BaseModel):
+    word: str
+    related: list[RelatedWord]
+
+
 class AnalyzeWordRequest(BaseModel):
     word: str
 
@@ -222,6 +235,25 @@ async def get_word_evidence(
     """Get evidence chain for a word (attestation_index + foundation_evidence)."""
     evidence = retriever.query_word_evidence(word, limit)
     return WordEvidenceResponse(word=word, evidence=evidence)
+
+
+@router.get(
+    "/word/{word}/related",
+    response_model=WordRelatedResponse,
+    dependencies=[Depends(require_scope("dataset:read"))],
+)
+async def get_word_related(
+    word: str,
+    limit: int = Query(12, ge=1, le=50),
+    retriever: UnifiedRetriever = Depends(get_retriever),
+) -> WordRelatedResponse:
+    """Related words, for display *after* the exact match.
+
+    Same word family first (shared prefix / extension), then same-POS
+    neighbours. Never includes the query word itself.
+    """
+    related = retriever.related_words(word, limit)
+    return WordRelatedResponse(word=word, related=related)
 
 
 @router.post(

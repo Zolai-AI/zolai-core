@@ -250,6 +250,112 @@ class UnifiedRetriever:
 
         return results[:limit]
 
+    # --- Related words (ranked) ---
+    def related_words(self, word: str, limit: int = 12) -> list[dict[str, Any]]:
+        """Words related to `word`, for display *after* the exact match.
+
+        Ordered by relationship strength: same word family first (shared
+        prefix/extension), then same-POS neighbours. Never includes the
+        query word itself.
+        """
+        w = (word or "").strip().lower()
+        if not w:
+            return []
+
+        out: list[dict[str, Any]] = []
+        seen: set[str] = {w}
+
+        with self.engine.connect() as conn:
+            # 1. Same word family: shared prefix (>=2 chars) or extension.
+            try:
+                # Fast prefix lookup on dictionary (uses the zolai index).
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT zolai, pos_canonical
+                        FROM dictionary
+                        WHERE zolai LIKE :prefix COLLATE NOCASE
+                          AND zolai <> :exact
+                        ORDER BY zolai ASC
+                        LIMIT 50
+                        """
+                    ),
+                    {"prefix": f"{w[:max(2, len(w) - 1)]}%", "exact": w},
+                ).fetchall()
+            except Exception:
+                rows = []
+
+            if rows:
+                # Fast frequency lookup for these specific words only.
+                freq_query = f"""
+                    SELECT LOWER(normalized_form), frequency
+                    FROM word_observation_stats
+                    WHERE LOWER(normalized_form) IN (
+                        {",".join([f":w{i}" for i in range(len(rows))])}
+                    )
+                """
+                freq_params = {f"w{i}": str(r[0]).lower() for i, r in enumerate(rows)}
+                try:
+                    freq_rows = conn.execute(text(freq_query), freq_params).fetchall()
+                    freq_map = {k: v for k, v in freq_rows}
+                except Exception:
+                    freq_map = {}
+
+                for word_, pos in rows:
+                    lw = word_.lower()
+                    if lw in seen:
+                        continue
+                    seen.add(lw)
+                    # Calculate shared prefix length against the query word.
+                    shared = 0
+                    for a, b in zip(w, lw):
+                        if a != b:
+                            break
+                        shared += 1
+                    out.append({
+                        "word": word_,
+                        "pos": pos,
+                        "frequency": freq_map.get(lw, 0),
+                        "relation": "prefix",
+                        "shared_prefix": shared,
+                    })
+
+            # 2. Same-POS fallback (neighbours sharing the query's POS).
+            if len(out) < limit:
+                try:
+                    pos_rows = conn.execute(
+                        text("""
+                            SELECT v.headword, v.pos_canonical, v.frequency
+                            FROM vocabulary v
+                            WHERE v.pos_canonical = (
+                                SELECT pos_canonical FROM dictionary
+                                WHERE zolai = :w COLLATE NOCASE LIMIT 1
+                            )
+                              AND v.headword <> :w
+                              AND v.headword LIKE :prefix COLLATE NOCASE
+                            ORDER BY v.frequency DESC
+                            LIMIT :cap
+                        """),
+                        {"w": w, "prefix": f"{w}%", "cap": limit - len(out)},
+                    ).fetchall()
+
+                    for headword, pos, freq in pos_rows:
+                        if headword.lower() in seen:
+                            continue
+                        seen.add(headword.lower())
+                        out.append({
+                            "word": headword,
+                            "pos": pos,
+                            "frequency": freq or 0,
+                            "relation": "same_pos",
+                            "shared_prefix": 0,
+                        })
+                except Exception:
+                    pass
+
+        out.sort(key=lambda r: (-r["shared_prefix"], -(r["frequency"] or 0), r["word"]))
+        return out[:limit]
+
     # --- RAG ---
     def rag_query(self, question: str, limit: int = 5) -> dict[str, Any]:
         """Full RAG: question → retrieval → answer with citations."""
