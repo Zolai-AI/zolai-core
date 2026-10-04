@@ -8,14 +8,11 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 from fastapi import HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.base import BaseHTTPMiddleware
-
-from zolai.api.auth import VALID_ACTIONS, validate_scopes
 
 log = logging.getLogger(__name__)
 
@@ -133,7 +130,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         return False
 
 
-def validate_api_key_age(created_at: str, warn_days: int = API_KEY_WARN_DAYS, expire_days: int = API_KEY_EXPIRE_DAYS) -> tuple[bool, str | None]:
+def validate_api_key_age(
+    created_at: str,
+    warn_days: int = API_KEY_WARN_DAYS,
+    expire_days: int = API_KEY_EXPIRE_DAYS,
+) -> tuple[bool, str | None]:
     """Validate API key age.
 
     Returns:

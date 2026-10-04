@@ -8,13 +8,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy.engine import Engine
 
 from zolai.api.auth import require_scope
 from zolai.data.repositories import get_engine
-from zolai.rag.retrieve import UnifiedRetriever, SearchResult
+from zolai.rag.retrieve import UnifiedRetriever
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["RAG"])
@@ -144,7 +143,8 @@ async def get_word_detail(
     word: str,
     retriever: UnifiedRetriever = Depends(get_retriever),
 ) -> WordDetailResponse:
-    """Get full word detail per §20 (forms, frequency, POS, morphology, examples, collocations, grammar usage, sources, confidence)."""
+    """Full word detail per §20: forms, frequency, POS, morphology,
+        examples, collocations, grammar usage, sources, confidence."""
     pack = retriever.query_word(word)
     return WordDetailResponse(**pack.__dict__)
 
