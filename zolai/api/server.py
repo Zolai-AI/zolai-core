@@ -26,6 +26,7 @@ from ..api.lexicon_router import router as lexicon_router
 from ..api.linguistics_router import router as linguistics_router
 from ..api.metrics_router import router as metrics_router
 from ..api.rag_router import router as rag_router
+from ..api.rbac import auth_router as auth_info_router
 from ..api.record_review_router import router as record_review_router
 from ..api.records_router import router as records_router
 from ..api.word_engine_router import router as word_engine_router
@@ -411,6 +412,8 @@ def create_app() -> FastAPI:
     # P1 admin AI-provider catalog — strict settings:* scope, registered before
     # the catch-all (ce04c72 contract).
     app.include_router(ai_providers_router)
+    # P2 GET /api/v1/auth/me — public identity probe for Studio role gating.
+    app.include_router(auth_info_router)
 
     # --- Static File Serving for Desktop App ---
     from fastapi.responses import FileResponse

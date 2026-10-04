@@ -47,6 +47,9 @@ SCOPE_LIMITS = {
     "settings:read": 60,
     "settings:write": 10,
     "rag:read": 60,
+    # P2 amendment — agent surface (docs/admin/permissions.md §2)
+    "agent:read": 60,
+    "agent:run": 10,
     # Admin scopes
     "*": 1000,  # Admin wildcard
 }

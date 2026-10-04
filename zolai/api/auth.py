@@ -70,7 +70,8 @@ FAILURE_LOG_LIMIT = 10
 DEFAULT_RATE_LIMIT_RPM = 60
 
 # ---------------------------------------------------------------------------
-# Frozen action vocabulary — docs/admin/permissions.md §2 (30 actions).
+# Frozen action vocabulary — docs/admin/permissions.md §2 (32 actions; the
+# human list stays frozen at 30, P2 adds the dated agent:* amendment).
 # ---------------------------------------------------------------------------
 
 VALID_ACTIONS: frozenset[str] = frozenset(
@@ -106,6 +107,9 @@ VALID_ACTIONS: frozenset[str] = frozenset(
         "apikey:manage",
         "settings:read",
         "settings:write",
+        # P2 amendment (30 → 32): agent run/list surface (docs/admin/permissions.md §2).
+        "agent:read",
+        "agent:run",
     }
 )
 
@@ -190,7 +194,7 @@ def validate_scopes(scopes: list[str]) -> list[str]:
         elif suffix == "*" and resource in VALID_RESOURCES:
             cleaned.append(scope)
         else:
-            raise ValueError(f"unknown scope '{raw}' — not in the frozen 30-action vocabulary")
+            raise ValueError(f"unknown scope '{raw}' — not in the frozen 32-action vocabulary")
     if not cleaned:
         raise ValueError("scopes must not be empty")
     # Deduplicate, keep order.
@@ -660,6 +664,14 @@ def require_scope(action: str, *, strict: bool = False) -> Any:
         raise ValueError(f"require_scope('{action}') is not in the frozen vocabulary")
 
     def dependency(request: Request) -> dict[str, Any]:
+        # P2: public paths are public in every mode — checked *before* the
+        # mode logic so enforce never 401s the public dictionary/search/word
+        # reads or the public assistant.  The single source of truth is
+        # ``zolai.api.rbac.PUBLIC_ROUTES`` (also read by the middleware).
+        from .rbac import is_public_path
+
+        if is_public_path(request.method, request.url.path):
+            return {}
         record: dict[str, Any] | None = getattr(request.state, "api_key", None)
         if record is None:
             mode = api_auth_mode()

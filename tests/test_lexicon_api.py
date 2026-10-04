@@ -413,20 +413,22 @@ class TestLinguisticsRoutes:
 
 
 class TestLexiconAuth:
-    def test_enforce_missing_key_is_401(self, client: TestClient, api_db, auth_db, monkeypatch) -> None:
+    def test_enforce_public_read_without_key_is_200(
+        self, client: TestClient, api_db, auth_db, monkeypatch
+    ) -> None:
+        """P2 RBAC: ``GET /api/v1/lexicon/*`` is public — enforce never 401s it."""
         _enforce(monkeypatch)
         resp = client.get("/api/v1/lexicon/pasian")
-        assert resp.status_code == 401
-        assert resp.json()["detail"]["error"] == "unauthorized"
+        assert resp.status_code == 200
 
-    def test_enforce_wrong_scope_is_403(self, client: TestClient, api_db, auth_db, monkeypatch) -> None:
+    def test_enforce_public_read_is_open_regardless_of_scope(
+        self, client: TestClient, api_db, auth_db, monkeypatch
+    ) -> None:
+        """A presented key never *adds* a restriction to a public read."""
         _enforce(monkeypatch)
         key = auth.create_api_key(name="pos-only", scopes=["pos:read"])
         resp = client.get("/api/v1/lexicon/pasian", headers=_headers(key))
-        assert resp.status_code == 403
-        detail = resp.json()["detail"]
-        assert detail["action"] == "dataset:read"
-        assert detail["reason"] == "missing_scope"
+        assert resp.status_code == 200
 
     def test_enforce_dataset_read_key_is_200(self, client: TestClient, api_db, auth_db, monkeypatch) -> None:
         _enforce(monkeypatch)
