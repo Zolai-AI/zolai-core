@@ -374,7 +374,25 @@ def _probe_production() -> Callable[[], Any]:
         return {"status": "ok"}
     return run
 
+def _probe_agent() -> Callable[[], Any]:
+    """Probe agent loop (network=True — canned chat, zero sockets, zero DB)."""
+    from zolai.agent.loop import run_agent_loop
+    from zolai.agent.tools.registry import allow_list
+
+    def run():
+        result = run_agent_loop(
+            system_prompt="probe",
+            user_message="ping",
+            allow=allow_list("public"),
+            chat=lambda messages, tools=None: {"text": "pong", "tool_calls": []},
+        )
+        return {"ok": result["ok"], "reply": result["reply"], "turns": result["turns"]}
+
+    return run
+
+
 PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
+    "agent": _probe_agent,
     "dictionary_lookup": _probe_dictionary,
     "translation_fallback": _probe_translation_fallback,
     "syllable": _probe_syllable,
@@ -406,7 +424,15 @@ PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
 
 class TestRegistry:
     def test_registry_has_at_least_eighteen_engines(self) -> None:
-        assert len(ENGINES) >= 23
+        assert len(ENGINES) >= 24
+
+    def test_agent_is_registered_network_nondeterministic_writes(self) -> None:
+        """P3 — the agent engine is the orchestrator tool-loop."""
+        spec = get_engine_spec("agent")
+        assert spec.target == "zolai.agent.orchestrator:run_agent_goal"
+        assert spec.capabilities == Capabilities(
+            network=True, deterministic=False, writes=True
+        )
 
     def test_observation_is_registered_offline_deterministic_writes(self) -> None:
         """Phase 2 §36 — the observation engine is a rule-mode write surface."""

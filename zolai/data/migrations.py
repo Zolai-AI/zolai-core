@@ -2067,6 +2067,7 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "knowledge_tables": create_knowledge_tables(mgr),
         "observation_tables": create_observation_tables(mgr),
         "ai_provider_tables": create_ai_provider_tables(mgr),
+        "agent_runs_table": create_agent_runs_table(mgr),
     }
 
 
@@ -2246,4 +2247,61 @@ def create_ai_provider_tables(mgr: DatabaseManager) -> dict[str, Any]:
             conn.commit()
     except Exception as exc:
         errors.append(f"ai_provider_tables: {exc}")
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
+# P3 — agent_runs (additive; see zolai/agent/store.py for the runtime re-assert)
+# ---------------------------------------------------------------------------
+
+AGENT_RUNS_DDL = """
+CREATE TABLE IF NOT EXISTS agent_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    goal TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running',
+    phases TEXT NOT NULL DEFAULT '{}',
+    tool_calls TEXT NOT NULL DEFAULT '[]',
+    evidence TEXT NOT NULL DEFAULT '[]',
+    answer TEXT NOT NULL DEFAULT '',
+    provider TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    turns INTEGER NOT NULL DEFAULT 0,
+    latency_ms REAL NOT NULL DEFAULT 0,
+    outcome TEXT NOT NULL DEFAULT '',
+    feedback_score REAL,
+    error TEXT NOT NULL DEFAULT '',
+    mode TEXT NOT NULL DEFAULT 'rule',
+    created_by TEXT NOT NULL DEFAULT 'system',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at TEXT
+)
+"""
+
+AGENT_RUN_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_agent_runs_status ON agent_runs(status)",
+    "CREATE INDEX IF NOT EXISTS ix_agent_runs_created_at ON agent_runs(created_at)",
+]
+
+
+def create_agent_runs_table(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create the P3 ``agent_runs`` table (idempotent, additive only)."""
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+    try:
+        with mgr.engine.connect() as conn:
+            if "agent_runs" in existing_tables:
+                skipped.append("agent_runs (already exists)")
+            else:
+                conn.execute(text(AGENT_RUNS_DDL))
+                created.append("agent_runs")
+            for idx_sql in AGENT_RUN_INDEXES:
+                conn.execute(text(idx_sql))
+            conn.commit()
+    except Exception as exc:
+        errors.append(f"agent_runs: {exc}")
     return {"created": created, "skipped": skipped, "errors": errors}
