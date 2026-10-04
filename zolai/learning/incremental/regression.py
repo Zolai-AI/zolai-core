@@ -52,7 +52,6 @@ def _get_baseline_counts(engine: Engine, version_id: int) -> dict[str, int] | No
 
 def _check_zvs_violations(engine: Engine) -> dict[str, int]:
     """Check ZVS violation rates."""
-    from zolai.zvs import validate
     # Sample check - would be expensive to validate all
     return {"status": "skipped"}
 
@@ -96,7 +95,7 @@ def run_regression_checks(
 
     if baseline_counts:
         report.checks["baseline_counts"] = baseline_counts
-        
+
         # Compare row counts
         count_diffs = {}
         for table, current in current_counts.items():
@@ -120,7 +119,7 @@ def run_regression_checks(
     with engine.connect() as conn:
         row = conn.execute(
             text("""
-                SELECT 
+                SELECT
                     COUNT(*) as total_claims,
                     SUM(CASE WHEN evidence_ids != '[]' AND evidence_ids != '' THEN 1 ELSE 0 END) as with_evidence
                 FROM knowledge_claims

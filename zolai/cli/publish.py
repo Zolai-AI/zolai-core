@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
 
 import typer
 from sqlalchemy.engine import Engine
@@ -12,8 +11,6 @@ from sqlalchemy.engine import Engine
 from zolai.data.repositories import get_engine
 from zolai.publishing import (
     build_knowledge_artifact,
-    sync_to_r2,
-    sync_to_d1,
     release_knowledge,
 )
 
@@ -33,7 +30,7 @@ def build(
     schema_version: str = typer.Option("1.0", "--schema-version"),
 ) -> None:
     """Build knowledge artifact (manifest.json + JSONL exports)."""
-    engine = _get_db_engine()
+    _engine = _get_db_engine()
     output = output_dir or f"/tmp/zolai-artifact-{version}"
     manifest = build_knowledge_artifact(
         _get_db_engine(),
@@ -128,7 +125,6 @@ def release(
         } if result.d1_sync else None,
         "knowledge_version_id": result.knowledge_version_id,
         "git_tag": result.git_tag,
-        "elapsed_seconds": result.elapsed_seconds,
         "errors": result.errors,
         "warnings": result.warnings,
     }, indent=2))

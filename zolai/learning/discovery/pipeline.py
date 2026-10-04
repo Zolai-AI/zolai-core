@@ -12,11 +12,11 @@ from typing import Any
 
 from sqlalchemy.engine import Engine
 
-from .pos import build_pos_hypotheses
-from .morphology import build_morphology_hypotheses
 from .collocation import build_collocation_hypotheses
-from .sentence_patterns import build_sentence_pattern_hypotheses
 from .grammar import build_grammar_hypotheses
+from .morphology import build_morphology_hypotheses
+from .pos import build_pos_hypotheses
+from .sentence_patterns import build_sentence_pattern_hypotheses
 
 # Default caps per capability (plan defaults)
 DEFAULT_CAPS: dict[str, int] = {
@@ -124,17 +124,19 @@ def build_discovery(
     return summary.to_dict()
 class DiscoveryPipeline:
     """Wrapper class for discovery pipeline matching test expectations."""
-    
+
     def __init__(self, engine, capabilities=None, limit=None, dry_run=False):
         self.engine = engine
         self.capabilities = capabilities
         self.limit = limit
         self.dry_run = dry_run
-    
+
     def run(self, conn=None, caps=None):
         from .pipeline import build_discovery
-        return build_discovery(self.engine, capabilities=self.capabilities, caps=caps, limit=self.limit, dry_run=self.dry_run)
-    
+        return build_discovery(
+            self.engine, capabilities=self.capabilities, caps=caps, limit=self.limit, dry_run=self.dry_run
+        )
+
     def build(self):
         from .pipeline import build_discovery
         return build_discovery(self.engine, capabilities=self.capabilities, limit=self.limit, dry_run=self.dry_run)

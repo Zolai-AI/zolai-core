@@ -19,8 +19,6 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from zolai.shared.contracts.base import confidence_from_evidence
-
 # Evidence tier mapping: internal tier int → (source table name, weight, tier name)
 EVIDENCE_TIER_MAP: dict[int, tuple[str, float, str]] = {
     1: ("bible_verses", 1.0, "BIBLE_PARALLEL"),

@@ -7,8 +7,8 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from zolai.data.repositories import get_engine
-from zolai.learning.discovery.sentence_patterns import SentencePatternDiscovery
 from zolai.learning.discovery.grammar import GrammarDiscovery
+from zolai.learning.discovery.sentence_patterns import SentencePatternDiscovery
 
 
 @pytest.fixture(scope="module")
@@ -36,7 +36,10 @@ def test_sentence_patterns_use_disc_sp_namespace(db_engine: Engine) -> None:
 
     with db_engine.connect() as conn:
         rows = conn.execute(
-            text("SELECT pattern_id, pattern, normalized, status, confidence, evidence_ids FROM grammar_patterns WHERE pattern_id LIKE 'disc_sp_%'")
+            text(
+                "SELECT pattern_id, pattern, normalized, status, confidence, "
+                "evidence_ids FROM grammar_patterns WHERE pattern_id LIKE 'disc_sp_%'"
+            )
         ).fetchall()
 
     assert len(rows) > 0
@@ -70,7 +73,10 @@ def test_grammar_patterns_use_disc_g_namespace(db_engine: Engine) -> None:
 
     with db_engine.connect() as conn:
         rows = conn.execute(
-            text("SELECT pattern_id, pattern, function, status, confidence, evidence_ids FROM grammar_patterns WHERE pattern_id LIKE 'disc_g_%'")
+            text(
+                "SELECT pattern_id, pattern, function, status, confidence, "
+                "evidence_ids FROM grammar_patterns WHERE pattern_id LIKE 'disc_g_%'"
+            )
         ).fetchall()
 
     assert len(rows) > 0

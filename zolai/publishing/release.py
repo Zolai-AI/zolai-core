@@ -10,15 +10,13 @@ import logging
 import subprocess
 import time
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from zolai.publishing.artifact import build_knowledge_artifact, ArtifactManifest
-from zolai.publishing.sync import sync_to_r2, sync_to_d1, SyncResult
 from zolai.learning.incremental.regression import run_regression_checks
+from zolai.publishing.artifact import ArtifactManifest, build_knowledge_artifact
+from zolai.publishing.sync import SyncResult, sync_to_d1, sync_to_r2
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +64,7 @@ def _validate_pre_release(engine: Engine, version: str) -> tuple[bool, list[str]
     # 2. Evidence coverage
     with engine.connect() as conn:
         row = conn.execute(text("""
-            SELECT 
+            SELECT
                 COUNT(*) as total,
                 SUM(CASE WHEN evidence_ids != '[]' AND evidence_ids != '' THEN 1 ELSE 0 END) as with_ev
             FROM knowledge_claims
@@ -116,7 +114,7 @@ def _create_knowledge_version_row(
     with engine.begin() as conn:
         result = conn.execute(
             text("""
-                INSERT INTO knowledge_versions 
+                INSERT INTO knowledge_versions
                 (version, git_commit, source_versions, pipeline_version, schema_version,
                  row_counts, quality, eval_run_id, manifest_hash, status, created_at)
                 VALUES (:v, :gc, :sv, :pv, :sc, :rc, :q, NULL, :mh, 'VERIFIED', datetime('now'))
@@ -210,7 +208,7 @@ def release_knowledge(
 
     # Step 2b: Sync to R2 (if configured)
     if bucket:
-        r2_prefix = prefix or f"releases/{version}/"
+        _r2_prefix = prefix or f"releases/{version}/"
         log.info("Syncing to R2 bucket %s...", bucket)
         r2_result = sync_to_r2(artifact_dir, bucket, prefix=f"releases/{version}/")
         result.r2_sync = r2_result

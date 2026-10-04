@@ -8,7 +8,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
@@ -105,21 +104,20 @@ def create_knowledge_version(
     Returns:
         The version ID (row ID).
     """
-    from zolai.data.repositories.knowledge import KnowledgeVersionRepository
-    
+
     repo = KnowledgeVersionRepository(engine)
-    
+
     if manifest_hash is None:
         manifest_hash = _compute_manifest_hash(engine)
-    
+
     row_counts = _get_table_row_counts(engine)
-    
+
     quality = {
         "total_rows": sum(row_counts.values()),
         "tables_checked": len(row_counts),
         "manifest_hash": manifest_hash,
     }
-    
+
     data = {
         "version": version,
         "git_commit": _get_git_commit(),
@@ -132,22 +130,20 @@ def create_knowledge_version(
         "manifest_hash": manifest_hash,
         "status": status,
     }
-    
+
     return repo.create(data, user=user)
 
 
 def list_knowledge_versions(engine: Engine, limit: int = 20) -> list[dict[str, Any]]:
     """List knowledge versions, newest first."""
-    from zolai.data.repositories.knowledge import KnowledgeVersionRepository
-    
+
     repo = KnowledgeVersionRepository(engine)
     return repo.find({}, limit=limit, offset=0, order_by="-id")
 
 
 def get_knowledge_version(engine: Engine, version: str) -> dict[str, Any] | None:
     """Get a specific knowledge version by tag."""
-    from zolai.data.repositories.knowledge import KnowledgeVersionRepository
-    
+
     repo = KnowledgeVersionRepository(engine)
     return repo.get_by_version(version)
 

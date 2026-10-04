@@ -8,10 +8,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import subprocess
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -183,7 +182,7 @@ def build_knowledge_artifact(
     with engine.connect() as conn:
         # ZVS compliance
         row = conn.execute(text("""
-            SELECT 
+            SELECT
                 COUNT(*) as total,
                 SUM(CASE WHEN zvs_compliance_status = 'compliant' THEN 1 ELSE 0 END) as compliant
             FROM dictionary WHERE is_deleted = 0
@@ -193,7 +192,7 @@ def build_knowledge_artifact(
 
         # Evidence coverage
         row = conn.execute(text("""
-            SELECT 
+            SELECT
                 COUNT(*) as total,
                 SUM(CASE WHEN evidence_ids != '[]' AND evidence_ids != '' THEN 1 ELSE 0 END) as with_evidence
             FROM knowledge_claims

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
 
 import typer
 from sqlalchemy.engine import Engine
@@ -12,7 +11,6 @@ from sqlalchemy.engine import Engine
 from zolai.data.repositories import get_engine
 from zolai.rag import build_knowledge_vectors
 from zolai.rag.retrieve import UnifiedRetriever
-from zolai.knowledge import KGRepository
 
 log = logging.getLogger(__name__)
 app = typer.Typer(name="rag", help="RAG commands (Phase 6)")

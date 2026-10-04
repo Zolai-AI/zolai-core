@@ -23,8 +23,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from zolai.learning.bible_pattern_learner import BiblePatternLearner, get_bible_learner
-from zolai.learning.discovery.evidence import upsert_evidence, upsert_evidence_bulk, EVIDENCE_TIER_MAP
+from zolai.learning.bible_pattern_learner import get_bible_learner
+from zolai.learning.discovery.evidence import EVIDENCE_TIER_MAP, upsert_evidence_bulk
 from zolai.shared.contracts.base import require_discovery_status
 
 log = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ def _extract_patterns_from_bible(engine: Engine, limit: int | None = None) -> li
     result: list[dict[str, Any]] = []
     for ptype, entries in patterns_by_type.items():
         # Take top 50 per type (by frequency)
-        freq = Counter(e["structure"] for e in entries)
+        _freq = Counter(e["structure"] for e in entries)
         seen_structures: set[str] = set()
         for entry in entries:
             if entry["structure"] in seen_structures:
@@ -214,7 +214,7 @@ def _write_grammar_pattern(
         evidence_ids = [ev_row[0]] if ev_row else []
 
         # Insert into grammar_patterns
-        now = json.dumps([], ensure_ascii=False)
+        _now = json.dumps([], ensure_ascii=False)
         with engine.begin() as conn:
             conn.execute(
                 text(
@@ -265,7 +265,20 @@ def build_sentence_pattern_hypotheses(
         if patterns_written >= PATTERN_CAP:
             break
 
-        source_name = "bible_verses" if pattern_data["ref"].startswith(("GEN", "EXO", "LEV", "NUM", "DEU", "JOS", "JDG", "RUT", "1SA", "2SA", "1KI", "2KI", "1CH", "2CH", "EZR", "NEH", "EST", "JOB", "PSA", "PRO", "ECC", "SNG", "ISA", "JER", "LAM", "EZK", "DAN", "HOS", "JOL", "AMO", "OBA", "JON", "MIC", "NAM", "HAB", "ZEP", "HAG", "ZEC", "MAL", "MAT", "MRK", "LUK", "JHN", "ACT", "ROM", "1CO", "2CO", "GAL", "EPH", "PHP", "COL", "1TH", "2TH", "1TI", "2TI", "TIT", "PHM", "HEB", "JAS", "1PE", "2PE", "1JN", "2JN", "3JN", "JUD", "REV")) else "translations"
+        source_name = (
+            "bible_verses"
+            if pattern_data["ref"].startswith(
+                (
+                        "GEN", "EXO", "LEV", "NUM", "DEU", "JOS", "JDG", "RUT", "1SA", "2SA", "1KI",
+                        "2KI", "1CH", "2CH", "EZR", "NEH", "EST", "JOB", "PSA", "PRO", "ECC", "SNG",
+                        "ISA", "JER", "LAM", "EZK", "DAN", "HOS", "JOL", "AMO", "OBA", "JON", "MIC",
+                        "NAM", "HAB", "ZEP", "HAG", "ZEC", "MAL", "MAT", "MRK", "LUK", "JHN", "ACT",
+                        "ROM", "1CO", "2CO", "GAL", "EPH", "PHP", "COL", "1TH", "2TH", "1TI", "2TI",
+                        "TIT", "PHM", "HEB", "JAS", "1PE", "2PE", "1JN", "2JN", "3JN", "JUD", "REV"
+                )
+            )
+            else "translations"
+        )
 
         try:
             _write_grammar_pattern(engine, pattern_data, source_name, dry_run)
@@ -284,11 +297,11 @@ def build_sentence_pattern_hypotheses(
     }
 class SentencePatternDiscovery:
     """Wrapper class for sentence pattern discovery matching test expectations."""
-    
+
     def __init__(self, engine, limit=100):
         self.engine = engine
         self.limit = limit
-    
+
     def run(self, conn=None):
         from .sentence_patterns import build_sentence_pattern_hypotheses
         return build_sentence_pattern_hypotheses(self.engine, limit=self.limit)

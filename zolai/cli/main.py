@@ -13,14 +13,14 @@ from rich.table import Table
 
 from ..config import config
 from ..dictionary.manager import DictionaryManager
-from .observation import observation_app
 from .discovery import discovery_app
-from .knowledge import app as knowledge_app
 from .incremental import app as incremental_app
-from .rag import app as rag_app
-from .publish import app as publish_app
-from .release import app as release_app
+from .knowledge import app as knowledge_app
+from .observation import observation_app
 from .profile import app as profile_app
+from .publish import app as publish_app
+from .rag import app as rag_app
+from .release import app as release_app
 
 app = typer.Typer(
     name="zolai",

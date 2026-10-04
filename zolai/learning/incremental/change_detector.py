@@ -62,7 +62,10 @@ class ChangeSet:
 def _compute_content_hash(record: dict[str, Any]) -> str:
     """Compute SHA256 of normalized record (excluding metadata fields)."""
     # Exclude auto-generated/metadata fields from hash
-    excluded = {"id", "import_batch_id", "source_file", "version", "imported_at", "created_at", "updated_at", "content_hash", "row_version"}
+    excluded = {
+        "id", "import_batch_id", "source_file", "version", "imported_at",
+        "created_at", "updated_at", "content_hash", "row_version",
+    }
     normalized = {k: v for k, v in record.items() if k not in excluded}
     # Sort keys for deterministic hash
     serialized = json.dumps(normalized, sort_keys=True, ensure_ascii=False)
@@ -84,11 +87,11 @@ def _fetch_canonical_hashes(engine: Engine, table: str, pk_col: str) -> dict[str
         # Check if content_hash column exists
         cols = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
         col_names = {c[1] for c in cols}
-        
+
         if "content_hash" not in col_names:
             log.warning("Table %s has no content_hash column; treating all as NEW", table)
             return {}
-        
+
         rows = conn.execute(
             text(f"SELECT {pk_col}, content_hash FROM {table} WHERE content_hash IS NOT NULL")
         ).fetchall()
@@ -141,7 +144,7 @@ def detect_changes(
     # Compute hashes for incoming
     incoming_by_pk: dict[str, dict[str, Any]] = {}
     incoming_hashes: dict[str, str] = {}
-    
+
     for rec in incoming_records:
         pk_val = str(rec.get(pk_col, ""))
         if not pk_val:
@@ -150,11 +153,11 @@ def detect_changes(
                 if pk_try in rec:
                     pk_val = str(rec[pk_try])
                     break
-        
+
         if not pk_val:
             # No PK - assign temporary
             pk_val = f"_nopk_{len(incoming_by_pk)}"
-        
+
         content_hash = _compute_content_hash(rec)
         rec["_content_hash"] = content_hash
         rec["_pk"] = pk_val

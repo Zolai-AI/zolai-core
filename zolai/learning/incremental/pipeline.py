@@ -16,8 +16,8 @@ from zolai.learning.incremental import (
     ChangeSet,
     detect_changes,
     process_changeset,
-    update_knowledge_from_changes,
     run_regression_checks,
+    update_knowledge_from_changes,
 )
 
 log = logging.getLogger(__name__)

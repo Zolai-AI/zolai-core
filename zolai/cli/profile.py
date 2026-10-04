@@ -9,7 +9,6 @@ import cProfile
 import json
 import logging
 import pstats
-import sys
 import time
 from io import StringIO
 from typing import Any
@@ -17,7 +16,6 @@ from typing import Any
 import typer
 from sqlalchemy.engine import Engine
 
-from zolai.data.repositories import get_engine
 from zolai.engines import ENGINES, get_engine
 
 log = logging.getLogger(__name__)
@@ -34,7 +32,7 @@ def _run_engine(spec, engine: Engine, dry_run: bool = False) -> Any:
     module_path, attr_name = spec.target.rsplit(":", 1)
     module = importlib.import_module(module_path)
     func = getattr(module, attr_name)
-    
+
     if hasattr(func, 'run'):
         return func.run(engine, dry_run=dry_run)
     elif hasattr(func, 'build'):
@@ -66,7 +64,7 @@ def profile_engine(
     for i in range(runs):
         start = time.perf_counter()
         try:
-            result = _run_engine(spec, engine, dry_run=True)
+            _result = _run_engine(spec, engine, dry_run=True)
             latency = time.perf_counter() - start
             latencies.append(latency)
         except Exception as e:
@@ -82,7 +80,7 @@ def profile_engine(
     profile_text = stream.getvalue()
 
     # Summary
-    valid_latencies = [l for l in latencies if l is not None]
+    valid_latencies = [lat for lat in latencies if lat is not None]
     summary = {
         "engine": engine_name,
         "runs": runs,
@@ -116,6 +114,7 @@ def profile_api(
 ) -> None:
     """Profile an API endpoint with load."""
     import asyncio
+
     import httpx
 
     base_url = "http://localhost:8000"
@@ -197,7 +196,7 @@ def profile_memory(
 
     try:
         while time.time() - start_time < duration:
-            snapshot = tracemalloc.take_snapshot()
+            _snapshot = tracemalloc.take_snapshot()
             current, peak = tracemalloc.get_traced_memory()
             snapshots.append({
                 "timestamp": time.time(),
@@ -278,7 +277,7 @@ def compare_engines(
             except Exception:
                 latencies.append(None)
 
-        valid = [l for l in latencies if l is not None]
+        valid = [lat for lat in latencies if lat is not None]
         if valid:
             results[engine_name] = {
                 "runs": len(valid),

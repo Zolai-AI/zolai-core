@@ -9,13 +9,12 @@ import json
 import logging
 import subprocess
 import sys
-from typing import Any
 
 import typer
 from sqlalchemy.engine import Engine
 
 from zolai.data.repositories import get_engine
-from zolai.publishing.release import release_knowledge, ReleaseResult
+from zolai.publishing.release import release_knowledge
 
 log = logging.getLogger(__name__)
 app = typer.Typer(name="release", help="Release automation (Phase 8)")
@@ -85,7 +84,7 @@ def promote(
     force: bool = typer.Option(False, "--force", help="Force promote even with warnings"),
 ) -> None:
     """Promote RC to stable: create stable tag, sync to R2/D1, update knowledge version."""
-    from zolai.publishing.release import release_knowledge, _create_git_tag
+    from zolai.publishing.release import release_knowledge
 
     if not rc_tag.endswith("-rc"):
         raise typer.BadParameter("Tag must end with -rc")
@@ -150,7 +149,7 @@ def rollback(
             raise typer_mod.Abort()
 
     engine = _get_db_engine()
-    tag = f"v{version}"
+    _tag = f"v{version}"
     r2_prefix = f"releases/{version}/"
 
     errors = []
@@ -183,8 +182,14 @@ def rollback(
 
     # 4. Delete git tags
     try:
-        subprocess.run(["git", "tag", "-d", f"v{version}"], check=True, cwd="/home/peter/Documents/Projects/zolai-ai/zolai-core")
-        subprocess.run(["git", "tag", "-d", f"v{version}-rc"], check=False, cwd="/home/peter/Documents/Projects/zolai-ai/zolai-core")
+        subprocess.run(
+            ["git", "tag", "-d", f"v{version}"], check=True, cwd="/home/peter/Documents/Projects/zolai-ai/zolai-core"
+        )
+        subprocess.run(
+            ["git", "tag", "-d", f"v{version}-rc"],
+            check=False,
+            cwd="/home/peter/Documents/Projects/zolai-ai/zolai-core",
+        )
         log.info("Deleted git tags for %s", version)
     except subprocess.CalledProcessError as e:
         errors.append(f"Git tag deletion failed: {e}")

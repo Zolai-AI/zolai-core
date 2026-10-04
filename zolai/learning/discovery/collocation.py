@@ -18,7 +18,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from zolai.learning.discovery.evidence import upsert_evidence, upsert_evidence_bulk, EVIDENCE_TIER_MAP
+from zolai.learning.discovery.evidence import EVIDENCE_TIER_MAP, upsert_evidence_bulk
 from zolai.shared.contracts import CollocationHypothesis
 from zolai.shared.contracts.base import require_discovery_status
 
@@ -28,7 +28,9 @@ log = logging.getLogger(__name__)
 COLLOC_CAP = 1000
 
 # Phase 2 stats file location
-STATS_COLLOCATIONS_PATH = Path(__file__).resolve().parent.parent.parent.parent.parent / "data" / "stats" / "collocations.json"
+STATS_COLLOCATIONS_PATH = (
+    Path(__file__).resolve().parent.parent.parent.parent.parent / "data" / "stats" / "collocations.json"
+)
 
 # PMI/frequency thresholds (plan R8)
 MIN_PMI = 3.0
@@ -204,11 +206,11 @@ def build_collocation_hypotheses(
     }
 class CollocationDiscovery:
     """Wrapper class for collocation hypothesis discovery matching test expectations."""
-    
+
     def __init__(self, engine, limit=100):
         self.engine = engine
         self.limit = limit
-    
+
     def run(self, conn=None):
         from .collocation import build_collocation_hypotheses
         return build_collocation_hypotheses(self.engine, limit=self.limit)

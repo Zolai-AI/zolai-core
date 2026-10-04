@@ -10,8 +10,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from zolai.foundation.consensus import adaptive_consensus, Candidate
-from zolai.foundation.evidence import EvidenceTier
+from zolai.foundation.consensus import adaptive_consensus
 
 # Evidence tier weights (matching foundation/evidence.py)
 EVIDENCE_TIER_WEIGHTS = {
@@ -37,7 +36,7 @@ def _get_claim_evidence(engine: Engine, claim_id: int) -> list[dict[str, Any]]:
     with engine.connect() as conn:
         rows = conn.execute(
             text("""
-                SELECT fe.id, fe.fact_type, fe.fact_key, fe.tier, fe.source, fe.confidence, 
+                SELECT fe.id, fe.fact_type, fe.fact_key, fe.tier, fe.source, fe.confidence,
                        fe.method, fe.extractor, fe.payload
                 FROM claim_evidence ce
                 JOIN foundation_evidence fe ON fe.id = ce.evidence_id
@@ -95,17 +94,17 @@ def compute_claim_consensus(
         Dict with claim_id → {confidence, agreement_score, tier_breakdown, evidence_count}.
     """
     claims = _get_claims_with_multiple_evidence(engine, claim_ids)
-    
+
     results = {}
     for claim in claims:
         claim_id = claim["id"]
         evidence_rows = _get_claim_evidence(engine, claim_id)
-        
+
         # Build evidence list for adaptive_consensus
         evidence_list = []
         tier_breakdown = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
         sources_seen = set()
-        
+
         for ev in evidence_rows:
             tier = ev["tier"]
             tier_breakdown[tier] = tier_breakdown.get(tier, 0) + 1
@@ -117,10 +116,10 @@ def compute_claim_consensus(
                 "extractor": ev["extractor"],
                 "confidence": ev["confidence"],
             })
-        
+
         if method == "weighted":
             # Use adaptive_consensus with proper Candidate objects
-            from zolai.foundation.evidence import Evidence, EvidenceTier, Candidate
+            from zolai.foundation.evidence import Candidate, Evidence, EvidenceTier
             candidates = []
             for ev in evidence_list:
                 tier_enum = EvidenceTier(ev["tier"])
@@ -152,10 +151,10 @@ def compute_claim_consensus(
                 consensus_confidence = round(sum(confs) / len(confs), 2)
             else:
                 consensus_confidence = 0.0
-        
+
         # Agreement score: fraction of evidence from distinct sources
         agreement_score = round(len(sources_seen) / len(evidence_rows), 2) if evidence_rows else 0.0
-        
+
         results[claim_id] = {
             "confidence": consensus_confidence,
             "agreement_score": agreement_score,
@@ -163,7 +162,7 @@ def compute_claim_consensus(
             "evidence_count": len(evidence_rows),
             "distinct_sources": len(sources_seen),
         }
-    
+
     return {
         "claims_processed": len(results),
         "method": method,

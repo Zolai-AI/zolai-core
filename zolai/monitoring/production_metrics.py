@@ -8,7 +8,6 @@ from __future__ import annotations
 import time
 from contextlib import contextmanager
 from functools import wraps
-from typing import Any
 
 from prometheus_client import Counter, Gauge, Histogram
 
@@ -288,6 +287,3 @@ def track_rag_query_sync(endpoint: str):
     return decorator
 
 
-# Imports at bottom for contextmanager, wraps
-from contextlib import contextmanager
-from functools import wraps

@@ -15,10 +15,7 @@ from sqlalchemy.engine import Engine
 
 from zolai.data.repositories.knowledge import ClaimRepository, HypothesisRepository
 from zolai.shared.contracts.base import (
-    GATED_STATUSES,
-    KnowledgeStatus,
     confidence_from_evidence,
-    require_discovery_status,
 )
 
 log = logging.getLogger(__name__)
@@ -91,24 +88,24 @@ def _map_hypothesis_to_claim(engine: Engine, hypothesis: dict[str, Any]) -> dict
 
     claim_base = mapper(hypothesis)
     evidence_ids = _parse_evidence_ids(hypothesis.get("evidence_ids"))
-    
+
     # Get evidence tiers for confidence calculation
     tiers = _get_evidence_tiers(engine, evidence_ids)
     if not tiers:
         # Fallback: infer from hypothesis extras/source info
         tiers = [4]  # CORPUS_ATTESTATION default
-    
+
     # Build minimal evidence objects for confidence_from_evidence
     class _MiniEvidence:
         def __init__(self, tier: int):
             self.tier = tier
-    
+
     evidence_items = [_MiniEvidence(t) for t in tiers]
     confidence = confidence_from_evidence(evidence_items)
 
     # Status: SUPPORTED if has evidence, else CANDIDATE (never OBSERVED for claims)
     status = "SUPPORTED" if evidence_ids else "CANDIDATE"
-    
+
     # Extras from hypothesis
     extras = hypothesis.get("extras", {})
     if isinstance(extras, str):
@@ -116,7 +113,7 @@ def _map_hypothesis_to_claim(engine: Engine, hypothesis: dict[str, Any]) -> dict
             extras = json.loads(extras)
         except json.JSONDecodeError:
             extras = {}
-    
+
     claim = {
         **claim_base,
         "confidence": confidence,

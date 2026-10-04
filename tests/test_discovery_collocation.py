@@ -34,7 +34,10 @@ def test_collocation_hypotheses_written_have_evidence(db_engine: Engine) -> None
 
     with db_engine.connect() as conn:
         rows = conn.execute(
-            text("SELECT id, kind, subject, predicate, object, evidence_ids, status, confidence, extras FROM hypotheses WHERE kind = 'collocation'")
+            text(
+                "SELECT id, kind, subject, predicate, object, evidence_ids, status, "
+                "confidence, extras FROM hypotheses WHERE kind = 'collocation'"
+            )
         ).fetchall()
 
     for row in rows:

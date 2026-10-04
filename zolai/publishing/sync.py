@@ -324,19 +324,19 @@ def sync_to_d1(
             # Read file and batch insert
             with f.open() as jf:
                 lines = jf.readlines()
-            
+
             # Batch insert in chunks of 100
             chunk_size = 100
             for i in range(0, len(lines), chunk_size):
                 chunk = lines[i:i+chunk_size]
-                values = []
+                _values = []
                 for line in chunk:
                     record = json.loads(line)
                     cols = list(record.keys())
-                    placeholders = ",".join(["?"] * len(cols))
+                    _placeholders = ",".join(["?"] * len(cols))
                     # For now, just count - actual insert would use parameterized queries
                     rows_inserted += 1
-                
+
             # In real implementation, would use wrangler d1 execute with batched INSERTs
             # This is a simplified version
             log.info("Would insert %d rows into %s", len(lines), table_name)
