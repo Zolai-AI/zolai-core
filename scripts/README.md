@@ -33,6 +33,8 @@ Data collection, processing, training, and maintenance scripts (~250 total).
 
 | Script | Purpose |
 |--------|---------|
+| `sync-db-from-server.sh` | **POST-DEPLOY:** pull `data/zolai.db` from pcore-server (server → local) |
+| `sync-db-to-server.sh` | **PRE-DEPLOY / local data work:** push local `data/zolai.db` to pcore-server (local → server) |
 | `gemini_webapi_setup.py` | Gemini WebAPI setup |
 | `local_translation_validator.py` | Local translation validation |
 | `translation_validator.py` | Translation quality validator |
@@ -43,6 +45,34 @@ Data collection, processing, training, and maintenance scripts (~250 total).
 | `validate_zolai_webapi_fixed.py` | Fixed WebAPI validation |
 | `zolai_gemini_tool.py` | Gemini tool integration |
 | `zvs_api.py` | ZVS API client |
+
+## DB sync — server ↔ local on every update
+
+**Bidirectional, one direction per update** (never merge automatically — pick the side that
+is authoritative for that change):
+
+| Update kind | Command | Direction |
+|---|---|---|
+| pcore-server deploy / migration / server-side data work | `scripts/sync-db-from-server.sh` | server → local |
+| local data work done (clean, import, annotation, review) | `scripts/sync-db-to-server.sh` | local → server |
+
+```bash
+scripts/sync-db-from-server.sh --dry-run   # preview, no changes
+scripts/sync-db-from-server.sh             # pull server → <workspace>/data/zolai.db
+scripts/sync-db-to-server.sh --dry-run     # preview, no changes
+scripts/sync-db-to-server.sh               # push <workspace>/data/zolai.db → server (+ container restart + /health gate)
+```
+
+Pull safety chain: server-side `sqlite3 .backup` snapshot (never raw-copy a hot WAL file) →
+rsync to a temp file → `PRAGMA integrity_check` → back up the local DB first
+(`../scripts/backup-zolai.sh`) → atomic replace (stale `-wal`/`-shm` dropped) → remove the
+remote snapshot; sizes echoed, `set -euo pipefail`.
+
+Push safety chain: local `sqlite3 .backup` snapshot → integrity check → rsync up → **stop the
+api container** (never swap a file the process holds open) → back up the server DB
+(`data/backups/zolai-<ts>.db.gz`) → remote integrity check → atomic replace + drop stale
+`-wal`/`-shm` → start container → **/health 200 gate** (30s).
+Full runbook: `docs/governance/backup-strategy.md`; deploy step: `docs/planning/AI_AGENTS_RBAC_PLAN.md` §F.
 
 ## Key Commands
 
