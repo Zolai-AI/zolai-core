@@ -36,7 +36,10 @@ def test_morphology_hypotheses_written_have_evidence(db_engine: Engine) -> None:
 
     with db_engine.connect() as conn:
         rows = conn.execute(
-            text("SELECT id, kind, subject, predicate, object, evidence_ids, status, confidence FROM hypotheses WHERE kind = 'morph_relation'")
+            text(
+                "SELECT id, kind, subject, predicate, object, evidence_ids, "
+                "status, confidence FROM hypotheses WHERE kind = 'morph_relation'"
+            )
         ).fetchall()
 
     for row in rows:

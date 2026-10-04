@@ -5,19 +5,16 @@ Updates knowledge claims, consensus, and review queue from incremental changes.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any
 
 from sqlalchemy import text
-from sqlalchemy.engine import Engine
 
 from zolai.knowledge import (
-    promote_hypotheses_to_claims,
-    compute_claim_consensus,
     ReviewQueue,
+    compute_claim_consensus,
     create_knowledge_version,
+    promote_hypotheses_to_claims,
 )
 
 log = logging.getLogger(__name__)
@@ -39,8 +36,8 @@ def _get_affected_subjects_from_changeset(changeset) -> list[str]:
     subjects = set()
     for rec in changeset.new + changeset.changed:
         # Extract words from record
-        for field in ("zolai", "zo_tdb77", "zo_tedim2010", "word", "headword", "source", "target"):
-            val = rec.get(field)
+        for _field in ("zolai", "zo_tdb77", "zo_tedim2010", "word", "headword", "source", "target"):
+            val = rec.get(_field)
             if isinstance(val, str):
                 for w in val.split():
                     if w.isalpha():

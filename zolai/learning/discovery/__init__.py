@@ -11,17 +11,17 @@ All writes are offline/rule-mode, capped, idempotent, and emit only
 OBSERVED/CANDIDATE status via the shared discovery status guard.
 """
 
+from .collocation import build_collocation_hypotheses
 from .evidence import (
-    upsert_evidence,
     EVIDENCE_TIER_MAP,
+    upsert_evidence,
     upsert_evidence_bulk,
 )
-from .pos import build_pos_hypotheses
-from .morphology import build_morphology_hypotheses
-from .collocation import build_collocation_hypotheses
-from .sentence_patterns import build_sentence_pattern_hypotheses
 from .grammar import build_grammar_hypotheses
-from .pipeline import build_discovery, DiscoverySummary
+from .morphology import build_morphology_hypotheses
+from .pipeline import DiscoverySummary, build_discovery
+from .pos import build_pos_hypotheses
+from .sentence_patterns import build_sentence_pattern_hypotheses
 
 __all__ = [
     "DiscoverySummary",

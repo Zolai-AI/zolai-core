@@ -6,11 +6,12 @@ with consensus-driven confidence, human review queues, and versioned snapshots.
 All writes go through repositories; no LLM→canonical direct writes.
 """
 
-from .promotion import promote_hypotheses_to_claims
-from .consensus import compute_claim_consensus
-from .review import ReviewQueue
 from zolai.data.repositories.extended import KGRepository
-from .versioning import create_knowledge_version, list_knowledge_versions, get_knowledge_version
+
+from .consensus import compute_claim_consensus
+from .promotion import promote_hypotheses_to_claims
+from .review import ReviewQueue
+from .versioning import create_knowledge_version, get_knowledge_version, list_knowledge_versions
 
 __all__ = [
     "promote_hypotheses_to_claims",

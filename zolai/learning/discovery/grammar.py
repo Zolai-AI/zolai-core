@@ -26,7 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from zolai.learning.bible_pattern_learner import get_bible_learner
-from zolai.learning.discovery.evidence import upsert_evidence, upsert_evidence_bulk, EVIDENCE_TIER_MAP
+from zolai.learning.discovery.evidence import EVIDENCE_TIER_MAP, upsert_evidence_bulk
 from zolai.shared.contracts.base import require_discovery_status
 
 log = logging.getLogger(__name__)
@@ -316,11 +316,11 @@ def build_grammar_hypotheses(
     }
 class GrammarDiscovery:
     """Wrapper class for grammar discovery matching test expectations."""
-    
+
     def __init__(self, engine, limit=100):
         self.engine = engine
         self.limit = limit
-    
+
     def run(self, conn=None):
         from .grammar import build_grammar_hypotheses
         return build_grammar_hypotheses(self.engine, limit=self.limit)

@@ -442,11 +442,11 @@ def record_publish_release(success: bool) -> None:
     from zolai.monitoring.production_metrics import record_publish_release as _record
     return _record(success)
 
-# Re-export context managers and decorators
-from zolai.monitoring.production_metrics import (
+# Re-export context managers and decorators (public surface of this module).
+from zolai.monitoring.production_metrics import (  # noqa: F401, E402
     time_engine_call,
-    time_rag_query,
     time_incremental_processing,
+    time_rag_query,
     track_engine_call,
     track_rag_query,
     track_rag_query_sync,

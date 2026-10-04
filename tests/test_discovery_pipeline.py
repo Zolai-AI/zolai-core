@@ -50,7 +50,7 @@ def test_discovery_idempotent(db_engine: Engine) -> None:
     # Run once
     pipeline = DiscoveryPipeline(db_engine, capabilities=["pos"], limit=5)
     result1 = pipeline.build()
-    count1 = result1.get("pos", {}).get("hypotheses_written", 0)
+    _count1 = result1.get("pos", {}).get("hypotheses_written", 0)
 
     # Run again
     result2 = pipeline.build()

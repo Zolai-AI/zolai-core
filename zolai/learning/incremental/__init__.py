@@ -5,6 +5,8 @@ process only affected records → update statistics/hypotheses/claims →
 evaluate → publish new knowledge version. Supports rollback via versions.
 """
 
+# ruff: noqa: I001 -- import order is cycle-sensitive (pipeline -> processor).
+
 from .change_detector import ChangeSet, detect_changes
 from .processor import ProcessingSummary, process_changeset
 from .knowledge_updater import UpdateSummary, update_knowledge_from_changes

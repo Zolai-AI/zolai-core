@@ -298,15 +298,19 @@ def _probe_discovery() -> Callable[[], Any]:
     """Construct-only probe for DiscoveryPipeline (build path writes; probe stays read-only)."""
     from zolai.learning.discovery.pipeline import DiscoveryPipeline
 
-    pipeline = DiscoveryPipeline.__new__(DiscoveryPipeline)
+    _pipeline = DiscoveryPipeline.__new__(DiscoveryPipeline)
     # Don't initialize fully — just verify the class can be imported and instantiated
-    return lambda: {"class": "DiscoveryPipeline", "capabilities": ["pos", "morphology", "collocation", "sentence_patterns", "grammar"]}
+    return lambda: {
+        "class": "DiscoveryPipeline",
+        "capabilities": ["pos", "morphology", "collocation", "sentence_patterns", "grammar"],
+    }
 
 
 
 def _probe_knowledge() -> Callable[[], Any]:
     """Probe knowledge promotion engine (offline, dry-run)."""
     from sqlalchemy import create_engine
+
     from zolai.knowledge.promotion import promote_hypotheses_to_claims
 
     def run():
@@ -319,10 +323,10 @@ def _probe_knowledge() -> Callable[[], Any]:
 def _probe_incremental() -> Callable[[], Any]:
     """Probe incremental learning engine (offline, dry-run)."""
     from sqlalchemy import create_engine
-    from zolai.learning.incremental.pipeline import run_incremental_pipeline
+
 
     def run():
-        engine = create_engine("sqlite:////home/peter/Documents/Projects/zolai-ai/data/zolai.db")
+        _engine = create_engine("sqlite:////home/peter/Documents/Projects/zolai-ai/data/zolai.db")
         # Dry-run with a test file - will fail gracefully if no test file
         # Return empty result for probe
         return {"success": True, "dry_run": True}
@@ -332,6 +336,7 @@ def _probe_incremental() -> Callable[[], Any]:
 def _probe_rag() -> Callable[[], Any]:
     """Probe RAG retrieval engine (network=True, offline probe)."""
     from sqlalchemy import create_engine
+
     from zolai.rag.retrieve import UnifiedRetriever
 
     def run():
@@ -346,7 +351,7 @@ def _probe_rag() -> Callable[[], Any]:
 def _probe_publishing() -> Callable[[], Any]:
     """Probe publishing engine (network=True, dry-run)."""
     from sqlalchemy import create_engine
-    from zolai.publishing.release import release_knowledge
+
 
     def run():
         engine = create_engine("sqlite:////home/peter/Documents/Projects/zolai-ai/data/zolai.db")
@@ -360,10 +365,11 @@ def _probe_publishing() -> Callable[[], Any]:
 def _probe_production() -> Callable[[], Any]:
     """Probe production monitoring (offline)."""
     from sqlalchemy import create_engine
+
     from zolai.monitoring.metrics import record_pipeline_run
 
     def run():
-        engine = create_engine("sqlite:////home/peter/Documents/Projects/zolai-ai/data/zolai.db")
+        _engine = create_engine("sqlite:////home/peter/Documents/Projects/zolai-ai/data/zolai.db")
         record_pipeline_run("test", True)
         return {"status": "ok"}
     return run
@@ -392,7 +398,6 @@ PROBES: dict[str, Callable[[], Callable[[], Any]]] = {
     "rag": _probe_rag,
     "publishing": _probe_publishing,
     "production": _probe_production,
-    "knowledge": _probe_knowledge,
 }
 
 

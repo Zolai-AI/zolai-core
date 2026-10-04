@@ -23,12 +23,10 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from zolai.data.pos_normalize import to_upos, UPOS_ALLOWLIST
-from zolai.foundation.evidence import EvidenceTier
-from zolai.learning.discovery.evidence import upsert_evidence, upsert_evidence_bulk, EVIDENCE_TIER_MAP
+from zolai.data.pos_normalize import UPOS_ALLOWLIST, to_upos
+from zolai.learning.discovery.evidence import upsert_evidence_bulk
 from zolai.shared.contracts import POSHypothesis
-from zolai.shared.contracts.base import confidence_from_evidence
-from zolai.shared.contracts.base import require_discovery_status
+from zolai.shared.contracts.base import confidence_from_evidence, require_discovery_status
 
 log = logging.getLogger(__name__)
 
@@ -134,7 +132,10 @@ def _get_observation_neighbors(engine: Engine) -> dict[str, list[str]]:
                 return result
 
             rows = conn.execute(
-                text("SELECT normalized_form, neighbors FROM word_observation_stats WHERE neighbors IS NOT NULL AND neighbors != '[]'")
+                text(
+                    "SELECT normalized_form, neighbors FROM word_observation_stats "
+                    "WHERE neighbors IS NOT NULL AND neighbors != '[]'"
+                )
             ).fetchall()
         for form, neighbors_json in rows:
             try:
@@ -328,7 +329,11 @@ def build_pos_hypotheses(
                             "source": src_name,
                             "method": "dictionary_pos_canonical",
                             "extractor": "pos_normalize_backfill",
-                            "payload": {"word": word, "pos_canonical": d["pos_canonical"], "pos_evidence": d["pos_evidence"]},
+                            "payload": {
+                                "word": word,
+                                "pos_canonical": d["pos_canonical"],
+                                "pos_evidence": d["pos_evidence"],
+                            },
                         })
 
         # 2. Tagger distribution (tier 4)
@@ -461,11 +466,11 @@ def build_pos_hypotheses(
     }
 class POSDiscovery:
     """Wrapper class for POS hypothesis discovery matching test expectations."""
-    
+
     def __init__(self, engine, limit=100):
         self.engine = engine
         self.limit = limit
-    
+
     def run(self, conn=None):
         from .pos import build_pos_hypotheses
         return build_pos_hypotheses(self.engine, limit=self.limit)

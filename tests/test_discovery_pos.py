@@ -37,7 +37,10 @@ def test_pos_hypotheses_written_have_evidence(db_engine: Engine) -> None:
     # Check hypotheses table
     with db_engine.connect() as conn:
         rows = conn.execute(
-            text("SELECT id, kind, subject, predicate, evidence_ids, status, confidence FROM hypotheses WHERE kind = 'pos'")
+            text(
+                "SELECT id, kind, subject, predicate, evidence_ids, status, "
+                "confidence FROM hypotheses WHERE kind = 'pos'"
+            )
         ).fetchall()
 
     for row in rows:
@@ -77,7 +80,10 @@ def test_pos_evidence_rows_created(db_engine: Engine) -> None:
     # Check evidence table
     with db_engine.connect() as conn:
         rows = conn.execute(
-            text("SELECT id, fact_type, fact_key, tier, source, method, extractor FROM foundation_evidence WHERE extractor = 'discovery'")
+            text(
+                "SELECT id, fact_type, fact_key, tier, source, method, "
+                "extractor FROM foundation_evidence WHERE extractor = 'discovery'"
+            )
         ).fetchall()
 
     assert len(rows) > 0

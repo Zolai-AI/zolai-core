@@ -13,10 +13,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
-from sqlalchemy.engine import Engine
 
 from zolai.data.repositories.knowledge import ClaimRepository
-from zolai.shared.contracts.base import KnowledgeStatus, require_discovery_status
 
 log = logging.getLogger(__name__)
 
@@ -48,7 +46,6 @@ class ReviewQueue:
         self._init_repo(engine)
 
     def _init_repo(self, engine):
-        from zolai.data.repositories.knowledge import ClaimRepository
         self._claim_repo = ClaimRepository(engine)
 
     def _ensure_table(self) -> None:
@@ -84,12 +81,13 @@ class ReviewQueue:
         self._ensure_table()
         now = datetime.now(timezone.utc).isoformat()
         meta = json.dumps(metadata or {}, ensure_ascii=False)
-        
+
         with self._engine.begin() as conn:
             # Upsert
             result = conn.execute(
                 text("""
-                    INSERT INTO foundation_review_queue (item_type, item_id, status, priority, assignee, created_at, updated_at, metadata)
+                    INSERT INTO foundation_review_queue (item_type, item_id, status,
+                           priority, assignee, created_at, updated_at, metadata)
                     VALUES (:type, :id, 'pending', :priority, :assignee, :created, :updated, :meta)
                     ON CONFLICT(item_type, item_id) DO UPDATE SET
                         status = 'pending',
@@ -121,20 +119,20 @@ class ReviewQueue:
         self._ensure_table()
         filters = []
         params = {"limit": limit, "offset": offset}
-        
+
         if status:
             filters.append("status = :status")
             params["status"] = status
         if item_type:
             filters.append("item_type = :item_type")
             params["item_type"] = item_type
-        
+
         where = "WHERE " + " AND ".join(filters) if filters else ""
-        
+
         with self._engine.connect() as conn:
             rows = conn.execute(
                 text(f"""
-                    SELECT id, item_type, item_id, status, priority, assignee, 
+                    SELECT id, item_type, item_id, status, priority, assignee,
                            created_at, updated_at, metadata
                     FROM foundation_review_queue
                     {where}
@@ -143,7 +141,7 @@ class ReviewQueue:
                 """),
                 params,
             ).fetchall()
-        
+
         result = []
         for row in rows:
             d = dict(row._mapping)
@@ -214,7 +212,7 @@ class ReviewQueue:
             new_status = "approved" if action in ("approve", "merge") else \
                          "rejected" if action == "reject" else \
                          "deferred" if action == "mark_uncertain" else "in_progress"
-            
+
             new_meta = {**old_meta, **payload}
             conn.execute(
                 text("""
@@ -263,7 +261,6 @@ class ReviewQueue:
         result: dict[str, Any],
     ) -> dict[str, Any]:
         """Process action on a knowledge claim."""
-        from zolai.data.repositories.knowledge import ClaimRepository
         claim_repo = ClaimRepository(self._engine)
 
         if action == "approve":
@@ -274,7 +271,7 @@ class ReviewQueue:
             ).first()
             if not current:
                 raise ValueError(f"Claim {claim_id} not found")
-            
+
             status_map = {
                 "CANDIDATE": "SUPPORTED",
                 "SUPPORTED": "VERIFIED",
@@ -282,7 +279,7 @@ class ReviewQueue:
             new_status = status_map.get(current.status)
             if not new_status:
                 raise ValueError(f"Cannot approve claim with status {current.status}")
-            
+
             claim_repo.update(claim_id, {"status": new_status}, user=user)
             result["new_status"] = new_status
 

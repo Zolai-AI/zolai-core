@@ -11,12 +11,12 @@ from sqlalchemy.engine import Engine
 
 from zolai.data.repositories import get_engine
 from zolai.learning.incremental import (
+    ChangeSet,
     detect_changes,
     process_changeset,
-    update_knowledge_from_changes,
-    run_regression_checks,
     run_incremental_pipeline,
-    ChangeSet,
+    run_regression_checks,
+    update_knowledge_from_changes,
 )
 
 log = logging.getLogger(__name__)

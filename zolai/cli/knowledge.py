@@ -4,19 +4,17 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
 
 import typer
 from sqlalchemy.engine import Engine
 
 from zolai.data.repositories import get_engine
 from zolai.knowledge import (
-    promote_hypotheses_to_claims,
-    compute_claim_consensus,
     ReviewQueue,
+    compute_claim_consensus,
     create_knowledge_version,
     list_knowledge_versions,
-    get_knowledge_version,
+    promote_hypotheses_to_claims,
 )
 
 log = logging.getLogger(__name__)
@@ -37,7 +35,7 @@ def promote(
     """Promote hypotheses to knowledge claims."""
     engine = _get_db_engine()
     kinds_list = kinds if kinds else None
-    
+
     result = promote_hypotheses_to_claims(
         engine,
         kinds=kinds_list,
@@ -45,7 +43,7 @@ def promote(
         min_confidence=min_confidence,
         dry_run=dry_run,
     )
-    
+
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 
@@ -57,7 +55,7 @@ def consensus(
     """Compute consensus confidence for claims."""
     engine = _get_db_engine()
     claim_ids_list = claim_ids if claim_ids else None
-    
+
     result = compute_claim_consensus(engine, claim_ids=claim_ids_list, method=method)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
@@ -88,7 +86,7 @@ def review_action(
     engine = get_engine()
     queue = ReviewQueue(engine)
     payload_dict = json.loads(payload)
-    
+
     result = queue.process_action(item_type, item_id, action, payload_dict, user=user)
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
@@ -105,9 +103,9 @@ def version_create(
     user: str = typer.Option("system", "--user"),
 ) -> None:
     """Create a knowledge version snapshot."""
-    engine = get_engine()
+    _engine = get_engine()
     source_dict = json.loads(source_versions)
-    
+
     version_id = create_knowledge_version(
         get_engine(),
         tag,
@@ -136,10 +134,10 @@ def list_versions(
 def stats() -> None:
     """Show knowledge engine statistics."""
     from zolai.knowledge.promotion import get_promotion_stats
-    
+
     engine = get_engine()
     promo_stats = get_promotion_stats(engine)
-    
+
     # Claim stats
     with get_engine().connect() as conn:
         claim_counts = conn.execute(
@@ -148,7 +146,7 @@ def stats() -> None:
         review_counts = conn.execute(
             text("SELECT status, COUNT(*) FROM foundation_review_queue GROUP BY status")
         ).fetchall()
-    
+
     result = {
         "promotion": promo_stats,
         "claims_by_status": {r[0]: r[1] for r in claim_counts},
