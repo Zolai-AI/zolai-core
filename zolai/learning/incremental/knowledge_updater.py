@@ -80,7 +80,7 @@ def update_knowledge_from_changes(
             min_confidence=0.0,
             dry_run=False,
         )
-        summary.claims_promoted = promo_result.get("promoted", 0)
+        summary.claims_promoted = promo_result.claims_created
 
         # 3. Recompute consensus for claims with updated evidence
         # Get claim IDs that might have changed evidence
@@ -101,7 +101,7 @@ def update_knowledge_from_changes(
 
         if claim_ids:
             consensus_result = compute_claim_consensus(engine, claim_ids=claim_ids, method="weighted")
-            summary.consensus_recomputed = consensus_result.get("claims_processed", 0)
+            summary.consensus_recomputed = len(consensus_result)
 
         # 4. Enqueue affected claims/hypotheses for review
         review_queue = ReviewQueue(engine)
