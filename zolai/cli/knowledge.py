@@ -50,7 +50,7 @@ def promote(
 @app.command("consensus")
 def consensus(
     claim_ids: list[int] = typer.Option(None, "--claim-id", help="Specific claim IDs"),
-    method: str = typer.Option("weighted", "--method", help="Consensus method"),
+    method: str = typer.Option("weighted", "--method", help="Consensus method: adaptive | weighted"),
 ) -> None:
     """Compute consensus confidence for claims."""
     engine = _get_db_engine()
