@@ -7,12 +7,10 @@ from __future__ import annotations
 
 import logging
 import time
-from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from threading import Lock
-from typing import Any
 
-from fastapi import HTTPException, Request, Response
+from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 log = logging.getLogger(__name__)
@@ -49,8 +47,6 @@ SCOPE_LIMITS = {
     "settings:read": 60,
     "settings:write": 10,
     "rag:read": 60,
-    "dataset:run_quality": 10,
-    "dataset:validate": 20,
     # Admin scopes
     "*": 1000,  # Admin wildcard
 }
@@ -234,9 +230,9 @@ def create_rate_limit_middleware(
 ) -> type[RateLimitMiddleware]:
     """Factory to create rate limit middleware with custom config."""
     limiter = InMemoryRateLimiter(window_seconds)
-    
+
     class ConfiguredMiddleware(RateLimitMiddleware):
         def __init__(self, app):
             super().__init__(app, limiter=limiter, scope_limits=scope_limits, window_seconds=window_seconds)
-    
+
     return ConfiguredMiddleware

@@ -22,9 +22,9 @@ from ..api.desktop_router import router as desktop_router
 from ..api.foundation_router import router as foundation_router
 from ..api.jsonl_router import router as jsonl_router
 from ..api.lexicon_router import router as lexicon_router
-from ..api.rag_router import router as rag_router
 from ..api.linguistics_router import router as linguistics_router
 from ..api.metrics_router import router as metrics_router
+from ..api.rag_router import router as rag_router
 from ..api.record_review_router import router as record_review_router
 from ..api.records_router import router as records_router
 from ..api.word_engine_router import router as word_engine_router
@@ -482,9 +482,14 @@ def create_app() -> FastAPI:
         """Quick corpus statistics endpoint."""
         try:
             analyzer = CorpusAnalyzer()
-            return analyzer.full_stats()
+            stats = analyzer.full_stats()
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        # CorpusAnalyzer signals "no corpus loaded" with a soft-error dict; that is
+        # a service-availability problem, not a successful stats response.
+        if isinstance(stats, dict) and stats.get("error"):
+            raise HTTPException(status_code=503, detail=stats["error"])
+        return stats
 
     # --- Trainer ---
 
@@ -1142,10 +1147,17 @@ def create_app() -> FastAPI:
     @app.get("/review/static/{file_path:path}")
     async def serve_ui_static(file_path: str):
         """Serve UI static files (CSS/JS/images)."""
-        full_path = _UI_STATIC_DIR / file_path
+        # Reject traversal before touching the filesystem.
+        if ".." in file_path or file_path.startswith("/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        full_path = (_UI_STATIC_DIR / file_path).resolve()
+        try:
+            full_path.relative_to(_UI_STATIC_DIR.resolve())
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Not found") from None
         if full_path.exists() and full_path.is_file():
             return FileResponse(str(full_path))
-        return {"error": "Not found"}
+        raise HTTPException(status_code=404, detail="Not found")
 
 
     # === Provider Endpoints ===
@@ -1390,13 +1402,24 @@ def create_app() -> FastAPI:
         return {"results": results, "count": len(results)}
 
     # === Static File Serving (last route - catch-all) ===
-    @app.get("/{path:path}")
+    @app.get("/{path:path}", include_in_schema=False)
     async def serve_static(path: str):
-        """Serve static files (CSS/JS/images only)."""
-        file_path = _FRONTEND_DIR / path
+        """Serve static files (CSS/JS/images only).
+
+        Last route. Anything that is not a real file is a genuine 404 -- it must
+        NOT return 200 with an {"error": ...} body, because clients branch on
+        the status code and would treat the error payload as a success.
+        """
+        if ".." in path or path.startswith("/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        file_path = (_FRONTEND_DIR / path).resolve()
+        try:
+            file_path.relative_to(_FRONTEND_DIR.resolve())
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Not found") from None
         if file_path.exists() and file_path.is_file():
             return FileResponse(str(file_path))
-        return {"error": "Not found"}
+        raise HTTPException(status_code=404, detail="Not found")
 
     return app
 

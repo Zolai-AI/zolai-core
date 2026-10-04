@@ -4,11 +4,21 @@ import json
 import subprocess
 import sys
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
 from ..config import config
+from .auth import require_scope
 
-router = APIRouter(prefix="/desktop", tags=["desktop"])
+# /desktop/* exposes corpus internals (table names, row counts, DB size) and can
+# shell out to scripts, so it is a guarded surface. In the default `warn` auth
+# mode this still dual-accepts unauthenticated calls (logged, rate-limited); if
+# ZOLAI_API_AUTH is flipped to `enforce` it starts requiring a `dataset:read`
+# key automatically, with no code change here.
+router = APIRouter(
+    prefix="/desktop",
+    tags=["desktop"],
+    dependencies=[Depends(require_scope("dataset:read"))],
+)
 
 SCRIPTS_DIR = config.paths.datasets_scripts
 ZOLAI_CORE = str(config.paths.root)
