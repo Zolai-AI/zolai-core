@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Generator
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -66,8 +66,8 @@ class NotificationTemplateOut(BaseModel):
     created_at: str
     updated_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True)
 
 
 class NotificationTemplateList(BaseModel):
@@ -96,8 +96,8 @@ class NotificationPreferenceOut(BaseModel):
     created_at: str
     updated_at: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True)
 
 
 class TestSendRequest(BaseModel):

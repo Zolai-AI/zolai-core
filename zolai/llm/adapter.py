@@ -29,7 +29,7 @@ from typing import Any
 
 import httpx
 
-from ..resilience import get_circuit_breaker, CircuitBreakerError
+from ..resilience import CircuitBreakerError, get_circuit_breaker
 from .catalog import (
     catalog_default_base_url,
     find_catalog,
