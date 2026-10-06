@@ -35,7 +35,7 @@ from typing import Any
 
 from starlette.concurrency import run_in_threadpool
 
-from . import auth
+from . import auth, session_auth
 from .rbac import is_public_chat_path, is_public_path
 
 #: Only this prefix is gated (boundary-aware: ``/api/v1x`` is not gated).
@@ -102,18 +102,42 @@ def client_ip(scope: Any) -> str:
 
 
 def extract_key(headers: Any) -> str | None:
-    """Read the plaintext key from ``Authorization: Bearer`` or ``X-API-Key``."""
+    """Read the plaintext key from ``X-API-Key`` or ``Authorization: Bearer``.
+
+    ``X-API-Key`` is scanned **first** and wins when both are present: it is the
+    machine-credential header (MCP / Tauri / scripts), and a session token that
+    happens to ride along in ``Authorization`` must never take precedence over a
+    real key.  With only one of the two headers the result is identical to a
+    first-match scan, so the existing key path is unchanged.
+    """
     if not headers:
         return None
+    for name, value in headers:
+        if name == b"x-api-key":
+            token = value.decode("latin-1").strip()
+            if token:
+                return token
     for name, value in headers:
         if name == b"authorization":
             scheme, _, token = value.decode("latin-1").partition(" ")
             if scheme.lower() == "bearer" and token.strip():
                 return token.strip()
-        elif name == b"x-api-key":
-            token = value.decode("latin-1").strip()
-            if token:
-                return token
+    return None
+
+
+def extract_bearer(scope: Any) -> str | None:
+    """Read the ``Authorization: Bearer`` token from a raw ASGI *scope*.
+
+    Deliberately narrower than :func:`extract_key` (which takes the headers
+    list): used by ``POST /api/v1/auth/logout``, which must revoke the **session
+    the caller presented** and must ignore ``X-API-Key`` entirely — an API key
+    has no session to revoke.
+    """
+    for name, value in scope.get("headers") or []:
+        if name == b"authorization":
+            scheme, _, token = value.decode("latin-1").partition(" ")
+            if scheme.lower() == "bearer" and token.strip():
+                return token.strip()
     return None
 
 
@@ -213,6 +237,21 @@ class ApiKeyMiddleware:
     def __init__(self, app: Any) -> None:
         self.app = app
 
+    @staticmethod
+    def _resolve_session(token: str | None) -> dict[str, Any] | None:
+        """Resolve a ``zolai_ss_*`` session token, or ``None`` to stay on the key path.
+
+        Imported lazily: :mod:`zolai.api.session_auth` pulls in argon2, and this
+        middleware is on the hot path for every API-key request.
+        """
+        if not token or not token.startswith(session_auth.SESSION_PREFIX):
+            return None
+        if not session_auth.sessions_enabled():
+            # Kill switch: the token is simply not a credential any more, so the
+            # caller lands on the ordinary ``invalid_api_key`` path.
+            return None
+        return session_auth.resolve_session(token)
+
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
@@ -234,6 +273,53 @@ class ApiKeyMiddleware:
             record = await run_in_threadpool(auth.resolve_key, token)
 
         if record is None:
+            # Username/session credentials: **only** a ``zolai_ss_*`` Bearer that
+            # the key lookup above did not already satisfy, and only while
+            # ``ZOLAI_AUTH_SESSIONS`` is on.  Precedence is therefore
+            # X-API-Key / any non-session Bearer -> key path (unchanged);
+            # ``zolai_ss_*`` -> session path; a session token while the flag is
+            # off falls through as an ordinary invalid key, so rollback looks
+            # like a bad credential rather than a new failure mode.
+            session_record = await run_in_threadpool(self._resolve_session, token)
+            if session_record is not None:
+                state = scope.setdefault("state", {})
+                state["api_key"] = session_record
+                state["session"] = {
+                    "id": session_record.get("session_id"),
+                    "user_id": session_record.get("user_id"),
+                    "username": session_record.get("username"),
+                    "expires_at": session_record.get("expires_at"),
+                }
+
+                capacity = auth.api_rate_limit_rpm()
+                allowed, remaining, reset, retry_after = await run_in_threadpool(
+                    limiter.hit, f"session:{session_record.get('session_id')}", capacity
+                )
+                rate_headers = _rate_headers(capacity, remaining, reset)
+                if not allowed:
+                    await _send_json(
+                        send,
+                        429,
+                        {
+                            "detail": {
+                                "error": "rate_limited",
+                                "limit_rpm": capacity,
+                                "retry_after_s": retry_after,
+                            }
+                        },
+                        rate_headers + [(b"retry-after", str(retry_after).encode("ascii"))],
+                    )
+                    return
+
+                async def send_session_wrapper(message: Any) -> None:
+                    if message.get("type") == "http.response.start":
+                        existing = list(message.get("headers") or [])
+                        message["headers"] = existing + rate_headers
+                    await send(message)
+
+                await self.app(scope, receive, send_session_wrapper)
+                return
+
             # P2 public class: anonymous reads (and the public assistant) stay
             # open in warn *and* enforce — rate limited per IP, never 401.
             if is_public_path(scope.get("method"), path):

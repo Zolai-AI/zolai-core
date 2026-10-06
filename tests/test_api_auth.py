@@ -9,6 +9,10 @@ Covers the P0-1 / ADR-014 done-when:
 - ``/health``, ``/metrics``, ``/api/metrics/*`` and legacy routes byte-identical
 - >rate-limit 429 + Retry-After + X-RateLimit-*
 - 401s are counted by MetricsMiddleware (registration order)
+- **session credentials never weaken the key path**: a ``zolai_ss_*`` token
+  resolves through the session branch only after the key lookup failed, an
+  ``X-API-Key`` still wins when both are presented, and
+  ``ZOLAI_AUTH_SESSIONS=off`` makes a session token look like a bad key
 """
 
 from __future__ import annotations
@@ -20,11 +24,13 @@ import pytest
 from fastapi.testclient import TestClient
 from prometheus_client.parser import Sample, text_string_to_metric_families
 
-from zolai.api import auth
+from zolai.api import auth, session_auth
 from zolai.api.auth_middleware import reset_rate_limiter
 from zolai.api.server import create_app
 from zolai.data.database import DatabaseManager
-from zolai.data.migrations import create_api_keys_table
+from zolai.data.migrations import create_api_keys_table, create_user_session_tables
+
+PASSWORD = "correct horse battery staple"
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -37,7 +43,9 @@ def auth_db(tmp_path, monkeypatch) -> Iterator[DatabaseManager]:
     mgr = DatabaseManager(f"sqlite:///{tmp_path / 'auth.db'}")
     mgr.init_db()
     create_api_keys_table(mgr)
+    create_user_session_tables(mgr)
     monkeypatch.setattr(auth, "_get_manager", lambda: mgr)
+    monkeypatch.setattr(session_auth, "_get_manager", lambda: mgr)
     yield mgr
     mgr.dispose()
 
@@ -53,10 +61,12 @@ def _clean_state() -> Iterator[None]:
     """Isolate cache / rate buckets / failure-log throttle around each test."""
     auth.invalidate_key_cache()
     auth.reset_failure_log()
+    session_auth.reset_session_cache()
     reset_rate_limiter()
     yield
     auth.invalidate_key_cache()
     auth.reset_failure_log()
+    session_auth.reset_session_cache()
     reset_rate_limiter()
 
 
@@ -334,3 +344,134 @@ def test_401_responses_are_counted_in_http_metrics(
 
     after = _total_401(_http_samples(client.get("/metrics").text))
     assert after >= before + 1
+
+
+# ---------------------------------------------------------------------------
+# Session credentials must not weaken the key path (username accounts)
+# ---------------------------------------------------------------------------
+
+
+def _session_token(auth_db, *, username: str = "founder", role: str = "admin") -> str:
+    session_auth.create_user(username=username, password=PASSWORD, role=role, actor="test")
+    return session_auth.login(username, PASSWORD)["token"]
+
+
+def _auth_headers_raw(token: str) -> dict[str, str]:
+    """A raw Bearer header (works for both a key and a session token)."""
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_session_token_authenticates_a_gated_route(
+    client: TestClient, auth_db, monkeypatch
+) -> None:
+    _enforce(monkeypatch)
+    token = _session_token(auth_db)
+
+    response = client.get("/api/v1/admin/api-keys", headers=_auth_headers_raw(token))
+
+    assert response.status_code == 200  # admin session holds apikey:manage
+
+
+def test_member_session_cannot_reach_the_admin_surface(
+    client: TestClient, auth_db, monkeypatch
+) -> None:
+    _enforce(monkeypatch)
+    token = _session_token(auth_db, username="member1", role="member")
+
+    response = client.get("/api/v1/admin/api-keys", headers=_auth_headers_raw(token))
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["action"] == "apikey:manage"
+
+
+def test_session_token_is_strict_in_warn_mode(
+    client: TestClient, auth_db, monkeypatch
+) -> None:
+    """A missing credential dual-accepts in warn; a *wrong* one never does."""
+    monkeypatch.setenv("ZOLAI_API_AUTH", "warn")
+    _session_token(auth_db)
+
+    assert client.post("/api/v1/admin/api-keys", json={"name": "x", "scopes": ["*"]}).status_code == 401
+    forged = client.post(
+        "/api/v1/admin/api-keys",
+        headers={"Authorization": "Bearer zolai_ss_not-a-real-session"},
+        json={"name": "x", "scopes": ["*"]},
+    )
+    assert forged.status_code == 401
+    assert forged.json()["detail"]["reason"] == "invalid_api_key"
+
+
+def test_x_api_key_wins_when_a_session_is_also_presented(
+    client: TestClient, auth_db, monkeypatch
+) -> None:
+    """Both credentials present → the key path answers (``key_prefix`` proves it)."""
+    _enforce(monkeypatch)
+    token = _session_token(auth_db, username="member1", role="member")
+    key = auth.create_api_key(name="key-wins", scopes=["dataset:read"])
+
+    response = client.get(
+        "/api/v1/auth/me",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-API-Key": key["plaintext"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["auth_source"] == "api_key"
+    assert body["key_prefix"] == key["key_prefix"]
+    # Session-only identity keys stay absent on the key path.
+    assert "username" not in body
+    assert "user_id" not in body
+
+
+def test_non_session_bearer_stays_on_the_key_path(
+    client: TestClient, auth_db, monkeypatch
+) -> None:
+    """MCP / Tauri / scripts present ``Bearer zolai_sk_*`` — unchanged."""
+    _enforce(monkeypatch)
+    key = auth.create_api_key(name="machine", scopes=["apikey:manage"])
+
+    response = client.get("/api/v1/admin/api-keys", headers=_auth_headers(key))
+
+    assert response.status_code == 200
+
+
+def test_session_flag_off_makes_a_session_token_look_like_a_bad_key(
+    client: TestClient, auth_db, monkeypatch
+) -> None:
+    """Rollback posture: ``ZOLAI_AUTH_SESSIONS=off`` → ``invalid_api_key``."""
+    _enforce(monkeypatch)
+    token = _session_token(auth_db)
+    assert client.get("/api/v1/admin/api-keys", headers=_auth_headers_raw(token)).status_code == 200
+
+    monkeypatch.setenv("ZOLAI_AUTH_SESSIONS", "off")
+    session_auth.reset_session_cache()
+
+    blocked = client.get("/api/v1/admin/api-keys", headers=_auth_headers_raw(token))
+
+    assert blocked.status_code == 401
+    assert blocked.json()["detail"]["reason"] == "invalid_api_key"
+    me = client.get("/api/v1/auth/me", headers=_auth_headers_raw(token))
+    assert me.json()["role"] == "anonymous"
+    assert set(me.json()) == {"role", "key_prefix", "scopes", "mode", "auth_source"}
+
+
+def test_auth_me_is_additive_for_a_session(client: TestClient, auth_db, monkeypatch) -> None:
+    _enforce(monkeypatch)
+    token = _session_token(auth_db, username="ada", role="admin")
+
+    response = client.get("/api/v1/auth/me", headers=_auth_headers_raw(token))
+
+    assert response.status_code == 200
+    body = response.json()
+    # The original four keys are still present, with the same meaning.
+    assert {"role", "key_prefix", "scopes", "mode"} <= set(body)
+    assert body["key_prefix"] is None  # a session has no key prefix (D7)
+    assert body["role"] == "admin"
+    assert body["auth_source"] == "session"
+    assert body["username"] == "ada"
+    assert body["display_name"] == "ada"
+    assert isinstance(body["user_id"], int)
+    assert body["expires_at"]

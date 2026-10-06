@@ -8,7 +8,9 @@ Covers the plan's done-when:
   /api/v1/assistant/chat`` → 200 with no key, while non-public routes and the
   admin surface still 401;
 - ``GET /api/v1/auth/me`` reports ``anonymous`` / ``member`` / ``admin`` and
-  never 401s;
+  never 401s, and carries its original four keys for every auth source;
+- ``POST /api/v1/auth/login`` + ``/auth/logout`` are **public** (a login cannot
+  require the credential it asks for, or ``enforce`` makes sign-in impossible);
 - scope vocabulary 31 → 33 (``agent:read`` / ``agent:run``) + rate-limit rows;
 - anonymous public paths get their own IP buckets (120/min, chat 10/min).
 """
@@ -23,7 +25,7 @@ import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
 
-from zolai.api import auth, rbac
+from zolai.api import auth, rbac, session_auth
 from zolai.api.auth_middleware import (
     DEFAULT_PUBLIC_CHAT_RATE_LIMIT_RPM,
     DEFAULT_PUBLIC_RATE_LIMIT_RPM,
@@ -33,7 +35,7 @@ from zolai.api.rate_limit import SCOPE_LIMITS
 from zolai.api.server import create_app
 from zolai.config import config
 from zolai.data.database import DatabaseManager
-from zolai.data.migrations import create_api_keys_table
+from zolai.data.migrations import create_api_keys_table, create_user_session_tables
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -66,10 +68,12 @@ INSERT INTO dictionary_en_zo VALUES (1, 'god', 'pasian', 'noun', 'test');
 def _clean_auth_state() -> Iterator[None]:
     auth.invalidate_key_cache()
     auth.reset_failure_log()
+    session_auth.reset_session_cache()
     reset_rate_limiter()
     yield
     auth.invalidate_key_cache()
     auth.reset_failure_log()
+    session_auth.reset_session_cache()
     reset_rate_limiter()
 
 
@@ -89,7 +93,9 @@ def auth_db(tmp_path, monkeypatch) -> Iterator[DatabaseManager]:
     mgr = DatabaseManager(f"sqlite:///{tmp_path / 'rbac.db'}")
     mgr.init_db()
     create_api_keys_table(mgr)
+    create_user_session_tables(mgr)
     monkeypatch.setattr(auth, "_get_manager", lambda: mgr)
+    monkeypatch.setattr(session_auth, "_get_manager", lambda: mgr)
     yield mgr
     mgr.dispose()
 
@@ -188,6 +194,9 @@ class TestRouteCompleteness:
             ("GET", "/api/v1/lexicon/pasian"),
             ("GET", "/api/v1/auth/me"),
             ("POST", "/api/v1/assistant/chat"),
+            # Username sign-in/out — public or sign-in is impossible under enforce.
+            ("POST", "/api/v1/auth/login"),
+            ("POST", "/api/v1/auth/logout"),
         ]
         for method, path in cases:
             assert rbac.is_public_path(method, path), f"{method} {path} must be public"
@@ -232,6 +241,19 @@ class TestPublicUnderEnforce:
         assert body["role"] == "anonymous"
         assert body["scopes"] == []
         assert body["mode"] == "enforce"
+        # The original four keys are still exactly the original four (plus the
+        # additive auth_source marker) — nothing a Studio client reads is gone.
+        assert set(body) == {"role", "key_prefix", "scopes", "mode", "auth_source"}
+        assert body["auth_source"] == "anonymous"
+
+    def test_login_and_logout_are_public_under_enforce(
+        self, client, auth_db, monkeypatch
+    ) -> None:
+        """R1 guard: forgetting D6 would make sign-in 401 under enforce."""
+        monkeypatch.setenv("ZOLAI_API_AUTH", "enforce")
+        assert client.post("/api/v1/auth/login", json={}).status_code == 422
+        assert rbac.classify_route("POST", "/api/v1/auth/login") == "public"
+        assert rbac.classify_route("POST", "/api/v1/auth/logout") == "public"
 
     def test_public_word_read_is_200_without_key(
         self, client, seed_db, auth_db, monkeypatch
@@ -258,6 +280,7 @@ class TestPublicUnderEnforce:
         assert body["role"] == "member"
         assert body["key_prefix"] == member_key["key_prefix"]
         assert body["scopes"] == ["dataset:read"]
+        assert body["auth_source"] == "api_key"
 
     def test_admin_key_reports_admin_role(self, client, auth_db, admin_key) -> None:
         resp = client.get("/api/v1/auth/me", headers=_headers(admin_key))
