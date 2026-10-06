@@ -1245,6 +1245,76 @@ class AttestationIndexRecord(Base):
         return f"<AttestationIndexRecord(word={self.word!r}, source={self.source!r})>"
 
 
+class UserRecord(Base):
+    """A username + password account (no self-registration — CLI bootstrap).
+
+    ``password_hash`` holds an argon2id **PHC string**; a plaintext password
+    never reaches the database, the logs, or an audit row.  ``role`` is one of
+    ``member`` / ``admin`` (the RBAC vocabulary) and ``enabled`` is the kill
+    switch a disable revokes against.
+    """
+
+    __tablename__ = "users"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    username: str = Column(String, nullable=False, unique=True)
+    password_hash: str = Column(Text, nullable=False)
+    display_name: str | None = Column(String, nullable=True)
+    role: str = Column(String, nullable=False, default="member", server_default=sa_sql_text("'member'"))
+    enabled: int = Column(Integer, nullable=False, default=1, server_default=sa_sql_text("1"))
+    created_at: str = Column(
+        String,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        server_default=sa_sql_text("datetime('now')"),
+    )
+    updated_at: str = Column(
+        String,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        server_default=sa_sql_text("datetime('now')"),
+    )
+    last_login: str | None = Column(String, nullable=True)
+
+    __table_args__ = (Index("ix_users_enabled", "enabled"),)
+
+    def __repr__(self) -> str:
+        return f"<UserRecord(id={self.id}, username={self.username!r}, role={self.role!r})>"
+
+
+class SessionRecord(Base):
+    """One issued session token — **SHA-256 hash only**, revocable.
+
+    The plaintext ``zolai_ss_*`` token is returned once at login and never
+    stored, so a database copy yields no usable credential.  ``revoked_at`` is
+    the kill switch (logout / ``revoke-sessions``), ``expires_at`` the TTL.
+    """
+
+    __tablename__ = "sessions"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    user_id: int = Column(Integer, nullable=False)
+    token_hash: str = Column(Text, nullable=False, unique=True)
+    created_at: str = Column(
+        String,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        server_default=sa_sql_text("datetime('now')"),
+    )
+    expires_at: str = Column(String, nullable=False)
+    revoked_at: str | None = Column(String, nullable=True)
+    last_used_at: str | None = Column(String, nullable=True)
+    created_by_ip: str | None = Column(String, nullable=True)
+
+    __table_args__ = (
+        Index("ix_sessions_user_id", "user_id"),
+        Index("ix_sessions_expires", "expires_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<SessionRecord(id={self.id}, user_id={self.user_id}, revoked={self.revoked_at!r})>"
+
+
 # ---------------------------------------------------------------------------
 # Model registry for migration/export
 # ---------------------------------------------------------------------------
@@ -1301,4 +1371,7 @@ MODEL_REGISTRY: dict[str, type[Base]] = {
     "observations": ObservationRecord,
     "word_observation_stats": WordObservationStatsRecord,
     "attestation_index": AttestationIndexRecord,
+    # Accounts + revocable sessions (username/password identity)
+    "users": UserRecord,
+    "sessions": SessionRecord,
 }
