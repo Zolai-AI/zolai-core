@@ -6,6 +6,10 @@
 checked before any provider resolution).  ``learn`` is deliberately *not* part
 of the run: it fires only from a thumbs-up feedback
 (:func:`zolai.agent.learn.learn_from_run`).
+
+Notifications
+-------------
+Emits system_event notifications on agent run failures.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from ..engines import engine_mode, llm_allowed
+from ..notifications import get_notification_service
 from . import store
 from .loop import run_agent_loop
 from .synthesis import make_chat_fn, rule_draft
@@ -215,6 +220,27 @@ def run_agent_goal(
         return updated or run
     except Exception as exc:
         logger.exception("agent run %s failed", run_id)
+        # Emit system event notification for agent run failure
+        try:
+            service = get_notification_service()
+            import asyncio
+
+            exc_type = type(exc).__name__
+            exc_msg = str(exc)
+
+            async def _emit() -> None:
+                context = {
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "event_type": "agent_run_failed",
+                    "details": f"Agent run {run_id} failed: {exc_type}: {exc_msg}",
+                    "app_name": "Zolai AI",
+                    "environment": "production",
+                }
+                await service.send_admin_alert("system_event", context, dedup=False)
+
+            asyncio.create_task(_emit())
+        except Exception:
+            pass
         phases["shipped"] = {"status": "failed"}
         updated = store.update_run(
             run_id,
