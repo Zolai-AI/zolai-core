@@ -31,6 +31,11 @@ Kill switch
 ``ZOLAI_AUTH_SESSIONS=off`` makes both routes **404** with
 ``{error: "session_auth_disabled"}`` and the middleware ignore ``zolai_ss_*``
 tokens entirely — the full rollback posture, leaving the tables inert in place.
+
+Notifications
+-------------
+Emits user_activity notifications on login/logout, and admin_action on user
+management operations (create, disable, enable, password change, revoke sessions).
 """
 
 from __future__ import annotations
@@ -41,10 +46,46 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from starlette.concurrency import run_in_threadpool
 
+from ..notifications import get_notification_service
 from . import auth, session_auth
 from .auth_middleware import client_ip, extract_bearer, limiter
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+
+
+async def _emit_user_activity(action: str, username: str, details: str) -> None:
+    """Emit a user activity notification to admins."""
+    try:
+        service = get_notification_service()
+        context = {
+            "timestamp": "2026-01-01T00:00:00Z",  # Will be overwritten by service
+            "action": action,
+            "username": username,
+            "details": details,
+            "app_name": "Zolai AI",
+            "environment": "production",
+        }
+        await service.send_admin_alert("user_activity", context, dedup=False)
+    except Exception:
+        # Don't let notification failures break the main flow
+        pass
+
+
+async def _emit_admin_action(action: str, admin_user: str, details: str) -> None:
+    """Emit an admin action notification to admins."""
+    try:
+        service = get_notification_service()
+        context = {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "action": action,
+            "admin_user": admin_user,
+            "details": details,
+            "app_name": "Zolai AI",
+            "environment": "production",
+        }
+        await service.send_admin_alert("admin_action", context, dedup=False)
+    except Exception:
+        pass
 
 
 class LoginIn(BaseModel):
@@ -123,7 +164,10 @@ async def login(body: LoginIn, request: Request) -> dict[str, Any]:
 
     try:
         # argon2id verify (~200ms) is CPU-bound — never on the event loop.
-        return await run_in_threadpool(session_auth.login, body.username, body.password, ip=ip)
+        result = await run_in_threadpool(session_auth.login, body.username, body.password, ip=ip)
+        # Emit login success notification
+        await _emit_user_activity("login", body.username, f"User {body.username} logged in from {ip}")
+        return result
     except session_auth.LoginRejected as rejected:
         # One shape for all three rejections; the reason is audited, never sent.
         session_auth.record_audit(
@@ -135,6 +179,12 @@ async def login(body: LoginIn, request: Request) -> dict[str, Any]:
             reason=f"login rejected ({rejected.reason}) for username from {ip}",
         )
         auth.log_auth_failure(f"login_{rejected.reason}", "/api/v1/auth/login", None)
+        # Emit login failure notification
+        await _emit_user_activity(
+            "login_failed",
+            body.username,
+            f"Failed login attempt for {body.username} from {ip}: {rejected.reason}",
+        )
         raise HTTPException(
             status_code=401, detail={"error": "invalid_credentials"}
         ) from None
@@ -152,4 +202,7 @@ async def logout(request: Request) -> dict[str, Any]:
         return {"revoked": False}
 
     revoked = await run_in_threadpool(session_auth.revoke_session, token, actor="api")
+    # Emit logout notification (best effort - we don't have username here)
+    if revoked:
+        await _emit_user_activity("logout", "unknown", "Session revoked")
     return {"revoked": bool(revoked)}

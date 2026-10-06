@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -34,12 +34,12 @@ from ..api.rbac import auth_router as auth_info_router
 from ..api.record_review_router import router as record_review_router
 from ..api.records_router import router as records_router
 from ..api.word_engine_router import router as word_engine_router
-from ..notifications.router import router as notifications_router
 from ..cleaner.pipeline import CleanPipeline
 from ..config import config
 from ..crawler.engine import CrawlEngine
 from ..dictionary.manager import DictionaryManager
 from ..monitoring.middleware import MetricsMiddleware
+from ..notifications.router import router as notifications_router
 from ..trainer.dataset import DatasetBuilder
 from ..ui.routes import router as ui_router
 
@@ -457,6 +457,67 @@ def create_app() -> FastAPI:
     # HTTP metrics: added last so it wraps everything above; labels are route
     # templates only (never raw paths), so cardinality stays bounded.
     app.add_middleware(MetricsMiddleware)
+
+    # --- Exception Handlers ---
+    # These capture unhandled exceptions and emit error notifications.
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        """Handle HTTP exceptions and emit notifications for 5xx errors."""
+        if exc.status_code >= 500:
+            try:
+                from ..notifications import get_notification_service
+
+                service = get_notification_service()
+                import asyncio
+
+                async def _emit():
+                    context = {
+                        "timestamp": "2026-01-01T00:00:00Z",
+                        "event_type": f"http_{exc.status_code}",
+                        "details": f"HTTP {exc.status_code}: {exc.detail}",
+                        "app_name": "Zolai AI",
+                        "environment": "production",
+                    }
+                    await service.send_admin_alert("error_alert", context, dedup=False)
+
+                asyncio.create_task(_emit())
+            except Exception:
+                pass
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.detail},
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(request: Request, exc: Exception):
+        """Handle unhandled exceptions and emit error notifications."""
+        logger.exception("Unhandled exception: %s", exc)
+        try:
+            from ..notifications import get_notification_service
+
+            service = get_notification_service()
+            import asyncio
+
+            async def _emit():
+                context = {
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "event_type": "unhandled_exception",
+                    "details": f"{type(exc).__name__}: {exc}",
+                    "app_name": "Zolai AI",
+                    "environment": "production",
+                }
+                await service.send_admin_alert("error_alert", context, dedup=False)
+
+            asyncio.create_task(_emit())
+        except Exception:
+            pass
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=500,
+            content={"detail": {"error": "internal_server_error"}},
+        )
 
     # --- Health ---
 

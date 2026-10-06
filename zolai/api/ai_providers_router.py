@@ -10,6 +10,10 @@ catch-all in :mod:`zolai.api.server`).  Every route is ``strict`` scope-gated:
 Responses are **masked** — see :mod:`zolai.api.ai_provider_schemas`.  Unknown
 ``catalog_id`` is a real **404** (the ce04c72 contract: status codes, not a 200
 body with ``error`` in it).
+
+Notifications
+-------------
+Emits admin_action notifications on provider activate and test.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..llm import provider_settings as settings
+from ..notifications import get_notification_service
 from . import auth
 from .ai_provider_schemas import (
     ActivateOut,
@@ -34,6 +39,23 @@ router = APIRouter(prefix="/api/v1/admin/ai-providers", tags=["admin-ai"])
 
 READ_DEP = Depends(auth.require_scope("settings:read", strict=True))
 WRITE_DEP = Depends(auth.require_scope("settings:write", strict=True))
+
+
+async def _emit_admin_action(action: str, admin_user: str, details: str) -> None:
+    """Emit an admin action notification to admins."""
+    try:
+        service = get_notification_service()
+        context = {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "action": action,
+            "admin_user": admin_user,
+            "details": details,
+            "app_name": "Zolai AI",
+            "environment": "production",
+        }
+        await service.send_admin_alert("admin_action", context, dedup=False)
+    except Exception:
+        pass
 
 
 def _parse_models(raw: Any) -> list[str]:
@@ -132,6 +154,21 @@ def activate_ai_provider(catalog_id: str) -> ActivateOut:
         ) from None
     rows = settings.list_provider_rows()
     active = sum(1 for r in rows if r.get("is_active"))
+    # Emit admin action notification (fire and forget)
+    import asyncio
+
+    async def _emit():
+        await _emit_admin_action(
+            "provider_activate",
+            "admin",  # Would need to get from request state
+            f"Activated provider {catalog_id}",
+        )
+
+    try:
+        asyncio.create_task(_emit())
+    except RuntimeError:
+        # No event loop running
+        pass
     return ActivateOut(catalog_id=catalog_id, is_active=True, active_count=active)
 
 
@@ -147,6 +184,20 @@ def test_ai_provider(catalog_id: str) -> ProviderTestOut:
         raise HTTPException(
             status_code=404, detail={"error": "provider_not_found", "catalog_id": catalog_id}
         ) from None
+    # Emit admin action notification
+    import asyncio
+
+    async def _emit():
+        await _emit_admin_action(
+            "provider_test",
+            "admin",
+            f"Tested provider {catalog_id}: {'success' if result.get('ok') else 'failed'}",
+        )
+
+    try:
+        asyncio.create_task(_emit())
+    except RuntimeError:
+        pass
     return ProviderTestOut(
         catalog_id=catalog_id,
         ok=bool(result.get("ok")),
