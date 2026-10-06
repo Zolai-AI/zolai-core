@@ -217,6 +217,57 @@ zolai-api serve --host 0.0.0.0 --port 8000
 - `POST /review/approve` — Approve candidate
 - `POST /review/reject` — Reject candidate
 
+### Identity Endpoints (`/api/v1/auth`)
+- `GET /api/v1/auth/me` — Who am I (public; role + scopes + `auth_source`)
+- `POST /api/v1/auth/login` — Username + password → session token (public)
+- `POST /api/v1/auth/logout` — Revoke the presented session (public)
+
+Machine clients keep using `X-API-Key` / `Authorization: Bearer zolai_sk_*` —
+username sessions are additive and never weaken key auth. `ZOLAI_AUTH_SESSIONS=off`
+turns the login surface off (404) and the middleware ignores `zolai_ss_*` tokens.
+
+## User Accounts
+
+Accounts are CLI-only: there is **no** self-registration and **no** default
+password. The password is typed at a hidden prompt, or piped in with
+`--password-stdin` so it never reaches shell history or `ps`.
+
+```bash
+# Create an admin (prompts for the password twice)
+zolai user create --username founder --role admin
+
+# Create without an interactive prompt
+printf '%s\n' "$PASSWORD" | zolai user create --username member1
+
+# List accounts (never prints a password hash)
+zolai user list
+zolai user list --json
+
+# Disable / re-enable (disabling also revokes live sessions)
+zolai user disable member1
+zolai user enable member1
+
+# Change a password — revokes every live session for that account
+zolai user password member1
+
+# Log a user out everywhere
+zolai user revoke-sessions member1
+```
+
+| Env var | Default | Purpose |
+|---------|---------|---------|
+| `ZOLAI_AUTH_SESSIONS` | `on` | `off` → login/logout 404, `zolai_ss_*` ignored |
+| `ZOLAI_SESSION_TTL_HOURS` | `12` | Session lifetime |
+| `ZOLAI_LOGIN_RATE_LIMIT_RPM` | `5` | Login attempts/minute per IP |
+| `ZOLAI_LOGIN_RATE_LIMIT_USER_RPM` | `10` | Login attempts/minute per username |
+
+Passwords are stored as argon2id PHC hashes and session tokens as SHA-256
+digests — a database copy contains no usable credential. A rejected login always
+answers the same `401 {"error": "invalid_credentials"}` (unknown user, wrong
+password and disabled account are indistinguishable), and every login, logout,
+create, disable, enable, password change and session revocation is recorded in
+`data_audit_log` without a secret in it.
+
 ## Tests
 
 ```bash

@@ -188,6 +188,66 @@ All GET/POST/PUT/DELETE calls are made against `API` (the base URL from
 
 ---
 
+## Identity Routes (`/api/v1/auth/...`)
+
+Username + password sign-in, beside — never in front of — API-key auth.
+Machine clients (`X-API-Key` / `Authorization: Bearer zolai_sk_*`) are
+unaffected; an `X-API-Key` wins outright when both credentials are presented.
+All three routes are in `rbac.PUBLIC_ROUTES`, so `ZOLAI_API_AUTH=enforce`
+never 401s sign-in itself. Responses use the FastAPI `{"detail": {...}}`
+envelope, like every other `/api/v1` error.
+
+| Method | Path | Params | Returns | Notes |
+|--------|------|--------|---------|-------|
+| GET | `/api/v1/auth/me` | header: any credential | `{role, key_prefix, scopes, mode, auth_source, username?, display_name?, user_id?, expires_at?}` | Public, never 401. `role`/`key_prefix`/`scopes`/`mode` are unchanged; `auth_source` ∈ `anonymous｜api_key｜session`. The `username`/`display_name`/`user_id`/`expires_at` keys appear **only** for a session. |
+| POST | `/api/v1/auth/login` | body: `{username, password}` | `{token, token_type: "bearer", expires_at, user: {id, username, display_name, role, scopes}}` | Public. `token` is `zolai_ss_*` and is returned **once**. 422 on a bad username/password shape. |
+| POST | `/api/v1/auth/logout` | header: `Authorization: Bearer zolai_ss_*` | `{revoked: bool}` | Public. Always 200 (idempotent); revokes **only** the presented session and ignores a presented API key. |
+
+### Login / logout error bodies
+
+| Status | Body | When |
+|--------|------|------|
+| 401 | `{"detail": {"error": "invalid_credentials"}}` | Unknown user, wrong password **or** disabled account — one shape, no reason, no username echo (no enumeration) |
+| 422 | FastAPI validation | `username` outside 1–64 chars of `[a-z0-9._-]`, empty/absent `password`, or missing field |
+| 429 | `{"detail": {"error": "rate_limited", "scope": "login", "limit_rpm": N, "retry_after_s": N}}` + `Retry-After` | Per-IP (`ZOLAI_LOGIN_RATE_LIMIT_RPM`, default 5/min) or per-username (`ZOLAI_LOGIN_RATE_LIMIT_USER_RPM`, default 10/min). Checked **before** any argon2 work. |
+| 404 | `{"detail": {"error": "session_auth_disabled"}}` | `ZOLAI_AUTH_SESSIONS=off` — the rollback posture, on both routes |
+
+### Scope sets (strict subsets of the frozen 33 actions — no `*`)
+
+| Role | Scopes |
+|------|--------|
+| `member` | `dataset:read`, `rag:read`, `catalog:read`, `agent:read`, `agent:run` |
+| `admin` | member + `apikey:manage`, `settings:read`, `settings:write`, `user:manage`, `role:manage` |
+
+An unknown `users.role` degrades to `member` (never raises). An admin session
+therefore reaches `/api/v1/admin/*` with `apikey:manage` and can mint keys.
+
+### Storage and lifetime
+
+- `users.password_hash` — argon2id PHC string (`$argon2id$v=19$m=65536,t=3,p=4$`); a plaintext password is never stored, logged, returned or audited.
+- `sessions.token_hash` — SHA-256 hex digest of `zolai_ss_<token_urlsafe(32)>`; the plaintext token exists only in the login response.
+- TTL `ZOLAI_SESSION_TTL_HOURS` (default 12); `last_used_at` is a throttled sliding mark.
+- Revocation is a `revoked_at` stamp, applied by logout, by `zolai user
+  revoke-sessions`, and by any of `disable` / password change for that account.
+  Re-enabling an account never resurrects a revoked session.
+- Every login, logout, create, disable, enable, password change and session
+  revocation appends a `data_audit_log` row carrying usernames/roles/counts
+  only — never a password, hash or token.
+
+### Config
+
+| Env var | Default | Purpose |
+|---------|---------|---------|
+| `ZOLAI_AUTH_SESSIONS` | `on` | `off` → login/logout 404, middleware ignores `zolai_ss_*` |
+| `ZOLAI_SESSION_TTL_HOURS` | `12` | Session lifetime in hours |
+| `ZOLAI_LOGIN_RATE_LIMIT_RPM` | `5` | Login attempts/minute per IP |
+| `ZOLAI_LOGIN_RATE_LIMIT_USER_RPM` | `10` | Login attempts/minute per username |
+
+Accounts are created only by the CLI (`zolai user create|list|disable|enable|password|revoke-sessions`);
+there is no self-registration route and no default password.
+
+---
+
 ## Frontend API Helper
 
 All calls go through one helper so the base URL always carries the prefix:

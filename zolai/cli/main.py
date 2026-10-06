@@ -1285,6 +1285,219 @@ def apikey_revoke(
 
 
 # ============================================================
+# USER ACCOUNTS (username + password, revocable sessions)
+# ============================================================
+#
+# There is **no** self-registration and **no** default password: an account is
+# bootstrapped here, by an operator who already has shell access. The password
+# is either typed at a hidden prompt or piped in with --password-stdin, so it
+# never lands in shell history or a process argument. ``--json`` output is passed
+# through session_auth.sanitize_user(), which drops ``password_hash``.
+
+user_app = typer.Typer(
+    name="user",
+    help="👤 Username accounts for /api/v1 (create, list, disable, enable, password, revoke-sessions).",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(user_app, name="user")
+
+
+def _user_bootstrap():
+    """Ensure the users/sessions tables exist and return the session service."""
+    from ..api import session_auth
+
+    session_auth.ensure_user_session_tables()
+    return session_auth
+
+
+def _read_password(from_stdin: bool) -> str:
+    """Resolve a password from a hidden prompt or stdin — never a default.
+
+    ``--password-stdin`` reads one line (for ``printf '%s\\n' "$PW" | zolai user
+    create …``); otherwise Typer prompts with echo suppressed and asks for a
+    confirmation. There is intentionally no ``--password`` option: a secret on
+    the command line is readable in ``ps`` and in shell history.
+    """
+    import sys
+
+    if from_stdin:
+        line = sys.stdin.readline()
+        if not line:
+            rprint("[red]✗ No password on stdin — pipe one line or drop --password-stdin[/red]")
+            raise typer.Exit(code=1)
+        return line.rstrip("\r\n")
+    return typer.prompt("Password", hide_input=True, confirmation_prompt=True)
+
+
+def _user_print(payload: dict) -> None:
+    import json as _json
+
+    rprint(_json.dumps(payload, indent=2, default=str))
+
+
+def _user_table(users: list[dict], title: str) -> Table:
+    table = Table(title=title, border_style="blue")
+    for column in ("ID", "Username", "Display name", "Role", "Enabled", "Created", "Last login"):
+        table.add_column(column)
+    for u in users:
+        table.add_row(
+            str(u.get("id") or ""),
+            str(u.get("username") or ""),
+            str(u.get("display_name") or ""),
+            str(u.get("role") or ""),
+            "yes" if u.get("enabled") else "no",
+            str(u.get("created_at") or ""),
+            str(u.get("last_login") or ""),
+        )
+    return table
+
+
+@user_app.command("create")
+def user_create(
+    username: str = typer.Option(..., "--username", "-u", help="1-64 chars of a-z 0-9 . _ -"),
+    display_name: str = typer.Option("", "--display-name", help="Optional display name"),
+    role: str = typer.Option("member", "--role", help="member | admin"),
+    password_stdin: bool = typer.Option(
+        False, "--password-stdin", help="Read the password from stdin (one line)"
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Print the record as JSON (never a hash)"),
+):
+    """➕ Create an account — prompts for the password, there is no default."""
+    _setup_logging(False)
+    session_auth = _user_bootstrap()
+    password = _read_password(password_stdin)
+    try:
+        user = session_auth.create_user(
+            username=username,
+            password=password,
+            display_name=display_name or None,
+            role=role,
+            actor="cli",
+        )
+    except ValueError as exc:
+        rprint(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+
+    safe = session_auth.sanitize_user(user)
+    if json_out:
+        _user_print(safe)
+    else:
+        console.print(_user_table([safe], "User created"))
+        rprint(f"[green]✓ Created '{safe['username']}'[/green] with role {safe['role']}. "
+               "Sign in with POST /api/v1/auth/login.")
+
+
+@user_app.command("list")
+def user_list(
+    json_out: bool = typer.Option(False, "--json", help="Print the records as JSON (never a hash)"),
+):
+    """📋 List accounts (ids, roles, status — never a password hash)."""
+    _setup_logging(False)
+    session_auth = _user_bootstrap()
+    users = session_auth.sanitize_users(session_auth.list_users())
+
+    if json_out:
+        _user_print({"items": users, "count": len(users)})
+    else:
+        console.print(_user_table(users, "Users"))
+        if not users:
+            rprint('[yellow]No users yet — run `zolai user create --username <name>`[/yellow]')
+
+
+@user_app.command("disable")
+def user_disable(
+    username: str = typer.Argument(..., help="Username"),
+    json_out: bool = typer.Option(False, "--json", help="Print the record as JSON"),
+):
+    """🚫 Disable an account — also revokes its live sessions."""
+    _setup_logging(False)
+    session_auth = _user_bootstrap()
+    try:
+        user = session_auth.set_user_enabled(username, enabled=False, actor="cli")
+    except LookupError as exc:
+        rprint(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+
+    safe = session_auth.sanitize_user(user)
+    if json_out:
+        _user_print(safe)
+    else:
+        rprint(f"[red]🚫 Disabled '{safe['username']}'[/red] — live sessions revoked.")
+
+
+@user_app.command("enable")
+def user_enable(
+    username: str = typer.Argument(..., help="Username"),
+    json_out: bool = typer.Option(False, "--json", help="Print the record as JSON"),
+):
+    """✅ Re-enable a disabled account (does not resurrect revoked sessions)."""
+    _setup_logging(False)
+    session_auth = _user_bootstrap()
+    try:
+        user = session_auth.set_user_enabled(username, enabled=True, actor="cli")
+    except LookupError as exc:
+        rprint(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+
+    safe = session_auth.sanitize_user(user)
+    if json_out:
+        _user_print(safe)
+    else:
+        rprint(f"[green]✓ Enabled '{safe['username']}'[/green] — existing sessions stay revoked.")
+
+
+@user_app.command("password")
+def user_password(
+    username: str = typer.Argument(..., help="Username"),
+    password_stdin: bool = typer.Option(
+        False, "--password-stdin", help="Read the new password from stdin (one line)"
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Print the record as JSON"),
+):
+    """🔑 Set a new password — revokes every live session for the account."""
+    _setup_logging(False)
+    session_auth = _user_bootstrap()
+    password = _read_password(password_stdin)
+    try:
+        user = session_auth.change_password(username, password, actor="cli")
+    except LookupError as exc:
+        rprint(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+    except ValueError as exc:
+        # Too short / too long — reported, never echoed back.
+        rprint(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+
+    safe = session_auth.sanitize_user(user)
+    if json_out:
+        _user_print(safe)
+    else:
+        rprint(f"[green]✓ Password updated for '{safe['username']}'[/green] — "
+               "all live sessions revoked.")
+
+
+@user_app.command("revoke-sessions")
+def user_revoke_sessions(
+    username: str = typer.Argument(..., help="Username"),
+    json_out: bool = typer.Option(False, "--json", help="Print the result as JSON"),
+):
+    """🧹 Revoke every live session for a user (log out everywhere)."""
+    _setup_logging(False)
+    session_auth = _user_bootstrap()
+    try:
+        result = session_auth.revoke_user_sessions(username, actor="cli")
+    except LookupError as exc:
+        rprint(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+
+    if json_out:
+        _user_print(result)
+    else:
+        rprint(f"[green]✓ Revoked {result['revoked']} session(s)[/green] for {result['username']}.")
+
+
+# ============================================================
 # CORPUS CLEAN (C1 — audit + dry-run/apply clean)
 # ============================================================
 
