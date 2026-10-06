@@ -29,6 +29,7 @@ from typing import Any
 
 import httpx
 
+from ..resilience import get_circuit_breaker, CircuitBreakerError
 from .catalog import (
     catalog_default_base_url,
     find_catalog,
@@ -235,19 +236,30 @@ def chat(
     body = build_chat_body(row, model, messages, tools=tools)
     timeout = float(timeout_s or row.get("timeout_s") or 60)
 
+    catalog_id = str(row.get("catalog_id") or "unknown")
+    cb = get_circuit_breaker(f"llm_{catalog_id}")
+
+    def _do_request() -> httpx.Response:
+        return httpx.post(url, json=body, headers=headers, timeout=timeout)
+
     started = time.monotonic()
     try:
-        response = httpx.post(url, json=body, headers=headers, timeout=timeout)
+        response = cb.call(_do_request)
+    except CircuitBreakerError as exc:
+        raise ProviderError(
+            PROVIDER_REQUEST_FAILED,
+            f"{catalog_id!r} circuit breaker open: {exc}",
+        ) from exc
     except httpx.HTTPError as exc:
         raise ProviderError(
-            PROVIDER_REQUEST_FAILED, f"{row.get('catalog_id')!r} request failed: {exc}"
+            PROVIDER_REQUEST_FAILED, f"{catalog_id!r} request failed: {exc}"
         ) from exc
     latency_ms = round((time.monotonic() - started) * 1000, 2)
 
     if response.status_code >= 400:
         raise ProviderError(
             PROVIDER_REQUEST_FAILED,
-            f"{row.get('catalog_id')!r} returned HTTP {response.status_code}: "
+            f"{catalog_id!r} returned HTTP {response.status_code}: "
             f"{response.text[:300]}",
         )
 
@@ -256,7 +268,7 @@ def chat(
     except ValueError as exc:
         raise ProviderError(
             PROVIDER_REQUEST_FAILED,
-            f"{row.get('catalog_id')!r} returned a non-JSON body",
+            f"{catalog_id!r} returned a non-JSON body",
         ) from exc
 
     choice = (payload.get("choices") or [{}])[0]
@@ -276,7 +288,7 @@ def chat(
         "text": text,
         "tool_calls": tool_calls,
         "latency_ms": latency_ms,
-        "provider": row.get("catalog_id"),
+        "provider": catalog_id,
         "model": model,
     }
 
