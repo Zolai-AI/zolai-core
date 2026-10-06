@@ -485,9 +485,12 @@ def create_app() -> FastAPI:
             except Exception:
                 pass
         from fastapi.responses import JSONResponse
+        # Preserve headers from the original HTTPException (e.g., Retry-After for rate limits)
+        headers = getattr(exc, "headers", None)
         return JSONResponse(
             status_code=exc.status_code,
             content={"detail": exc.detail},
+            headers=headers,
         )
 
     @app.exception_handler(Exception)

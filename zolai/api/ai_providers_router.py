@@ -165,9 +165,10 @@ def activate_ai_provider(catalog_id: str) -> ActivateOut:
         )
 
     try:
-        asyncio.create_task(_emit())
+        loop = asyncio.get_running_loop()
+        loop.create_task(_emit())
     except RuntimeError:
-        # No event loop running
+        # No event loop running (e.g., in tests)
         pass
     return ActivateOut(catalog_id=catalog_id, is_active=True, active_count=active)
 
@@ -187,7 +188,7 @@ def test_ai_provider(catalog_id: str) -> ProviderTestOut:
     # Emit admin action notification
     import asyncio
 
-    async def _emit():
+    async def _emit() -> None:
         await _emit_admin_action(
             "provider_test",
             "admin",
@@ -195,8 +196,10 @@ def test_ai_provider(catalog_id: str) -> ProviderTestOut:
         )
 
     try:
-        asyncio.create_task(_emit())
+        loop = asyncio.get_running_loop()
+        loop.create_task(_emit())
     except RuntimeError:
+        # No event loop running (e.g., in tests)
         pass
     return ProviderTestOut(
         catalog_id=catalog_id,
