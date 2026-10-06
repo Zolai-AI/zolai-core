@@ -1,0 +1,12 @@
+Admin Action Notification from {{ app_name }}
+
+Timestamp: {{ timestamp }}
+Action: {{ action }}
+Admin User: {{ admin_user }}
+Environment: {{ environment }}
+
+Details:
+{{ details }}
+
+---
+This is an automated notification from {{ app_name }}.

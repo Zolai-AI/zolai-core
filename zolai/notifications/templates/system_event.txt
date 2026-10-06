@@ -1,0 +1,11 @@
+System Event Notification from {{ app_name }}
+
+Timestamp: {{ timestamp }}
+Event Type: {{ event_type }}
+Environment: {{ environment }}
+
+Details:
+{{ details }}
+
+---
+This is an automated notification from {{ app_name }}.

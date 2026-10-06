@@ -1,0 +1,1 @@
+[ERROR] {{ app_name }} - {{ event_type|upper }} Alert

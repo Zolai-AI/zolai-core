@@ -36,6 +36,8 @@ huggingface_hub>=1.33.0,<2
 mistralai>=1.0
 # Resilience: retry logic for external calls
 tenacity>=9.0.0
+# Notifications: async SMTP
+aiosmtplib>=3.0.0
 
 # Dev
 ruff>=0.11.0

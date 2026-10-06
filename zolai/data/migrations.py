@@ -2163,6 +2163,7 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "observation_tables": create_observation_tables(mgr),
         "ai_provider_tables": create_ai_provider_tables(mgr),
         "agent_runs_table": create_agent_runs_table(mgr),
+        "notification_tables": create_notification_tables(mgr),
     }
 
 
@@ -2399,4 +2400,88 @@ def create_agent_runs_table(mgr: DatabaseManager) -> dict[str, Any]:
             conn.commit()
     except Exception as exc:
         errors.append(f"agent_runs: {exc}")
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
+# Notifications (additive IF NOT EXISTS)
+# ---------------------------------------------------------------------------
+
+NOTIFICATIONS_DDL = """
+CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_name TEXT NOT NULL,
+    recipient TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    body_text TEXT NOT NULL,
+    body_html TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    error_message TEXT,
+    sent_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+NOTIFICATION_PREFERENCES_DDL = """
+CREATE TABLE IF NOT EXISTS notification_preferences (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    email_enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(user_id, event_type)
+)
+"""
+
+NOTIFICATION_TEMPLATES_DDL = """
+CREATE TABLE IF NOT EXISTS notification_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    subject_template TEXT NOT NULL,
+    body_text_template TEXT NOT NULL,
+    body_html_template TEXT,
+    event_type TEXT NOT NULL,
+    description TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+NOTIFICATION_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_notifications_recipient_created ON notifications(recipient, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_notifications_status_created ON notifications(status, created_at)",
+]
+
+
+def create_notification_tables(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create notification system tables (idempotent, additive only)."""
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+
+    wanted = [
+        ("notifications", NOTIFICATIONS_DDL),
+        ("notification_preferences", NOTIFICATION_PREFERENCES_DDL),
+        ("notification_templates", NOTIFICATION_TEMPLATES_DDL),
+    ]
+    try:
+        with mgr.engine.connect() as conn:
+            for table, ddl in wanted:
+                if table in existing_tables:
+                    skipped.append(f"{table} (already exists)")
+                    continue
+                conn.execute(text(ddl))
+                created.append(table)
+            for idx_sql in NOTIFICATION_INDEXES:
+                conn.execute(text(idx_sql))
+            conn.commit()
+    except Exception as exc:
+        errors.append(f"notification_tables: {exc}")
     return {"created": created, "skipped": skipped, "errors": errors}

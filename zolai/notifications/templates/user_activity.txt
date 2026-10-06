@@ -1,0 +1,12 @@
+User Activity Notification from {{ app_name }}
+
+Timestamp: {{ timestamp }}
+Action: {{ action }}
+Username: {{ username }}
+Environment: {{ environment }}
+
+Details:
+{{ details }}
+
+---
+This is an automated notification from {{ app_name }}.

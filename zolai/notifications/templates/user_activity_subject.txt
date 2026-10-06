@@ -1,0 +1,1 @@
+[USER ACTIVITY] {{ app_name }} - {{ action|upper }}

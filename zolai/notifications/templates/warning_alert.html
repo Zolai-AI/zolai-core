@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Warning Alert - {{ app_name }}</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: #ffc107; color: #333; padding: 20px; border-radius: 8px 8px 0 0; }
+        .content { background: #f8f9fa; padding: 20px; border: 1px solid #dee2e6; border-top: none; }
+        .footer { background: #e9ecef; padding: 15px; border-radius: 0 0 8px 8px; font-size: 12px; color: #6c757d; }
+        .detail { background: white; padding: 15px; border-radius: 4px; margin: 10px 0; font-family: monospace; white-space: pre-wrap; }
+        .label { font-weight: bold; color: #495057; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1 style="margin: 0;">⚠️ Warning Alert</h1>
+        <p style="margin: 10px 0 0 0;">{{ app_name }}</p>
+    </div>
+    <div class="content">
+        <p><span class="label">Timestamp:</span> {{ timestamp }}</p>
+        <p><span class="label">Event Type:</span> {{ event_type }}</p>
+        <p><span class="label">Environment:</span> {{ environment }}</p>
+        <p><span class="label">Details:</span></p>
+        <div class="detail">{{ details }}</div>
+    </div>
+    <div class="footer">
+        This is an automated alert from {{ app_name }}. Please review if necessary.
+    </div>
+</body>
+</html>
