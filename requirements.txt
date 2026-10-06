@@ -20,6 +20,8 @@ lxml>=5.1
 sqlalchemy>=2.0.36
 psycopg2-binary>=2.9
 orjson>=3.9
+# Password hashing for username accounts (argon2id PHC hash at rest, pinned)
+argon2-cffi==25.1.0
 pandas>=2.3.0
 numpy>=2.5.3,<3
 scikit-learn>=1.9.0,<1.10

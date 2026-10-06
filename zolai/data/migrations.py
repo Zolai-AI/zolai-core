@@ -1555,6 +1555,100 @@ def create_api_keys_table(mgr: DatabaseManager) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Username + password accounts and revocable sessions — additive only.
+#
+# ``users`` holds the credential of record: an argon2id **PHC hash** (never a
+# plaintext password, never a reversible encoding) plus the RBAC role.  There is
+# no self-registration path — accounts are bootstrapped by the CLI
+# (``zolai user create``).
+#
+# ``sessions`` holds one row per issued session token.  Only the SHA-256 hash of
+# the token is stored, so a database copy never yields a usable credential.
+# Revocation is a ``revoked_at`` stamp (same idiom as ``api_keys``); expiry is
+# ``expires_at``; ``last_used_at`` is a throttled bookkeeping column.
+#
+# No foreign keys — the repo's additive idiom (see ``api_keys``) keeps these two
+# tables standalone so nothing pre-existing is ever rebuilt.
+#
+# Reverse (rollback) SQL — safe to run at any time:
+#     DROP INDEX IF EXISTS ix_users_enabled;
+#     DROP INDEX IF EXISTS ix_sessions_expires;
+#     DROP INDEX IF EXISTS ix_sessions_user_id;
+#     DROP TABLE IF EXISTS sessions;
+#     DROP TABLE IF EXISTS users;
+# ---------------------------------------------------------------------------
+
+USERS_DDL = """
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    display_name TEXT,
+    role TEXT NOT NULL DEFAULT 'member',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_login TEXT
+)
+"""
+
+SESSIONS_DDL = """
+CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    revoked_at TEXT,
+    last_used_at TEXT,
+    created_by_ip TEXT
+)
+"""
+
+USER_SESSION_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_sessions_user_id ON sessions(user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_sessions_expires ON sessions(expires_at)",
+    "CREATE INDEX IF NOT EXISTS ix_users_enabled ON users(enabled)",
+]
+
+
+def create_user_session_tables(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create ``users`` + ``sessions`` (username accounts, revocable sessions).
+
+    Idempotent and additive: a table that already exists is reported as
+    ``skipped`` and never rebuilt, so existing rows (and any future column added
+    out of band) survive untouched.  The three indexes are ``IF NOT EXISTS``, so
+    they are safe on a store that already has the tables.
+
+    Returns:
+        Dict with 'created', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    existing = set(sa_inspect(mgr.engine).get_table_names())
+    wanted = (("users", USERS_DDL), ("sessions", SESSIONS_DDL))
+    pending = [(name, ddl) for name, ddl in wanted if name not in existing]
+    skipped = [f"{name} (already exists)" for name, _ddl in wanted if name in existing]
+
+    created: list[str] = []
+    errors: list[str] = []
+    if pending:
+        try:
+            with mgr.engine.connect() as conn:
+                for name, ddl in pending:
+                    conn.execute(text(ddl))
+                    created.append(name)
+                for idx_sql in USER_SESSION_INDEXES:
+                    conn.execute(text(idx_sql))
+                conn.commit()
+        except Exception as exc:
+            errors.append(f"user_session_tables: {exc}")
+            return {"created": [], "skipped": skipped, "errors": errors}
+
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
 # Phase 1 — knowledge contracts (Master Prompt §36) — additive only.
 #
 # Two groups of DDL, both idempotent:
@@ -2062,6 +2156,7 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "lexicon_pos_indexes": create_lexicon_pos_indexes(mgr),
         "monitoring_tables": create_monitoring_tables(mgr),
         "api_keys_table": create_api_keys_table(mgr),
+        "user_session_tables": create_user_session_tables(mgr),
         "contract_columns": add_contract_columns(mgr),
         "contract_indexes": create_contract_indexes(mgr),
         "knowledge_tables": create_knowledge_tables(mgr),

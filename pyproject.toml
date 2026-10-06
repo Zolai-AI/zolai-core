@@ -45,6 +45,8 @@ dependencies = [
     "sqlalchemy>=2.0.36",
     "psycopg2-binary>=2.9",
     "orjson>=3.9",
+    # Password hashing for username accounts (argon2id PHC hash at rest, pinned)
+    "argon2-cffi==25.1.0",
     # Metrics (Prometheus exposition — pinned, exporter output must be stable)
     "prometheus-client==0.26.0",
     # Data processing

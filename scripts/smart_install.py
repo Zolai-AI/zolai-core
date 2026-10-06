@@ -84,6 +84,9 @@ def main():
         ("pydantic>=2.12", "Data validation"),
         ("sqlalchemy>=2.0", "Database ORM"),
         ("psycopg2-binary>=2.9", "PostgreSQL driver"),
+        # Password hashing for username accounts — exact pin (argon2id PHC at rest).
+        # NOTE: the core install shell-quotes each entry, so the ``==`` pin is safe here.
+        ("argon2-cffi==25.1.0", "Password hashing (argon2id)"),
         ("pandas>=2.0", "Data processing"),
         ("numpy>=2.4", "Numerical computing"),
         ("scikit-learn>=1.8", "ML utilities"),
