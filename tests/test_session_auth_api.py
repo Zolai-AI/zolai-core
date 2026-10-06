@@ -1,29 +1,45 @@
-"""Username + password accounts — :mod:`zolai.api.session_auth` service tests.
+"""Username + password accounts — service **and** HTTP contract tests.
 
-The identity counterpart to :mod:`zolai.api.auth` (machine API keys). Covers the
-service half of the contract; the HTTP surface (``/api/v1/auth/login``,
-``/api/v1/auth/logout``) is tested in the API half of this same file.
+Two halves of the same contract:
 
-Highlights
-- passwords are stored as an argon2id PHC hash and verified only against that
-- a login returns a ``zolai_ss_*`` token whose **SHA-256** is what gets stored
-- unknown user / wrong password / disabled all share one exception shape, and
-  an unknown user still pays a dummy argon2 verify so timing does not split
-- disabling an account, changing its password, or ``revoke-sessions`` revokes
-  its live sessions; re-enabling never resurrects a revoked one
-- every mutation appends a ``data_audit_log`` row carrying **no secret**
-- scope sets are strict subsets of the frozen 33-action vocabulary (no ``*``)
+- the :mod:`zolai.api.session_auth` service — hash-at-rest, one failure shape,
+  the dummy verify that keeps timing from enumerating accounts, audit rows,
+  TTL + revocation;
+- the HTTP surface — ``POST /api/v1/auth/login`` and
+  ``POST /api/v1/auth/logout``, with their status codes, rate limits and the
+  ``ZOLAI_AUTH_SESSIONS=off`` kill switch.
+
+HTTP contract highlights
+- login 200 → ``{token, token_type:"bearer", expires_at, user:{…}}``; the token
+  is ``zolai_ss_*`` and is returned exactly once
+- login 401 → **one** shape ``{error:"invalid_credentials"}`` for unknown user,
+  wrong password and disabled account alike (no enumeration, no username echo)
+- login 429 → ``{error:"rate_limited", scope:"login", limit_rpm, retry_after_s}``
+  plus ``Retry-After``; buckets are per IP **and** per username, checked before
+  any argon2 work
+- ``ZOLAI_AUTH_SESSIONS=off`` → login **and** logout **404**
+  ``{error:"session_auth_disabled"}`` (the rollback posture: the surface does
+  not exist, and the stable error marker still names the reason)
+- logout → always 200 ``{revoked: bool}``, revoking the presented session only
+- 422 on a bad username/password shape
+- no secret (password, argon2 hash, token) in any audit row, response, or log
+
+The key-path regressions that must keep holding live in
+``tests/test_api_auth.py`` (session tokens never weaken API-key auth).
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from zolai.api import auth, rbac, session_auth
 from zolai.api.auth_middleware import reset_rate_limiter
+from zolai.api.server import create_app
 from zolai.data.database import DatabaseManager
 from zolai.data.migrations import create_user_session_tables
 
@@ -51,6 +67,11 @@ def session_db(tmp_path, monkeypatch) -> Iterator[DatabaseManager]:
     monkeypatch.setattr(auth, "_get_manager", lambda: mgr)
     yield mgr
     mgr.dispose()
+
+
+@pytest.fixture()
+def client() -> TestClient:
+    return TestClient(create_app())
 
 
 @pytest.fixture(autouse=True)
@@ -383,3 +404,179 @@ class TestAudit:
         # the reason) — assert what the service guarantees: nothing leaked.
         blob = " | ".join(str(value) for row in _audit_rows(session_db) for value in row)
         assert "the wrong passphrase" not in blob
+
+
+# ---------------------------------------------------------------------------
+# HTTP: POST /api/v1/auth/login
+# ---------------------------------------------------------------------------
+
+
+class TestLoginEndpoint:
+    def test_login_is_public_under_enforce(self, client, founder, monkeypatch) -> None:
+        """R1: without PUBLIC_ROUTES, enforce would 401 the login itself."""
+        monkeypatch.setenv("ZOLAI_API_AUTH", "enforce")
+        assert rbac.is_public_path("POST", "/api/v1/auth/login") is True
+
+        response = client.post("/api/v1/auth/login", json=_login_body())
+        assert response.status_code == 200
+
+    def test_login_200_contract(self, client, founder) -> None:
+        response = client.post("/api/v1/auth/login", json=_login_body())
+
+        assert response.status_code == 200
+        body = response.json()
+        assert set(body) == {"token", "token_type", "expires_at", "user"}
+        assert body["token"].startswith("zolai_ss_")
+        assert body["token_type"] == "bearer"
+        assert set(body["user"]) == {"id", "username", "display_name", "role", "scopes"}
+        assert body["user"]["username"] == "founder"
+        assert body["user"]["display_name"] == "founder"  # falls back to username
+
+    def test_login_401_is_one_shape_for_all_three_failures(self, client, founder) -> None:
+        unknown = client.post("/api/v1/auth/login", json=_login_body(username="ghost"))
+        wrong = client.post(
+            "/api/v1/auth/login", json=_login_body(password="the wrong passphrase")
+        )
+        session_auth.set_user_enabled("founder", enabled=False, actor="test")
+        disabled = client.post("/api/v1/auth/login", json=_login_body())
+
+        for response in (unknown, wrong, disabled):
+            assert response.status_code == 401
+            body = response.json()
+            assert body["detail"]["error"] == "invalid_credentials"
+            # No enumeration: the same keys, no reason, no username echo.
+            assert set(body["detail"]) == {"error"}
+
+    def test_login_does_not_echo_the_username_or_password(self, client, founder) -> None:
+        response = client.post(
+            "/api/v1/auth/login", json=_login_body(password="the wrong passphrase")
+        )
+        blob = response.text
+        assert "ghost" not in blob
+        assert "the wrong passphrase" not in blob
+        assert PASSWORD not in blob
+
+    def test_login_422_on_a_bad_body(self, client, founder) -> None:
+        for body in (
+            {"username": "", "password": PASSWORD},
+            {"username": "has space", "password": PASSWORD},
+            {"username": "founder", "password": ""},
+            {"username": "founder"},
+            {},
+        ):
+            response = client.post("/api/v1/auth/login", json=body)
+            assert response.status_code == 422, body
+
+    def test_login_429_per_ip(self, client, founder, monkeypatch) -> None:
+        monkeypatch.setenv("ZOLAI_LOGIN_RATE_LIMIT_RPM", "2")
+        monkeypatch.setenv("ZOLAI_LOGIN_RATE_LIMIT_USER_RPM", "100")
+
+        assert client.post("/api/v1/auth/login", json=_login_body()).status_code == 200
+        assert client.post("/api/v1/auth/login", json=_login_body()).status_code == 200
+        blocked = client.post("/api/v1/auth/login", json=_login_body())
+
+        assert blocked.status_code == 429
+        detail = blocked.json()["detail"]
+        assert detail["error"] == "rate_limited"
+        assert detail["scope"] == "login"
+        assert detail["limit_rpm"] == 2
+        assert detail["retry_after_s"] >= 1
+        assert int(blocked.headers["retry-after"]) >= 1
+
+    def test_login_429_per_username_even_across_ips(
+        self, client, founder, monkeypatch
+    ) -> None:
+        """The username bucket holds even when the IP bucket is wide open."""
+        monkeypatch.setenv("ZOLAI_LOGIN_RATE_LIMIT_RPM", "100")
+        monkeypatch.setenv("ZOLAI_LOGIN_RATE_LIMIT_USER_RPM", "2")
+
+        for _ in range(2):
+            client.post(
+                "/api/v1/auth/login",
+                json=_login_body(password="the wrong passphrase"),
+                headers={"X-Forwarded-For": "10.0.0.1"},
+            )
+        blocked = client.post(
+            "/api/v1/auth/login",
+            json=_login_body(password="the wrong passphrase"),
+            headers={"X-Forwarded-For": "10.0.0.2"},
+        )
+        assert blocked.status_code == 429
+        assert blocked.json()["detail"]["limit_rpm"] == 2
+
+    def test_login_404_when_the_feature_flag_is_off(
+        self, client, founder, monkeypatch
+    ) -> None:
+        """Rollback posture: the endpoint does not exist (404).
+
+        The body still carries the stable ``session_auth_disabled`` marker so a
+        client can tell "feature off" from "route not deployed", without the
+        status code having to double as a feature flag.
+        """
+        monkeypatch.setenv("ZOLAI_AUTH_SESSIONS", "off")
+
+        response = client.post("/api/v1/auth/login", json=_login_body())
+
+        assert response.status_code == 404
+        assert response.json()["detail"]["error"] == "session_auth_disabled"
+
+    def test_login_404_with_the_flag_off_even_in_enforce(self, client, founder, monkeypatch) -> None:
+        monkeypatch.setenv("ZOLAI_API_AUTH", "enforce")
+        monkeypatch.setenv("ZOLAI_AUTH_SESSIONS", "off")
+
+        response = client.post("/api/v1/auth/login", json=_login_body())
+
+        assert response.status_code == 404
+        assert response.json()["detail"]["error"] == "session_auth_disabled"
+
+    def test_login_never_logs_the_password(
+        self, client, founder, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.DEBUG):
+            client.post(
+                "/api/v1/auth/login", json=_login_body(password="the wrong passphrase")
+            )
+        assert PASSWORD not in caplog.text
+        assert "the wrong passphrase" not in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# HTTP: POST /api/v1/auth/logout
+# ---------------------------------------------------------------------------
+
+
+class TestLogoutEndpoint:
+    def test_logout_is_public_and_always_200(self, client, founder, monkeypatch) -> None:
+        monkeypatch.setenv("ZOLAI_API_AUTH", "enforce")
+        assert rbac.is_public_path("POST", "/api/v1/auth/logout") is True
+
+        # No token at all → 200 with revoked:false (idempotent, no probing).
+        anonymous = client.post("/api/v1/auth/logout")
+        assert anonymous.status_code == 200
+        assert anonymous.json()["revoked"] is False
+
+        token = client.post("/api/v1/auth/login", json=_login_body()).json()["token"]
+        first = client.post("/api/v1/auth/logout", headers={"Authorization": f"Bearer {token}"})
+        assert first.status_code == 200
+        assert first.json() == {"revoked": True}
+
+        again = client.post("/api/v1/auth/logout", headers={"Authorization": f"Bearer {token}"})
+        assert again.status_code == 200
+        assert again.json() == {"revoked": False}
+
+    def test_logout_404_when_the_feature_flag_is_off(
+        self, client, founder, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("ZOLAI_AUTH_SESSIONS", "off")
+        response = client.post("/api/v1/auth/logout")
+        assert response.status_code == 404
+        assert response.json()["detail"]["error"] == "session_auth_disabled"
+
+    def test_logout_does_not_revoke_other_sessions(self, client, founder) -> None:
+        first = client.post("/api/v1/auth/login", json=_login_body()).json()["token"]
+        second = client.post("/api/v1/auth/login", json=_login_body()).json()["token"]
+
+        client.post("/api/v1/auth/logout", headers={"Authorization": f"Bearer {first}"})
+
+        assert session_auth.resolve_session(first) is None
+        assert session_auth.resolve_session(second) is not None

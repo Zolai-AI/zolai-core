@@ -77,6 +77,13 @@ PUBLIC_ROUTES: tuple[tuple[str | None, str], ...] = (
     (None, "/api/v1/health"),
     # Identity probe — never 401s, so Studio can gate its own UI.
     ("GET", "/api/v1/auth/me"),
+    # Username + password sign-in/out. Public by necessity: a login cannot
+    # require the credential it is asking for, so under ``enforce`` these two
+    # must stay open or sign-in becomes impossible (chicken-and-egg). Both are
+    # rate limited per IP **and** per username, and 404 when
+    # ``ZOLAI_AUTH_SESSIONS=off``.
+    ("POST", "/api/v1/auth/login"),
+    ("POST", "/api/v1/auth/logout"),
     # Public assistant (P4) — anonymous chat stays open under enforce.
     ("POST", "/api/v1/assistant/chat"),
     # Anonymous Studio reads (plan §B table).
@@ -217,11 +224,28 @@ auth_router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 @auth_router.get("/me")
 def auth_me(request: Request) -> dict[str, Any]:
-    """Who am I?  Public, never 401 — powers Studio role gating."""
+    """Who am I?  Public, never 401 — powers Studio role gating.
+
+    The original four keys (``role``, ``key_prefix``, ``scopes``, ``mode``) are
+    unchanged — additive only.  When the caller authenticated with a username
+    session (``Authorization: Bearer zolai_ss_*``) the response also carries
+    ``auth_source="session"`` with ``username`` / ``display_name`` / ``user_id``
+    / ``expires_at``; ``key_prefix`` stays ``None`` because a session has no key
+    prefix (D7).  With ``ZOLAI_AUTH_SESSIONS=off`` the response is the original
+    four keys plus ``auth_source`` set to ``"api_key"``/``"anonymous"``.
+    """
     record: dict[str, Any] | None = getattr(request.state, "api_key", None)
-    return {
+    is_session = bool(record) and record.get("auth_source") == "session"
+    body: dict[str, Any] = {
         "role": role_for(record),
         "key_prefix": (record or {}).get("key_prefix"),
         "scopes": list((record or {}).get("scopes") or []),
         "mode": auth.api_auth_mode(),
+        "auth_source": "session" if is_session else ("api_key" if record else "anonymous"),
     }
+    if is_session:
+        body["username"] = record.get("username")
+        body["display_name"] = record.get("display_name")
+        body["user_id"] = record.get("user_id")
+        body["expires_at"] = record.get("expires_at")
+    return body

@@ -22,6 +22,7 @@ from ..api.ai_providers_router import router as ai_providers_router
 from ..api.assistant_router import admin_router as admin_assistant_router
 from ..api.assistant_router import public_router as assistant_router
 from ..api.auth_middleware import ApiKeyMiddleware
+from ..api.auth_session_router import router as auth_session_router
 from ..api.desktop_router import router as desktop_router
 from ..api.foundation_router import router as foundation_router
 from ..api.jsonl_router import router as jsonl_router
@@ -417,6 +418,9 @@ def create_app() -> FastAPI:
     app.include_router(ai_providers_router)
     # P2 GET /api/v1/auth/me — public identity probe for Studio role gating.
     app.include_router(auth_info_router)
+    # Username + password sign-in/out — also public (rbac.PUBLIC_ROUTES), and
+    # registered before the catch-all like every other /api/v1 surface.
+    app.include_router(auth_session_router)
     # P3/P4 agent + assistant surfaces — same rule: BEFORE the catch-all.
     #   /api/v1/assistant/chat is public (rbac.PUBLIC_ROUTES), the admin chat
     #   and /api/v1/agent/* are strict scope-gated.
