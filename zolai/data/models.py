@@ -1316,6 +1316,91 @@ class SessionRecord(Base):
 
 
 # ---------------------------------------------------------------------------
+# Notifications (additive; Phase 3)
+# ---------------------------------------------------------------------------
+
+
+class NotificationRecord(Base):
+    """Notification delivery records for audit and tracking."""
+
+    __tablename__ = "notifications"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    template_name: str = Column(String, nullable=False, index=True)
+    recipient: str = Column(String, nullable=False, index=True)
+    subject: str = Column(String, nullable=False)
+    body_text: str = Column(Text, nullable=False)
+    body_html: str | None = Column(Text, nullable=True)
+    status: str = Column(String, nullable=False, default="pending", index=True)
+    error_message: str | None = Column(Text, nullable=True)
+    sent_at: str | None = Column(String, nullable=True)
+    created_at: str = Column(
+        String,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc).isoformat(),
+        index=True,
+    )
+
+    __table_args__ = (
+        Index("ix_notifications_recipient_created", "recipient", "created_at"),
+        Index("ix_notifications_status_created", "status", "created_at"),
+    )
+
+
+class NotificationPreferenceRecord(Base):
+    """User notification preferences."""
+
+    __tablename__ = "notification_preferences"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    user_id: str = Column(String, nullable=False, index=True)
+    event_type: str = Column(String, nullable=False, index=True)
+    enabled: bool = Column(Integer, nullable=False, default=1)
+    email_enabled: bool = Column(Integer, nullable=False, default=1)
+    created_at: str = Column(
+        String,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc).isoformat(),
+    )
+    updated_at: str = Column(
+        String,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc).isoformat(),
+        onupdate=lambda: datetime.now(timezone.utc).isoformat(),
+    )
+
+    __table_args__ = (
+        Index("ux_notif_pref_user_event", "user_id", "event_type", unique=True),
+    )
+
+
+class NotificationTemplateRecord(Base):
+    """Notification templates with Jinja2 rendering."""
+
+    __tablename__ = "notification_templates"
+
+    id: int = Column(Integer, primary_key=True, autoincrement=True)
+    name: str = Column(String, nullable=False, unique=True, index=True)
+    subject_template: str = Column(Text, nullable=False)
+    body_text_template: str = Column(Text, nullable=False)
+    body_html_template: str | None = Column(Text, nullable=True)
+    event_type: str = Column(String, nullable=False, index=True)
+    description: str | None = Column(Text, nullable=True)
+    is_active: bool = Column(Integer, nullable=False, default=1)
+    created_at: str = Column(
+        String,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc).isoformat(),
+    )
+    updated_at: str = Column(
+        String,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc).isoformat(),
+        onupdate=lambda: datetime.now(timezone.utc).isoformat(),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Model registry for migration/export
 # ---------------------------------------------------------------------------
 MODEL_REGISTRY: dict[str, type[Base]] = {
@@ -1374,4 +1459,8 @@ MODEL_REGISTRY: dict[str, type[Base]] = {
     # Accounts + revocable sessions (username/password identity)
     "users": UserRecord,
     "sessions": SessionRecord,
+    # Notifications (Phase 3)
+    "notifications": NotificationRecord,
+    "notification_preferences": NotificationPreferenceRecord,
+    "notification_templates": NotificationTemplateRecord,
 }

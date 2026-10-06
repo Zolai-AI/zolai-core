@@ -1,0 +1,1 @@
+[ADMIN ACTION] {{ app_name }} - {{ action|upper }}

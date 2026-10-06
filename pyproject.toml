@@ -51,6 +51,8 @@ dependencies = [
     "prometheus-client==0.26.0",
     # Resilience: retry logic for external calls
     "tenacity>=9.0.0",
+    # Notifications: async SMTP
+    "aiosmtplib>=3.0.0",
     # Data processing
     "pandas>=2.3.0",
     "numpy>=2.5.3,<3",

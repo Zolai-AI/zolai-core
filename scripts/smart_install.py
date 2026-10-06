@@ -100,6 +100,7 @@ def main():
         ("huggingface_hub>=1.33.0,<2", "HF Hub"),
         ("mistralai>=1.0", "Mistral AI"),
         ("tenacity>=9.0.0", "Retry logic for external calls"),
+        ("aiosmtplib>=3.0.0", "Async SMTP for notifications"),
         ("ddgs>=9.16", "Web search"),
         ("beautifulsoup4>=4.12", "HTML parser"),
         ("lxml>=5.1", "XML parser"),

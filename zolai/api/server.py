@@ -34,6 +34,7 @@ from ..api.rbac import auth_router as auth_info_router
 from ..api.record_review_router import router as record_review_router
 from ..api.records_router import router as records_router
 from ..api.word_engine_router import router as word_engine_router
+from ..notifications.router import router as notifications_router
 from ..cleaner.pipeline import CleanPipeline
 from ..config import config
 from ..crawler.engine import CrawlEngine
@@ -427,6 +428,8 @@ def create_app() -> FastAPI:
     app.include_router(agent_router)
     app.include_router(assistant_router)
     app.include_router(admin_assistant_router)
+    # Notifications admin endpoints — strict settings:* scope.
+    app.include_router(notifications_router)
 
     # --- Static File Serving for Desktop App ---
     from fastapi.responses import FileResponse

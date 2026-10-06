@@ -1,0 +1,1 @@
+[SYSTEM EVENT] {{ app_name }} - {{ event_type|upper }}
