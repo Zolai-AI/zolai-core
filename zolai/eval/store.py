@@ -9,8 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator
 
-from zolai.config import config as settings
-
 
 @dataclass
 class EvalSet:

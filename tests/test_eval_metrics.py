@@ -5,14 +5,14 @@ from __future__ import annotations
 import pytest
 
 from zolai.eval.metrics import (
-    TokenizationMetrics,
-    POSMetrics,
-    MorphologyMetrics,
     GrammarMetrics,
-    compute_tokenization_metrics,
-    compute_pos_metrics,
-    compute_morphology_metrics,
+    MorphologyMetrics,
+    POSMetrics,
+    TokenizationMetrics,
     compute_grammar_metrics,
+    compute_morphology_metrics,
+    compute_pos_metrics,
+    compute_tokenization_metrics,
 )
 
 
@@ -150,7 +150,13 @@ class TestMorphologyMetrics:
 
     def test_morphology_metrics_dataclass(self) -> None:
         """Test MorphologyMetrics dataclass."""
-        m = MorphologyMetrics(exact_match=0.5, boundary_precision=0.5, boundary_recall=0.5, boundary_f1=0.5, feature_accuracy=0.5)
+        m = MorphologyMetrics(
+            exact_match=0.5,
+            boundary_precision=0.5,
+            boundary_recall=0.5,
+            boundary_f1=0.5,
+            feature_accuracy=0.5,
+        )
         d = m.to_dict()
         assert d["exact_match"] == 0.5
         assert d["boundary_f1"] == 0.5
