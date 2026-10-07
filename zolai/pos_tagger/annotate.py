@@ -12,8 +12,6 @@ from rich.console import Console
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
-from zolai.config import config as settings
-
 app = typer.Typer(help="POS Annotation Tool for Zolai")
 console = Console()
 

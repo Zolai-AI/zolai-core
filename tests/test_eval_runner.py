@@ -7,7 +7,6 @@ from typer.testing import CliRunner
 
 from zolai.eval.runner import app as runner_app
 
-
 runner = CliRunner()
 
 
