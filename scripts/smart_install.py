@@ -90,6 +90,7 @@ def main():
         ("pandas>=2.0", "Data processing"),
         ("numpy>=2.4", "Numerical computing"),
         ("scikit-learn>=1.8", "ML utilities"),
+        ("sklearn-crfsuite>=0.5.0", "CRF for POS tagging"),
         ("transformers>=5.0", "HuggingFace transformers"),
         ("datasets>=4.8", "HuggingFace datasets"),
         ("sentence-transformers>=5.0", "Sentence embeddings"),

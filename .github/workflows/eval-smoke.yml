@@ -1,0 +1,95 @@
+# ZolaiBench v0.1 — Evaluation Smoke Tests
+# Runs on PR/push to catch regressions in POS, Morphology, Grammar, Tokenization
+
+name: ZolaiBench Smoke Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  eval-smoke:
+    name: ZolaiBench Smoke (50 samples/task)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .  # installs base + sklearn-crfsuite
+          pip install pytest ruff
+
+      - name: Verify data directory exists
+        run: |
+          ls -la data/ || echo "data/ not found - will use bundled fixtures"
+          ls -la data/eval/ || mkdir -p data/eval
+
+      - name: Run ZolaiBench smoke tests
+        run: |
+          # Run all 4 tasks with --smoke flag (50 samples each)
+          zolai eval run --task all --smoke --json > smoke_results.json
+          cat smoke_results.json
+
+      - name: Check for failures
+        run: |
+          # Exit non-zero if any task failed
+          python -c "
+import json, sys
+with open('smoke_results.json') as f:
+    results = json.load(f)
+failed = any('error' in r for r in results.values())
+if failed:
+    print('❌ Smoke tests FAILED')
+    for task, result in results.items():
+        if 'error' in result:
+            print(f'  {task}: {result[\"error\"]}')
+    sys.exit(1)
+else:
+    print('✅ All smoke tests PASSED')
+    for task, result in results.items():
+        print(f'  {task}: {result}')
+"
+
+      - name: Upload results as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zolaibench-smoke-results
+          path: smoke_results.json
+          retention-days: 7
+
+  lint:
+    name: Ruff Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: pip install ruff
+      - run: ruff check zolai tests
+
+  typecheck:
+    name: Type Check (Mypy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: pip install mypy
+      - run: mypy zolai/eval --ignore-missing-imports

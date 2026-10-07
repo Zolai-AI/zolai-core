@@ -1385,19 +1385,6 @@ UNIQUE_CONTENT_HASH_INDEX = (
 )
 
 
-def _eval_sets_ddl_statements() -> list[str]:
-    """Return the canonical ``eval_sets`` / ``eval_cases`` DDL statements.
-
-    ``eval_runs.set_name`` references ``eval_sets(set_name)``, so the parent
-    table has to exist before the child DDL runs on a fresh store.  The
-    statements come straight from :mod:`zolai.eval.store` so the two definitions
-    can never drift apart.
-    """
-    from zolai.eval.store import _SCHEMA_SQL
-
-    return [stmt.strip() for stmt in _SCHEMA_SQL.split(";") if stmt.strip()]
-
-
 def create_monitoring_tables(mgr: DatabaseManager) -> dict[str, Any]:
     """Create the L-ops monitoring tables and the content-hash dedup index.
 
@@ -1426,10 +1413,8 @@ def create_monitoring_tables(mgr: DatabaseManager) -> dict[str, Any]:
     existing = set(inspector.get_table_names())
 
     statements: list[tuple[str, str]] = []
-    if "eval_sets" not in existing or "eval_cases" not in existing:
-        # Both halves of the store schema are ensured together: eval_runs.set_name
-        # references eval_sets, and eval_cases is the pair table they share.
-        statements.extend(("eval_parent", stmt) for stmt in _eval_sets_ddl_statements())
+    # eval_sets and eval_cases are created by zolai.eval.store.init_eval_db()
+    # which is called by the eval CLI and API. No need to create them here.
     statements.extend(
         [
             ("monitoring_annotations", MONITORING_ANNOTATIONS_DDL),
@@ -2128,6 +2113,89 @@ def create_observation_tables(mgr: DatabaseManager) -> dict[str, Any]:
     return {"created": created, "skipped": skipped, "errors": errors}
 
 
+# ── Eval Tables (ZolaiBench v0.1) ───────────────────────────────────────────────
+
+EVAL_SETS_DDL = """
+CREATE TABLE IF NOT EXISTS eval_sets (
+    set_name TEXT PRIMARY KEY,
+    version TEXT,
+    description TEXT,
+    case_count INTEGER,
+    created_at TEXT,
+    updated_at TEXT
+)
+"""
+
+EVAL_CASES_DDL = """
+CREATE TABLE IF NOT EXISTS eval_cases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    set_name TEXT NOT NULL REFERENCES eval_sets(set_name),
+    kind TEXT NOT NULL CHECK(kind IN ('pos', 'morph', 'grammar', 'tokenization')),
+    payload TEXT NOT NULL,
+    source_table TEXT,
+    ordinal INTEGER,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT
+)
+"""
+
+EVAL_INDEXES: tuple[tuple[str, str], ...] = (
+    ("idx_eval_cases_lookup", "CREATE INDEX IF NOT EXISTS idx_eval_cases_lookup ON eval_cases(set_name, is_active, ordinal)"),
+    ("idx_eval_cases_kind", "CREATE INDEX IF NOT EXISTS idx_eval_cases_kind ON eval_cases(kind)"),
+)
+
+
+def create_eval_tables(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create the ZolaiBench v0.1 evaluation tables (eval_sets, eval_cases).
+
+    Additive only: CREATE TABLE IF NOT EXISTS + CREATE INDEX IF NOT EXISTS.
+    No DROP / RENAME / ALTER of existing tables.
+
+    Returns:
+        Dict with 'created', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+
+    statements: tuple[tuple[str, str], ...] = (
+        ("eval_sets", EVAL_SETS_DDL),
+        ("eval_cases", EVAL_CASES_DDL),
+    )
+
+    try:
+        with mgr.engine.connect() as conn:
+            for name, ddl in statements:
+                conn.execute(text(ddl))
+                if name in existing_tables:
+                    skipped.append(f"{name} (already exists)")
+                else:
+                    created.append(name)
+            for index_name, ddl in EVAL_INDEXES:
+                exists = conn.execute(
+                    text(
+                        "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = :n"
+                    ),
+                    {"n": index_name},
+                ).first()
+                if exists is not None:
+                    skipped.append(f"{index_name} (already exists)")
+                    continue
+                conn.execute(text(ddl))
+                created.append(index_name)
+            conn.commit()
+    except Exception as exc:
+        errors.append(f"eval_tables: {exc}")
+        return {"created": created, "skipped": skipped, "errors": errors}
+
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
 def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
     """Run all constraint and index migrations including Foundation tables.
 
@@ -2164,6 +2232,7 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "ai_provider_tables": create_ai_provider_tables(mgr),
         "agent_runs_table": create_agent_runs_table(mgr),
         "notification_tables": create_notification_tables(mgr),
+        "eval_tables": create_eval_tables(mgr),
     }
 
 
