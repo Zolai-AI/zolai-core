@@ -419,3 +419,17 @@ def get_pos_tagger() -> ZolaiPOSTagger:
     if _tagger is None:
         _tagger = ZolaiPOSTagger()
     return _tagger
+
+
+# Lazy import for CLI submodule
+def __getattr__(name: str):
+    if name == "annotate":
+        from . import annotate
+        return annotate
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = [
+    "ZolaiPOSTagger",
+    "get_pos_tagger",
+]

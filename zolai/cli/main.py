@@ -598,28 +598,67 @@ def ocr(
 
 
 # ============================================================
-# EVAL (offline quality metrics)
+# EVAL (ZolaiBench v0.1)
 # ============================================================
 
+eval_app = typer.Typer(
+    name="eval",
+    help="📊 ZolaiBench v0.1 — Evaluation runner (tokenization, POS, morphology, grammar).",
+    no_args_is_help=True,
+    rich_markup_mode="rich",
+)
+app.add_typer(eval_app, name="eval")
 
-@app.command()
-def evaluate_cmd(
-    set_name: str = typer.Option("smoke", "--set", help="Set name ('smoke') or a path/base prefix"),
-    baseline: str = typer.Option(None, "--baseline", help="Path to baseline JSON (metric -> minimum floor)"),
-    gate: bool = typer.Option(False, "--gate", help="Exit non-zero when any metric drops below its floor"),
-    json_out: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+
+@eval_app.command("run")
+def eval_run(
+    task: str = typer.Argument(..., help="Task: tokenization, pos, morph, grammar, all"),
+    smoke: bool = typer.Option(False, help="Run smoke test (50 items per task)"),
 ):
-    """📊 Run offline evaluation metrics on a dataset set."""
-    from ..eval.cli import main as eval_main
+    """Run evaluation for specified task(s) — reads from evaluation database."""
 
-    argv = ["--set", set_name]
-    if baseline:
-        argv += ["--baseline", baseline]
-    if gate:
-        argv += ["--gate"]
-    if json_out:
-        argv += ["--json"]
-    raise typer.Exit(eval_main(argv))
+    from zolai.eval.runner import app as runner_app
+    argv = ["run", task]
+    if smoke:
+        argv.append("--smoke")
+    # Use the runner app directly
+    raise typer.Exit(runner_app(argv, standalone_mode=False))
+
+
+@eval_app.command("init-gold")
+def eval_init_gold(
+    task: str = typer.Argument(..., help="Task to initialize from JSONL"),
+):
+    """Initialize gold set in evaluation DB from JSONL file (one-time migration)."""
+    from zolai.eval.runner import app as runner_app
+    raise typer.Exit(runner_app(["init-gold", task], standalone_mode=False))
+
+
+@eval_app.command("export")
+def eval_export(
+    task: str = typer.Argument(..., help="Task to export"),
+    output: Path = typer.Option(None, help="Output file"),
+):
+    """Export eval set from DB to JSONL (for backup/portability)."""
+    from zolai.eval.runner import app as runner_app
+    argv = ["export", task]
+    if output:
+        argv += ["--output", str(output)]
+    raise typer.Exit(runner_app(argv, standalone_mode=False))
+
+
+@eval_app.command("list")
+def eval_list():
+    """List available evaluation tasks."""
+    from zolai.eval.runner import app as runner_app
+    raise typer.Exit(runner_app(["list-tasks"], standalone_mode=False))
+
+
+@eval_app.command("stats")
+def eval_stats():
+    """Show evaluation database statistics."""
+    from zolai.eval.runner import app as runner_app
+    raise typer.Exit(runner_app(["stats"], standalone_mode=False))
 
 
 # ============================================================
