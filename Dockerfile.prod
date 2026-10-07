@@ -1,0 +1,48 @@
+FROM python:3.14-slim
+
+WORKDIR /app
+
+# System deps (for argon2-cffi, sklearn-crfsuite, psycopg2)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Package metadata first (better layer caching)
+COPY pyproject.toml README.md ./
+COPY zolai/ zolai/
+
+# Install base + ML extras with CPU-only torch (no NVIDIA in containers by default)
+# For GPU images, build with:
+#   docker build --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu130 -t zolai-core:gpu -f Dockerfile.prod .
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir --extra-index-url ${TORCH_INDEX} \
+    -e ".[ml]"
+
+# Copy project (data/ is gitignored — mount at runtime)
+COPY scripts/ scripts/
+COPY config/ config/
+COPY .env.example .env.example
+
+# Copy UI assets for the review web interface
+COPY zolai/ui/templates ./zolai/ui/templates
+COPY zolai/ui/static ./zolai/ui/static
+
+# data/ is NOT copied — mount as volume
+VOLUME ["/app/data"]
+
+# Production environment defaults
+ENV ZOLAI_API_AUTH=warn \
+    ZOLAI_AUTH_SESSIONS=on \
+    ZOLAI_SESSION_TTL_HOURS=12 \
+    ZOLAI_LOG_LEVEL=INFO
+
+EXPOSE 8000
+
+# Health check endpoint
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD python -c "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"
+
+CMD ["uvicorn", "zolai.api.server:app", "--host", "0.0.0.0", "--port", "8000"]

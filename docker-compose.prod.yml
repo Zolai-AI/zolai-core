@@ -1,31 +1,17 @@
 services:
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "127.0.0.1:6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
-
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
     ports:
       - "127.0.0.1:8001:8000"
     volumes:
       - ./data:/app/data
-      - api_logs:/app/logs
+      - ./.env:/app/.env:ro
     env_file:
       - .env.production
     environment:
-      - REDIS_URL=redis://redis:6379
-    depends_on:
-      redis:
-        condition: service_healthy
+      - ZOLAI_DB_PATH=/app/data/zolai.db
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
       interval: 30s
@@ -33,13 +19,3 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
-    networks:
-      - zolai-prod
-
-networks:
-  zolai-prod:
-    driver: bridge
-
-volumes:
-  redis_data:
-  api_logs:
