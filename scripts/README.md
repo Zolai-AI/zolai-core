@@ -45,6 +45,8 @@ Data collection, processing, training, and maintenance scripts (~250 total).
 | `validate_zolai_webapi_fixed.py` | Fixed WebAPI validation |
 | `zolai_gemini_tool.py` | Gemini tool integration |
 | `zvs_api.py` | ZVS API client |
+| `backup_nightly.py` | **NIGHTLY BACKUP:** WAL-safe sqlite3 backup + gzip + JSONL logging + 30-day retention |
+| `backup_cron.sh` | Cron wrapper for backup_nightly.py (sources .env, sets PYTHONPATH) |
 
 ## DB sync — server ↔ local on every update
 
