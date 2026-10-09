@@ -30,6 +30,8 @@ def make_chat_fn(
     model: str | None = None,
     native: bool | None = None,
     timeout_s: float | None = None,
+    user_api_key: str | None = None,
+    user_provider: str | None = None,
 ) -> tuple[ChatFn, dict[str, Any]]:
     """Resolve the assistant's provider once and bind a chat closure.
 
@@ -46,6 +48,12 @@ def make_chat_fn(
             the resolved adapter (``openai``/``openrouter`` only — the brain
             path never receives a ``tools`` key).
         timeout_s: Per-request timeout override.
+        user_api_key: Optional per-request API key override (user-provided,
+            not stored server-side). If provided, it takes precedence over
+            the row's stored key or env fallback.
+        user_provider: Optional per-request provider override for user-provided
+            keys (OpenAI, OpenRouter, Gemini, custom). If provided, a temporary
+            row is constructed for this request using the user's key.
 
     Returns:
         ``(chat_fn, meta)`` where ``meta`` carries ``catalog_id``/``model``/
@@ -71,7 +79,9 @@ def make_chat_fn(
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        result = adapter_mod.chat(row, model_id, messages, tools=tools, timeout_s=timeout_s)
+        result = adapter_mod.chat(
+            row, model_id, messages, tools=tools, timeout_s=timeout_s, user_api_key=user_api_key
+        )
         return {
             "text": result.get("text") or "",
             "tool_calls": result.get("tool_calls") or [],
@@ -84,6 +94,7 @@ def make_chat_fn(
         "adapter": adapter_name,
         "native": use_native,
         "chat": chat,
+        "user_provider": user_provider or "",
     }
     return chat, meta
 
