@@ -101,6 +101,7 @@ def run_agent_goal(
     max_turns: int | None = None,
     provider: str | None = None,
     model: str | None = None,
+    user_api_key: str | None = None,
 ) -> dict[str, Any]:
     """Execute one agent run end-to-end and persist the ``agent_runs`` row.
 
@@ -110,6 +111,9 @@ def run_agent_goal(
             opens; ``None`` keeps the assistant's default resolution.
         model: Optional per-request model override (must be listed on the
             chosen row).
+        user_api_key: Optional per-request API key override (user-provided,
+            not stored server-side). If provided, it takes precedence over
+            the row's stored key or env fallback.
 
     Returns:
         The full run (phases, tool trace, evidence, answer, provider,
@@ -160,7 +164,7 @@ def run_agent_goal(
         if llm_allowed():
             try:
                 chat, meta = make_chat_fn(
-                    assistant=assistant, provider=provider, model=model
+                    assistant=assistant, provider=provider, model=model, user_api_key=user_api_key
                 )
                 loop_result = run_agent_loop(
                     system_prompt=SYSTEM_PROMPT,

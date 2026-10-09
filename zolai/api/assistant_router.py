@@ -52,12 +52,22 @@ class ChatIn(BaseModel):
     validated against an **enabled** catalog row *before* the run (a DB read —
     so an unknown/disabled provider is a real 404 even in ``rule`` mode) and
     echoed back as ``requested_provider`` / ``requested_model``.
+
+    ``api_key`` is an optional per-request override for the provider's API key.
+    This allows users to use their own API keys without server-side storage.
+
+    ``user_provider`` is an optional per-request provider override for
+    user-provided keys (OpenAI, OpenRouter, Gemini, custom). This allows
+    users to specify which provider their key belongs to without needing
+    a server-side catalog entry.
     """
 
     message: str = Field(min_length=1, max_length=8000)
     persist: bool = False
     provider: str | None = None
     model: str | None = None
+    api_key: str | None = None
+    user_provider: str | None = None
 
 
 def _sanitize(answer: str) -> tuple[str, dict[str, Any]]:
@@ -126,6 +136,8 @@ def run_assistant(
     persist: bool = False,
     provider: str | None = None,
     model: str | None = None,
+    api_key: str | None = None,
+    user_provider: str | None = None,
 ) -> dict[str, Any]:
     """Shared runner: resolve provider → loop (or honest retrieval fallback).
 
@@ -133,6 +145,9 @@ def run_assistant(
     request only (validated by the route via ``validate_selection`` first).
     The override is echoed in the response as ``requested_provider`` /
     ``requested_model``; ``provider``/``model`` keep meaning *actually used*.
+
+    ``api_key`` is an optional per-request API key override (user-provided key
+    for this request only, not stored server-side).
     """
     assistant = "admin" if admin else "public"
     allow = allow_list("admin" if admin else "public")
@@ -143,10 +158,12 @@ def run_assistant(
         return _finish(
             out, message, admin=admin, persist=persist, started=started,
             requested_provider=provider, requested_model=model,
+            requested_api_key=api_key is not None,
+            requested_user_provider=user_provider is not None,
         )
 
     try:
-        chat, meta = make_chat_fn(assistant=assistant, provider=provider, model=model)
+        chat, meta = make_chat_fn(assistant=assistant, provider=provider, model=model, user_api_key=api_key, user_provider=user_provider)
     except Exception as exc:  # ProviderError (stable codes) → honest fallback
         logger.info("assistant %s degraded to retrieval-only: %s", assistant, exc)
         out = _retrieval_only(message, allow)
@@ -154,6 +171,8 @@ def run_assistant(
         return _finish(
             out, message, admin=admin, persist=persist, started=started,
             requested_provider=provider, requested_model=model,
+            requested_api_key=api_key is not None,
+            requested_user_provider=user_provider is not None,
         )
 
     loop_result = run_agent_loop(
@@ -178,6 +197,8 @@ def run_assistant(
         return _finish(
             out, message, admin=admin, persist=persist, started=started,
             requested_provider=provider, requested_model=model,
+            requested_api_key=api_key is not None,
+            requested_user_provider=user_provider is not None,
         )
 
     out = {
@@ -208,13 +229,17 @@ def _finish(
     started: float,
     requested_provider: str | None = None,
     requested_model: str | None = None,
+    requested_api_key: bool = False,
+    requested_user_provider: bool = False,
 ) -> dict[str, Any]:
     """ZVS validation + optional admin persist (chat is not an agent run).
 
     Also stamps the per-request override echo: ``requested_provider`` /
     ``requested_model`` are what the caller *asked for* (``""`` when no
     override) — ``provider``/``model`` in ``out`` keep meaning *actually used*
-    (``""`` in rule/retrieval-only mode).
+    (``""`` in rule/retrieval-only mode). ``requested_api_key`` indicates
+    whether the caller provided a per-request API key. ``requested_user_provider``
+    indicates whether the caller provided a per-request user provider override.
     """
     out["requested_provider"] = requested_provider or ""
     out["requested_model"] = requested_model or ""
@@ -222,6 +247,8 @@ def _finish(
     out["answer"] = answer
     out["zvs"] = {k: review[k] for k in ("valid", "violations_before", "violations_after")}
     out["latency_ms"] = round((time.monotonic() - started) * 1000, 2)
+    out["requested_api_key"] = requested_api_key
+    out["requested_user_provider"] = requested_user_provider
     if persist:
         if not admin:
             raise HTTPException(
@@ -259,13 +286,19 @@ def public_chat(body: ChatIn) -> dict[str, Any]:
     An optional ``provider``/``model`` override is validated **before** the
     run (DB read only): unknown/disabled provider → 404, model not on the
     row → 400, in every engine mode including ``rule``.
+
+    ``api_key`` is an optional per-request override for the provider's API key
+    (user-provided, not stored server-side).
+
+    ``user_provider`` is an optional per-request provider override for
+    user-provided keys (OpenAI, OpenRouter, Gemini, custom).
     """
     from .providers_router import validate_selection
 
     validate_selection(body.provider, body.model, assistant="public")
     return run_assistant(
         body.message, admin=False, persist=False,
-        provider=body.provider, model=body.model,
+        provider=body.provider, model=body.model, api_key=body.api_key, user_provider=body.user_provider,
     )
 
 
@@ -277,5 +310,5 @@ def admin_chat(body: ChatIn, request: Request) -> dict[str, Any]:
     validate_selection(body.provider, body.model, assistant="admin")
     return run_assistant(
         body.message, admin=True, persist=body.persist,
-        provider=body.provider, model=body.model,
+        provider=body.provider, model=body.model, api_key=body.api_key, user_provider=body.user_provider,
     )

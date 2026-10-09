@@ -541,6 +541,16 @@ def create_app() -> FastAPI:
             uptime_s=round(time.time() - PROCESS_STARTED_AT, 3),
         )
 
+    @app.get("/api/v1/health", response_model=HealthResponse)
+    async def api_v1_health():
+        from ..monitoring.store import PROCESS_STARTED_AT
+
+        return HealthResponse(
+            status="ok",
+            data_root=str(config.paths.data),
+            uptime_s=round(time.time() - PROCESS_STARTED_AT, 3),
+        )
+
     # --- Crawler ---
 
     @app.post("/crawl", response_model=CrawlResponse)

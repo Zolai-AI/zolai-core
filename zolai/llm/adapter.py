@@ -210,6 +210,7 @@ def chat(
     *,
     tools: list[dict[str, Any]] | None = None,
     timeout_s: float | None = None,
+    user_api_key: str | None = None,
 ) -> dict[str, Any]:
     """One synchronous chat-completions call against ``row``'s endpoint.
 
@@ -218,15 +219,20 @@ def chat(
 
     Raises:
         ProviderError: ``PROVIDER_KEY_MISSING`` / ``PROVIDER_REQUEST_FAILED``.
+
+    ``user_api_key`` is an optional per-request key override (user-provided,
+    not stored server-side). If provided, it takes precedence over the
+    row's stored key or env fallback.
     """
     url = resolve_completions_url(row)
-    key = resolve_api_key(row)
+    # User-provided key takes precedence over stored key
+    key = user_api_key or resolve_api_key(row)
     requires_key = bool(row.get("requires_key", 1))
     if requires_key and not key:
         raise ProviderError(
             PROVIDER_KEY_MISSING,
-            f"provider {row.get('catalog_id')!r} needs an API key — paste one in "
-            "Admin → Settings or point it at an env: reference.",
+            f"provider {row.get('catalog_id')!r} needs an API key — provide one in the "
+            "request or paste one in Admin → Settings or point it at an env: reference.",
         )
 
     headers = {"Content-Type": "application/json"}

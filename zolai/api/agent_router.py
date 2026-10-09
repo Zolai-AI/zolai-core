@@ -67,11 +67,16 @@ class RunIn(BaseModel):
     validated against an enabled catalog row before the run starts (a DB read
     — a real 404/400 even in ``rule`` mode) and echoed back as
     ``requested_provider`` / ``requested_model``.
+
+    ``api_key`` is an optional per-request API key override (user-provided,
+    not stored server-side). If provided, it takes precedence over the
+    row's stored key or env fallback.
     """
 
     goal: str = Field(min_length=1, max_length=4000)
     provider: str | None = None
     model: str | None = None
+    api_key: str | None = None
 
 
 class FeedbackIn(BaseModel):
@@ -94,6 +99,10 @@ def create_run(body: RunIn, request: Request) -> dict[str, Any]:
     An optional ``provider``/``model`` override is validated before the run
     (unknown/disabled provider → 404, unknown model → 400) and echoed in the
     response as ``requested_provider`` / ``requested_model``.
+
+    ``api_key`` is an optional per-request API key override (user-provided,
+    not stored server-side). If provided, it takes precedence over the
+    row's stored key or env fallback.
     """
     from ..agent.orchestrator import run_agent_goal
     from .providers_router import validate_selection
@@ -106,11 +115,13 @@ def create_run(body: RunIn, request: Request) -> dict[str, Any]:
             created_by=_created_by(request),
             provider=body.provider,
             model=body.model,
+            user_api_key=body.api_key,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": "invalid_goal", "detail": str(exc)}) from exc
     run["requested_provider"] = body.provider or ""
     run["requested_model"] = body.model or ""
+    run["requested_api_key"] = body.api_key is not None
     return run
 
 
