@@ -82,6 +82,7 @@ def main():
         ("aiofiles>=23.2", "Async file I/O"),
         ("pyyaml>=6.0", "YAML parser"),
         ("pydantic>=2.12", "Data validation"),
+        ("email-validator>=2.2.0", "EmailStr validation (notifications API)"),
         ("sqlalchemy>=2.0", "Database ORM"),
         ("psycopg2-binary>=2.9", "PostgreSQL driver"),
         # Password hashing for username accounts — exact pin (argon2id PHC at rest).

@@ -36,6 +36,8 @@ dependencies = [
     "aiofiles>=23.2",
     "pyyaml>=6.0",
     "pydantic>=2.13.5",
+    # EmailStr field validation (notifications admin API) — required at model build
+    "email-validator>=2.2.0",
     "jinja2>=3.1",
     # Web/Crawler
     "ddgs>=9.16",

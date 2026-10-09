@@ -7,6 +7,8 @@
 fastapi>=0.142.2
 uvicorn[standard]>=0.34.0
 pydantic>=2.13.5
+# EmailStr field validation (notifications admin API) — required at model build
+email-validator>=2.2.0
 python-dotenv>=1.0
 httpx>=0.28.1
 aiofiles>=23.2
