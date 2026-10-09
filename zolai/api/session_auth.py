@@ -600,6 +600,48 @@ def set_user_enabled(username: str, *, enabled: bool, actor: str = "cli") -> dic
     return updated or {**user, "enabled": flag}
 
 
+def set_user_role(username: str, *, role: str, actor: str = "cli") -> dict[str, Any]:
+    """Change an account's role (``member`` ↔ ``admin``).
+
+    Role is read back from the ``users`` row on every session resolve, so a
+    fresh :func:`reset_session_cache` is enough — no forced logout, but a demoted
+    admin loses admin routes on their very next request.
+
+    Raises:
+        LookupError: no such user.
+        ValueError: unknown role (nothing is written).
+    """
+    name = normalize_username(username)
+    user = get_user(name)
+    if user is None:
+        raise LookupError(f"user '{name}' not found")
+    role_value = str(role or "").strip().lower()
+    if role_value not in VALID_ROLES:
+        raise ValueError(f"unknown role {role!r}; expected one of {sorted(VALID_ROLES)}")
+    old_role = str(user.get("role") or "member")
+    if old_role == role_value:
+        return user
+    stamp = _stamp()
+    with _get_manager().engine.begin() as conn:
+        conn.execute(
+            text("UPDATE users SET role = :role, updated_at = :stamp WHERE id = :id"),
+            {"role": role_value, "stamp": stamp, "id": int(user["id"])},
+        )
+    # Role is embedded in cached session records — drop the whole cache so a
+    # demotion takes effect on the next request instead of at TTL expiry.
+    reset_session_cache()
+    record_audit(
+        table="users",
+        row_id=int(user["id"]),
+        field="role",
+        old_value=old_role,
+        new_value=role_value,
+        reason=f"role of {name} changed by {actor}",
+    )
+    updated = get_user(name)
+    return updated or {**user, "role": role_value, "updated_at": stamp}
+
+
 def change_password(username: str, password: str, *, actor: str = "cli") -> dict[str, Any]:
     """Replace a password and revoke every live session for that user.
 

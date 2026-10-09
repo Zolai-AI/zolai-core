@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from ..analyzer.corpus import CorpusAnalyzer
 from ..api.admin_api_keys_router import router as admin_api_keys_router
+from ..api.admin_users_router import router as admin_users_router
 from ..api.agent_router import router as agent_router
 from ..api.ai_providers_router import router as ai_providers_router
 from ..api.assistant_router import admin_router as admin_assistant_router
@@ -400,6 +401,9 @@ def create_app() -> FastAPI:
     app.include_router(foundation_router, prefix="/api/v1")
     # API-key admin (issue/list/rotate/revoke) — scope-gated, plaintext once
     app.include_router(admin_api_keys_router)
+    # Admin user accounts (list/create/role/password/revoke-sessions) — strict
+    # ``user:manage`` scope + admin role, same rule: BEFORE the catch-all.
+    app.include_router(admin_users_router)
     # UI Routes for review queue
     app.include_router(ui_router)
     # Metrics REST API — MUST stay registered before the catch-all

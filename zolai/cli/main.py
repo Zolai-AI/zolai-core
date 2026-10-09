@@ -452,7 +452,7 @@ def api(
     bind_port = port or config.api_port
     rprint(f"[bold green]Starting API on http://{bind_host}:{bind_port}[/bold green]")
     rprint(f"[dim]Docs: http://{bind_host}:{bind_port}/docs[/dim]")
-    uvicorn.run("zolai_toolkit.api.server:app", host=bind_host, port=bind_port, reload=reload)
+    uvicorn.run("zolai.api.server:app", host=bind_host, port=bind_port, reload=reload)
 
 
 @app.command()

@@ -101,10 +101,8 @@ def process_directory(
     table_format: str = "html",
 ) -> dict:
     """Process all PDFs in a directory."""
-    from zolai_toolkit.shared.utils import ensure_dir
-
     stats = {"total": 0, "success": 0, "failed": 0, "skipped": 0, "pages": 0, "chars": 0, "errors": []}
-    ensure_dir(output_dir)
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     pdfs = sorted(input_dir.rglob("*.pdf"))
     stats["total"] = len(pdfs)
