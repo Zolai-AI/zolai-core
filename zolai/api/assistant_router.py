@@ -46,10 +46,18 @@ RETRIEVAL_TOOLS: tuple[str, ...] = ("rag_search", "dictionary_lookup")
 
 
 class ChatIn(BaseModel):
-    """Chat body shared by both routes."""
+    """Chat body shared by both routes.
+
+    ``provider`` / ``model`` are an optional per-request override (Phase B §9):
+    validated against an **enabled** catalog row *before* the run (a DB read —
+    so an unknown/disabled provider is a real 404 even in ``rule`` mode) and
+    echoed back as ``requested_provider`` / ``requested_model``.
+    """
 
     message: str = Field(min_length=1, max_length=8000)
     persist: bool = False
+    provider: str | None = None
+    model: str | None = None
 
 
 def _sanitize(answer: str) -> tuple[str, dict[str, Any]]:
@@ -116,23 +124,37 @@ def run_assistant(
     *,
     admin: bool = False,
     persist: bool = False,
+    provider: str | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
-    """Shared runner: resolve provider → loop (or honest retrieval fallback)."""
+    """Shared runner: resolve provider → loop (or honest retrieval fallback).
+
+    ``provider``/``model`` override the assistant's default target for this
+    request only (validated by the route via ``validate_selection`` first).
+    The override is echoed in the response as ``requested_provider`` /
+    ``requested_model``; ``provider``/``model`` keep meaning *actually used*.
+    """
     assistant = "admin" if admin else "public"
     allow = allow_list("admin" if admin else "public")
     started = time.monotonic()
 
     if not llm_allowed():
         out = _retrieval_only(message, allow)
-        return _finish(out, message, admin=admin, persist=persist, started=started)
+        return _finish(
+            out, message, admin=admin, persist=persist, started=started,
+            requested_provider=provider, requested_model=model,
+        )
 
     try:
-        chat, meta = make_chat_fn(assistant=assistant)
+        chat, meta = make_chat_fn(assistant=assistant, provider=provider, model=model)
     except Exception as exc:  # ProviderError (stable codes) → honest fallback
         logger.info("assistant %s degraded to retrieval-only: %s", assistant, exc)
         out = _retrieval_only(message, allow)
         out["provider_error"] = str(exc)
-        return _finish(out, message, admin=admin, persist=persist, started=started)
+        return _finish(
+            out, message, admin=admin, persist=persist, started=started,
+            requested_provider=provider, requested_model=model,
+        )
 
     loop_result = run_agent_loop(
         system_prompt=(
@@ -153,7 +175,10 @@ def run_assistant(
         # Provider failed mid-loop → honest fallback, never a blank 200.
         out = _retrieval_only(message, allow)
         out["provider_error"] = str(loop_result.get("error") or "empty_reply")
-        return _finish(out, message, admin=admin, persist=persist, started=started)
+        return _finish(
+            out, message, admin=admin, persist=persist, started=started,
+            requested_provider=provider, requested_model=model,
+        )
 
     out = {
         "answer": answer,
@@ -168,7 +193,10 @@ def run_assistant(
     }
     if not loop_result.get("ok"):
         out["loop_error"] = str(loop_result.get("error") or "")
-    return _finish(out, message, admin=admin, persist=persist, started=started)
+    return _finish(
+        out, message, admin=admin, persist=persist, started=started,
+        requested_provider=provider, requested_model=model,
+    )
 
 
 def _finish(
@@ -178,8 +206,18 @@ def _finish(
     admin: bool,
     persist: bool,
     started: float,
+    requested_provider: str | None = None,
+    requested_model: str | None = None,
 ) -> dict[str, Any]:
-    """ZVS validation + optional admin persist (chat is not an agent run)."""
+    """ZVS validation + optional admin persist (chat is not an agent run).
+
+    Also stamps the per-request override echo: ``requested_provider`` /
+    ``requested_model`` are what the caller *asked for* (``""`` when no
+    override) — ``provider``/``model`` in ``out`` keep meaning *actually used*
+    (``""`` in rule/retrieval-only mode).
+    """
+    out["requested_provider"] = requested_provider or ""
+    out["requested_model"] = requested_model or ""
     answer, review = _sanitize(str(out.get("answer") or ""))
     out["answer"] = answer
     out["zvs"] = {k: review[k] for k in ("valid", "violations_before", "violations_after")}
@@ -216,11 +254,28 @@ def _finish(
 
 @public_router.post("/chat")
 def public_chat(body: ChatIn) -> dict[str, Any]:
-    """Anonymous-safe chat — public in every auth mode (rbac.PUBLIC_ROUTES)."""
-    return run_assistant(body.message, admin=False, persist=False)
+    """Anonymous-safe chat — public in every auth mode (rbac.PUBLIC_ROUTES).
+
+    An optional ``provider``/``model`` override is validated **before** the
+    run (DB read only): unknown/disabled provider → 404, model not on the
+    row → 400, in every engine mode including ``rule``.
+    """
+    from .providers_router import validate_selection
+
+    validate_selection(body.provider, body.model, assistant="public")
+    return run_assistant(
+        body.message, admin=False, persist=False,
+        provider=body.provider, model=body.model,
+    )
 
 
 @admin_router.post("/chat", dependencies=[ADMIN_ROLE_DEP, ADMIN_SCOPE_DEP])
 def admin_chat(body: ChatIn, request: Request) -> dict[str, Any]:
     """Admin chat: full tool set + trace; strict role + ``agent:run`` scope."""
-    return run_assistant(body.message, admin=True, persist=body.persist)
+    from .providers_router import validate_selection
+
+    validate_selection(body.provider, body.model, assistant="admin")
+    return run_assistant(
+        body.message, admin=True, persist=body.persist,
+        provider=body.provider, model=body.model,
+    )

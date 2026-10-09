@@ -61,9 +61,17 @@ def _check_run_rate(request: Request) -> None:
 
 
 class RunIn(BaseModel):
-    """POST /runs body."""
+    """POST /runs body.
+
+    ``provider`` / ``model`` are an optional per-request override (Phase B §9),
+    validated against an enabled catalog row before the run starts (a DB read
+    — a real 404/400 even in ``rule`` mode) and echoed back as
+    ``requested_provider`` / ``requested_model``.
+    """
 
     goal: str = Field(min_length=1, max_length=4000)
+    provider: str | None = None
+    model: str | None = None
 
 
 class FeedbackIn(BaseModel):
@@ -81,14 +89,28 @@ def _created_by(request: Request) -> str:
 
 @router.post("/runs", dependencies=[RUN_DEP])
 def create_run(body: RunIn, request: Request) -> dict[str, Any]:
-    """Run the agent synchronously (≤60s) and return the full run + trace."""
+    """Run the agent synchronously (≤60s) and return the full run + trace.
+
+    An optional ``provider``/``model`` override is validated before the run
+    (unknown/disabled provider → 404, unknown model → 400) and echoed in the
+    response as ``requested_provider`` / ``requested_model``.
+    """
     from ..agent.orchestrator import run_agent_goal
+    from .providers_router import validate_selection
 
     _check_run_rate(request)
+    validate_selection(body.provider, body.model, assistant="admin")
     try:
-        run = run_agent_goal(body.goal, created_by=_created_by(request))
+        run = run_agent_goal(
+            body.goal,
+            created_by=_created_by(request),
+            provider=body.provider,
+            model=body.model,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": "invalid_goal", "detail": str(exc)}) from exc
+    run["requested_provider"] = body.provider or ""
+    run["requested_model"] = body.model or ""
     return run
 
 

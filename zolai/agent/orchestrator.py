@@ -99,11 +99,21 @@ def run_agent_goal(
     extra_allow: Iterable[str] | None = None,
     assistant: str = "admin",
     max_turns: int | None = None,
+    provider: str | None = None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Execute one agent run end-to-end and persist the ``agent_runs`` row.
 
-    Returns the full run (phases, tool trace, evidence, answer, provider,
-    model, turns, latency) — the API returns it as-is.
+    Args:
+        provider: Optional per-request provider override — validated against
+            the catalog row (stable ``PROVIDER_*`` code) before any socket
+            opens; ``None`` keeps the assistant's default resolution.
+        model: Optional per-request model override (must be listed on the
+            chosen row).
+
+    Returns:
+        The full run (phases, tool trace, evidence, answer, provider,
+        model, turns, latency) — the API returns it as-is.
     """
     goal = str(goal or "").strip()
     if not goal:
@@ -122,8 +132,8 @@ def run_agent_goal(
     error = ""
     status = "running"
     answer = ""
-    provider = ""
-    model = ""
+    used_provider = ""
+    used_model = ""
     turns = 0
     outcome = ""
 
@@ -149,7 +159,9 @@ def run_agent_goal(
         t0 = time.monotonic()
         if llm_allowed():
             try:
-                chat, meta = make_chat_fn(assistant=assistant)
+                chat, meta = make_chat_fn(
+                    assistant=assistant, provider=provider, model=model
+                )
                 loop_result = run_agent_loop(
                     system_prompt=SYSTEM_PROMPT,
                     user_message=f"Goal: {goal}",
@@ -161,8 +173,8 @@ def run_agent_goal(
                 if loop_result.get("ok") and str(loop_result.get("reply") or "").strip():
                     answer = str(loop_result["reply"])
                     turns = int(loop_result.get("turns") or 0)
-                    provider = str(meta.get("catalog_id") or "")
-                    model = str(meta.get("model") or "")
+                    used_provider = str(meta.get("catalog_id") or "")
+                    used_model = str(meta.get("model") or "")
                     outcome = "generated"
                     trace.extend(loop_result.get("tool_calls") or [])
                 else:
@@ -209,8 +221,8 @@ def run_agent_goal(
             tool_calls=trace,
             evidence=flat_evidence[:20],
             answer=answer,
-            provider=provider,
-            model=model,
+            provider=used_provider,
+            model=used_model,
             turns=turns,
             latency_ms=round((finished - started) * 1000, 2),
             outcome=outcome,

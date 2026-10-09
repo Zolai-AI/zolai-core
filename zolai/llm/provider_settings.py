@@ -31,6 +31,12 @@ ASSISTANT_PROVIDER_NOT_FOUND = "ASSISTANT_PROVIDER_NOT_FOUND"
 ASSISTANT_MODEL_NOT_SELECTED = "ASSISTANT_MODEL_NOT_SELECTED"
 ASSISTANT_MODEL_UNKNOWN_FOR_PROVIDER = "ASSISTANT_MODEL_UNKNOWN_FOR_PROVIDER"
 
+#: Per-request ``provider`` / ``model`` overrides (assistant chat + agent runs).
+#: Callers branch on ``code`` — never on message text.
+PROVIDER_UNKNOWN = "PROVIDER_UNKNOWN"
+PROVIDER_INACTIVE = "PROVIDER_INACTIVE"
+PROVIDER_MODEL_UNKNOWN = "PROVIDER_MODEL_UNKNOWN"
+
 #: ``env:`` reference prefix — nothing secret is stored, only the var name.
 ENV_REF_PREFIX = "env:"
 
@@ -505,3 +511,83 @@ def resolve_assistant_ai(assistant: str, manager: Any = None) -> dict[str, Any]:
                 f"{model!r} is not in the model list of {active_id!r}",
             )
     return {"row": row, "model": model, "catalog_id": active_id}
+
+
+def parse_models(raw: Any) -> list[str]:
+    """``models`` column (JSON string or list) → ``list[str]`` (never raises)."""
+    if isinstance(raw, list):
+        return [str(m) for m in raw]
+    try:
+        parsed = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return []
+    return [str(m) for m in parsed] if isinstance(parsed, list) else []
+
+
+def resolve_selection(
+    provider: str | None = None,
+    model: str | None = None,
+    *,
+    assistant: str | None = None,
+    manager: Any = None,
+) -> dict[str, Any]:
+    """Validate an optional per-request ``provider`` / ``model`` (Phase B §9).
+
+    Rules:
+
+    - ``provider`` given → the row must exist (:data:`PROVIDER_UNKNOWN`) and be
+      enabled (:data:`PROVIDER_INACTIVE`) — a disabled row is never selectable.
+    - ``model`` given → it must be listed on the chosen row
+      (:data:`PROVIDER_MODEL_UNKNOWN`).
+    - neither given → the assistant's pin (or the global active row) plus its
+      default model — identical to a request that never asked for an override.
+
+    Returns ``{"row", "model", "catalog_id"}``.  Reads the DB only; **no socket
+    is opened here**, so callers can validate an override in ``rule`` mode.
+
+    Raises:
+        ProviderError: with one of the stable codes above (or the adapter's
+            ``NO_ACTIVE_PROVIDER`` / ``MODEL_NOT_CONFIGURED``).
+    """
+    from . import adapter as adapter_mod
+
+    mgr = manager or _get_manager()
+
+    if not provider and not model:
+        if assistant:
+            resolved = resolve_assistant_ai(assistant, mgr)
+            return {
+                "row": resolved["row"],
+                "model": resolved["model"],
+                "catalog_id": resolved["catalog_id"],
+            }
+        row = adapter_mod.pick_provider(mgr)
+        return {
+            "row": row,
+            "model": adapter_mod.resolve_model(row),
+            "catalog_id": str(row.get("catalog_id") or ""),
+        }
+
+    if provider:
+        row = get_provider_row(str(provider), mgr)
+        if row is None:
+            raise ProviderError(PROVIDER_UNKNOWN, f"provider {provider!r} is not a catalog row")
+        if not int(row.get("enabled") or 0):
+            raise ProviderError(PROVIDER_INACTIVE, f"provider {provider!r} is disabled")
+    elif assistant:
+        row = resolve_assistant_ai(assistant, mgr)["row"]
+    else:
+        row = adapter_mod.pick_provider(mgr)
+
+    catalog_id = str(row.get("catalog_id") or "")
+    if model:
+        wanted = str(model).strip()
+        if wanted not in adapter_mod._models(row):
+            raise ProviderError(
+                PROVIDER_MODEL_UNKNOWN,
+                f"{wanted!r} is not in the model list of provider {catalog_id!r}",
+            )
+        model_id = wanted
+    else:
+        model_id = adapter_mod.resolve_model(row)
+    return {"row": row, "model": model_id, "catalog_id": catalog_id}
