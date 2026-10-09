@@ -26,6 +26,8 @@ ChatFn = Callable[[list[dict[str, Any]], list[dict[str, Any]] | None], dict[str,
 def make_chat_fn(
     *,
     assistant: str = "public",
+    provider: str | None = None,
+    model: str | None = None,
     native: bool | None = None,
     timeout_s: float | None = None,
 ) -> tuple[ChatFn, dict[str, Any]]:
@@ -33,6 +35,13 @@ def make_chat_fn(
 
     Args:
         assistant: ``'public'`` | ``'admin'`` — pin lookup key.
+        provider: Optional per-request provider override (Phase B §9).  A DB
+            read only — validated against the row (unknown/disabled provider →
+            ``PROVIDER_UNKNOWN``/``PROVIDER_INACTIVE``), never a socket.
+        model: Optional per-request model override; must be listed on the
+            chosen row (``PROVIDER_MODEL_UNKNOWN`` otherwise).  Blank/None
+            falls back to the row's selected model, then its first catalog
+            model.
         native: Force the native-``tools`` decision; ``None`` derives it from
             the resolved adapter (``openai``/``openrouter`` only — the brain
             path never receives a ``tools`` key).
@@ -44,11 +53,15 @@ def make_chat_fn(
 
     Raises:
         ProviderError: ``NO_ACTIVE_PROVIDER`` / ``MODEL_NOT_CONFIGURED`` /
-            ``ASSISTANT_*`` — callers degrade to retrieval-only.
+            ``ASSISTANT_*`` / ``PROVIDER_*`` — callers degrade to
+            retrieval-only or map to 4xx before a run starts.
     """
-    resolved = settings.resolve_assistant_ai(assistant)
+    if provider or model:
+        resolved = settings.resolve_selection(provider, model, assistant=assistant)
+    else:
+        resolved = settings.resolve_assistant_ai(assistant)
     row: dict[str, Any] = resolved["row"]
-    model: str = resolved["model"]
+    model_id: str = resolved["model"]
     adapter_name = str(row.get("adapter") or "openai")
     use_native = (
         adapter_mod.supports_native_tools(adapter_name) if native is None else bool(native)
@@ -58,7 +71,7 @@ def make_chat_fn(
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        result = adapter_mod.chat(row, model, messages, tools=tools, timeout_s=timeout_s)
+        result = adapter_mod.chat(row, model_id, messages, tools=tools, timeout_s=timeout_s)
         return {
             "text": result.get("text") or "",
             "tool_calls": result.get("tool_calls") or [],
@@ -67,7 +80,7 @@ def make_chat_fn(
 
     meta = {
         "catalog_id": str(row.get("catalog_id") or ""),
-        "model": model,
+        "model": model_id,
         "adapter": adapter_name,
         "native": use_native,
         "chat": chat,

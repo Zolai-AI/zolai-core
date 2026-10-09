@@ -93,6 +93,9 @@ PUBLIC_ROUTES: tuple[tuple[str | None, str], ...] = (
     ("GET", "/api/v1/foundation/stats"),
     ("GET", "/api/v1/knowledge/version"),
     ("GET", "/api/v1/knowledge/statistics"),
+    # Public provider catalog (Phase B) — enabled rows, zero secrets, so a
+    # client can see what it may target before it asks for a chat/run.
+    ("GET", "/api/v1/providers"),
 )
 
 #: Prefix entries: ``(method, prefix)`` — ``/api/v1/word`` covers every

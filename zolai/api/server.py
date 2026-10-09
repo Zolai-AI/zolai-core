@@ -30,6 +30,7 @@ from ..api.jsonl_router import router as jsonl_router
 from ..api.lexicon_router import router as lexicon_router
 from ..api.linguistics_router import router as linguistics_router
 from ..api.metrics_router import router as metrics_router
+from ..api.providers_router import router as providers_router
 from ..api.rag_router import router as rag_router
 from ..api.rbac import auth_router as auth_info_router
 from ..api.record_review_router import router as record_review_router
@@ -404,6 +405,8 @@ def create_app() -> FastAPI:
     # Admin user accounts (list/create/role/password/revoke-sessions) — strict
     # ``user:manage`` scope + admin role, same rule: BEFORE the catch-all.
     app.include_router(admin_users_router)
+    # Public provider catalog (enabled rows, zero secrets) — rbac.PUBLIC_ROUTES.
+    app.include_router(providers_router)
     # UI Routes for review queue
     app.include_router(ui_router)
     # Metrics REST API — MUST stay registered before the catch-all

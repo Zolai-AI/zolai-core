@@ -80,6 +80,20 @@ class ActivateOut(BaseModel):
     active_count: int = 1
 
 
+class RefreshModelsOut(BaseModel):
+    """``POST .../{catalog_id}/refresh-models`` — refreshed model list.
+
+    ``source`` is honest about where the list came from: ``remote`` = the
+    provider's ``/models`` endpoint answered (and the row was updated);
+    ``catalog`` = the fetch was skipped or failed and the catalog-declared
+    list was returned unchanged (never a 500).
+    """
+
+    catalog_id: str
+    models: list[str] = Field(default_factory=list)
+    source: Literal["remote", "catalog"] = "catalog"
+
+
 class ErrorBody(BaseModel):
     """Stable machine-readable error envelope (``detail.error``)."""
 

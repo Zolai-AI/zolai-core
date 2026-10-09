@@ -245,7 +245,26 @@ class TestPickProvider:
         row = adapter.pick_provider(provider_db)
         assert row["catalog_id"] == "openrouter"
 
+    def test_seed_activates_brain_when_no_row_active(self, provider_db) -> None:
+        # Phase B §8: a fresh seed activates pcore-brain so a new install has a
+        # default; an admin's explicit choice elsewhere is never clobbered.
+        rows = settings.list_provider_rows(provider_db)
+        active = [r["catalog_id"] for r in rows if r["is_active"]]
+        assert active == [catalog.BRAIN_CATALOG_ID]
+        assert adapter.pick_provider(provider_db)["catalog_id"] == catalog.BRAIN_CATALOG_ID
+
+    def test_seed_does_not_clobber_admin_active_choice(self, provider_db) -> None:
+        settings.activate_provider("openrouter", provider_db)
+        catalog.seed_catalog(provider_db)
+        rows = settings.list_provider_rows(provider_db)
+        assert [r["catalog_id"] for r in rows if r["is_active"]] == ["openrouter"]
+
     def test_falls_back_to_first_enabled_row(self, provider_db) -> None:
+        # No active row (admin cleared them all) → first *enabled* row.
+        from sqlalchemy import text
+
+        with provider_db.engine.begin() as conn:
+            conn.execute(text("UPDATE ai_providers SET is_active = 0"))
         rows = settings.list_provider_rows(provider_db)
         assert all(not r["is_active"] for r in rows)
         assert adapter.pick_provider(provider_db)["catalog_id"] == rows[0]["catalog_id"]

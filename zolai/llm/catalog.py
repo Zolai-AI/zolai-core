@@ -281,6 +281,28 @@ def seed_catalog(manager: Any = None) -> dict[str, Any]:
                     },
                 )
                 created.append(entry.id)
+
+            # Phase B: a store where no row is active has no default at all —
+            # activate the first-class brain row so a fresh install works.
+            # Only when NOTHING is active: an admin's explicit choice is never
+            # clobbered (one active row at a time, same rule as activate()).
+            active = conn.execute(
+                text("SELECT catalog_id FROM ai_providers WHERE is_active = 1")
+            ).fetchone()
+            if active is None:
+                brain = conn.execute(
+                    text("SELECT catalog_id FROM ai_providers WHERE catalog_id = :cid"),
+                    {"cid": BRAIN_CATALOG_ID},
+                ).fetchone()
+                if brain is not None:
+                    conn.execute(
+                        text(
+                            "UPDATE ai_providers SET is_active = 1, updated_at = :now "
+                            "WHERE catalog_id = :cid"
+                        ),
+                        {"cid": BRAIN_CATALOG_ID, "now": _utc_now()},
+                    )
+                    logger.info("ai_provider_seed: activated default %s", BRAIN_CATALOG_ID)
     except Exception as exc:  # pragma: no cover - defensive
         errors.append(f"seed_catalog: {exc}")
         logger.exception("ai provider catalog seed failed")
