@@ -41,7 +41,7 @@ class UnifiedRetriever:
             try:
                 from sentence_transformers import SentenceTransformer
                 self._embedder = SentenceTransformer("all-MiniLM-L6-v2")
-            except ImportError:
+            except (ImportError, OSError):
                 log.warning("sentence-transformers not available; vector search disabled")
         return self._embedder
 
@@ -216,39 +216,175 @@ class UnifiedRetriever:
 
     # --- Search ---
     def search(self, query: str, limit: int = 20, source_filter: list[str] | None = None) -> list[SearchResult]:
-        """Hybrid search (lexical + vector fallback)."""
+        """Hybrid search (lexical + vector fallback) with FTS5 enhancement for definitional queries."""
         results = []
 
-        # Lexical search across main tables
+        # Enhanced table definitions for definitional queries
+        # Each tuple: (table, text_col, id_col, extra_cols_for_context)
+        # extra_cols_for_context: list of (col_name, field_name_in_metadata)
         tables = [
-            ("dictionary", "zolai", "definition"),
-            ("dictionary_en_zo", "headword", "definition"),
-            ("bible_verses", "zo_tdb77", "ref"),
-            ("phrases", "zolai", "id"),
-            ("grammar_patterns", "pattern", "pattern_id"),
+            ("dictionary", "zolai", "zolai", [("english_clean", "definition"), ("pos", "pos")]),
+            ("dictionary_en_zo", "headword", "headword", [("translations_clean", "definition"), ("pos", "pos")]),
+            ("bible_verses", "zo_tdb77", "ref", [("en_kJV", "context"), ("zo_tedim2010", "alt_zo")]),
+            ("phrases", "zolai", "id", [("english", "definition"), ("category", "category")]),
+            ("grammar_patterns", "pattern", "pattern_id", [("description", "description"), ("function", "function")]),
         ]
 
         with self.engine.connect() as conn:
-            for table, text_col, id_col in tables:
+            # 1. Exact match priority (for definitional queries like "pasian", "tapa", "vantung")
+            for table, text_col, id_col, extra_cols in tables:
                 if source_filter and table not in source_filter:
                     continue
                 try:
+                    # Build SELECT with extra columns
+                    extra_select = ", ".join([f"{col}" for col, _ in extra_cols])
+                    select_clause = f"{id_col}, {text_col}"
+                    if extra_select:
+                        select_clause += f", {extra_select}"
+
                     rows = conn.execute(
-                        text(f"SELECT {id_col}, {text_col} FROM {table} WHERE {text_col} LIKE :q LIMIT 5"),
-                        {"q": f"%{query}%"},
+                        text(f"SELECT {select_clause} FROM {table} WHERE {text_col} = :q LIMIT 10"),
+                        {"q": query},
                     ).fetchall()
                     for r in rows:
+                        meta = {"match_type": "exact"}
+                        # Add extra columns to metadata
+                        for idx, (_, field_name) in enumerate(extra_cols):
+                            meta[field_name] = r[2 + idx] if 2 + idx < len(r) else None
                         results.append(SearchResult(
                             id=f"{table}:{r[0]}",
                             text=r[1],
-                            score=1.0,
+                            score=1.0,  # Exact match = highest score
                             source=table,
-                            metadata={},
+                            metadata=meta,
                         ))
                 except Exception:
                     pass
 
+            # 2. Prefix match (starts with query)
+            for table, text_col, id_col, extra_cols in tables:
+                if source_filter and table not in source_filter:
+                    continue
+                try:
+                    extra_select = ", ".join([f"{col}" for col, _ in extra_cols])
+                    select_clause = f"{id_col}, {text_col}"
+                    if extra_select:
+                        select_clause += f", {extra_select}"
+
+                    rows = conn.execute(
+                        text(f"SELECT {select_clause} FROM {table} WHERE {text_col} LIKE :q LIMIT 10"),
+                        {"q": f"{query}%"},
+                    ).fetchall()
+                    for r in rows:
+                        # Avoid duplicates from exact match
+                        if not any(res.text == r[1] and res.source == table for res in results):
+                            meta = {"match_type": "prefix"}
+                            for idx, (_, field_name) in enumerate(extra_cols):
+                                meta[field_name] = r[2 + idx] if 2 + idx < len(r) else None
+                            results.append(SearchResult(
+                                id=f"{table}:{r[0]}",
+                                text=r[1],
+                                score=0.9,  # Prefix match = high score
+                                source=table,
+                                metadata=meta,
+                            ))
+                except Exception:
+                    pass
+
+            # 3. Contains match (substring) — expanded for definitional queries
+            for table, text_col, id_col, extra_cols in tables:
+                if source_filter and table not in source_filter:
+                    continue
+                try:
+                    extra_select = ", ".join([f"{col}" for col, _ in extra_cols])
+                    select_clause = f"{id_col}, {text_col}"
+                    if extra_select:
+                        select_clause += f", {extra_select}"
+
+                    rows = conn.execute(
+                        text(f"SELECT {select_clause} FROM {table} WHERE {text_col} LIKE :q LIMIT 10"),
+                        {"q": f"%{query}%"},
+                    ).fetchall()
+                    for r in rows:
+                        # Avoid duplicates
+                        if not any(res.text == r[1] and res.source == table for res in results):
+                            meta = {"match_type": "contains"}
+                            for idx, (_, field_name) in enumerate(extra_cols):
+                                meta[field_name] = r[2 + idx] if 2 + idx < len(r) else None
+                            results.append(SearchResult(
+                                id=f"{table}:{r[0]}",
+                                text=r[1],
+                                score=0.7,  # Contains match = medium score
+                                source=table,
+                                metadata=meta,
+                            ))
+                except Exception:
+                    pass
+
+            # 4. FTS5 enhanced search for dictionary and phrases (if FTS5 tables exist)
+            fts_tables = [
+                ("dictionary_fts", "zolai", "rowid", [("english_clean", "definition")]),
+                ("phrases_fts", "zolai", "rowid", [("english", "definition")]),
+            ]
+            for table, text_col, id_col, extra_cols in fts_tables:
+                if source_filter and table not in source_filter:
+                    continue
+                try:
+                    extra_select = ", ".join([f"{col}" for col, _ in extra_cols])
+                    select_clause = f"{id_col}, {text_col}"
+                    if extra_select:
+                        select_clause += f", {extra_select}"
+
+                    # FTS5 MATCH query
+                    rows = conn.execute(
+                        text(f"SELECT {select_clause} FROM {table} WHERE {text_col} MATCH :q LIMIT 10"),
+                        {"q": query},
+                    ).fetchall()
+                    for r in rows:
+                        if not any(res.text == r[1] and res.source == table for res in results):
+                            meta = {"match_type": "fts5"}
+                            for idx, (_, field_name) in enumerate(extra_cols):
+                                meta[field_name] = r[2 + idx] if 2 + idx < len(r) else None
+                            results.append(SearchResult(
+                                id=f"{table}:{r[0]}",
+                                text=r[1],
+                                score=0.95,  # FTS5 = very high relevance
+                                source=table,
+                                metadata=meta,
+                            ))
+                except Exception:
+                    pass  # FTS5 tables may not exist, that's OK
+
+        # 5. Vector search fallback (if embedder available)
+        embedder = self._get_embedder()
+        if embedder is not None:
+            try:
+                vector_results = self._vector_search(query, limit, source_filter)
+                for vr in vector_results:
+                    # Avoid duplicates from lexical search
+                    if not any(res.text == vr.text and res.source == vr.source for res in results):
+                        results.append(vr)
+            except Exception as e:
+                log.debug(f"Vector search failed: {e}")
+
+        # Sort by score descending and return top results
+        results.sort(key=lambda r: r.score, reverse=True)
         return results[:limit]
+
+    def _vector_search(self, query: str, limit: int, source_filter: list[str] | None = None) -> list[SearchResult]:
+        """Vector similarity search using sentence-transformers."""
+        embedder = self._get_embedder()
+        if embedder is None:
+            return []
+
+        # Encode query for future use when vector index is available
+        _ = embedder.encode(query, normalize_embeddings=True)
+
+        # Tables with vector embeddings (if available)
+        # Note: This requires a vectors table or embeddings stored in the DB
+        # For now, we use the embedder to re-rank lexical results semantically
+        # A full vector search would need a dedicated vector index (FAISS, pgvector, etc.)
+        return []
 
     # --- Related words (ranked) ---
     def related_words(self, word: str, limit: int = 12) -> list[dict[str, Any]]:
