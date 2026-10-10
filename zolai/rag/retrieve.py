@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,6 +17,83 @@ from sqlalchemy.engine import Engine
 from zolai.rag.evidence import EvidencePack, build_word_evidence_items, evidence_to_pack
 
 log = logging.getLogger(__name__)
+
+
+#: Query tokens that carry no lexical signal (frozen — retrieval must stay stable).
+STOPWORDS = frozenset({
+    "a", "an", "and", "are", "at", "by", "can", "do", "does", "for", "how", "i",
+    "in", "is", "it", "me", "mean", "meaning", "my", "of", "on", "or", "please",
+    "that", "the", "this", "to", "translate", "translation", "what", "when",
+    "where", "which", "who", "why", "word", "you",
+})
+
+#: Upper bound on tokens fed to the per-table token-OR pass (bounds SQL size).
+MAX_SEARCH_TOKENS = 6
+
+#: Per-table LIMIT for every lexical pass (one LIMIT per table, not per token).
+SEARCH_PASS_LIMIT = 10
+
+#: (table, id_col, primary_col, matchable_cols, context_cols)
+#:
+#: ``primary_col`` drives prefix/contains scoring; ``matchable_cols`` (primary
+#: first) drive exact matching and the token-OR pass, so English/parallel
+#: columns such as ``dictionary.english_clean`` or ``bible_verses.en_kJV``
+#: answer English queries. ``context_cols`` are (column, metadata_field) pairs
+#: copied into result metadata.
+SEARCH_TABLES: list[tuple[str, str, str, list[str], list[tuple[str, str]]]] = [
+    (
+        "dictionary",
+        "zolai",
+        "zolai",
+        ["zolai", "english_clean", "english"],
+        [("english_clean", "definition"), ("pos", "pos")],
+    ),
+    (
+        "dictionary_en_zo",
+        "headword",
+        "headword",
+        ["headword", "translations_clean"],
+        [("translations_clean", "definition"), ("pos", "pos")],
+    ),
+    (
+        "bible_verses",
+        "ref",
+        "zo_tdb77",
+        ["zo_tdb77", "zo_tedim2010", "en_kJV"],
+        [("en_kJV", "context"), ("zo_tedim2010", "alt_zo")],
+    ),
+    (
+        "phrases",
+        "id",
+        "zolai",
+        ["zolai", "english"],
+        [("english", "definition"), ("frequency", "frequency")],
+    ),
+    (
+        "grammar_patterns",
+        "pattern_id",
+        "pattern",
+        ["pattern", "description"],
+        [("description", "description"), ("function", "function")],
+    ),
+]
+
+
+def tokenize_query(query: str) -> list[str]:
+    """Lowercase alphanumeric tokens, stopwords dropped, order preserved.
+
+    Empty result means "no usable token" — callers fall back to whole-string
+    matching instead of issuing an empty SQL token list.
+    """
+    tokens = re.findall(r"[a-z0-9]+", (query or "").lower())
+    out: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        if token in STOPWORDS or token in seen:
+            continue
+        seen.add(token)
+        out.append(token)
+    return out[:MAX_SEARCH_TOKENS]
 
 
 @dataclass
@@ -216,112 +294,118 @@ class UnifiedRetriever:
 
     # --- Search ---
     def search(self, query: str, limit: int = 20, source_filter: list[str] | None = None) -> list[SearchResult]:
-        """Hybrid search (lexical + vector fallback) with FTS5 enhancement for definitional queries."""
-        results = []
+        """Hybrid search (lexical passes + vector fallback).
 
-        # Enhanced table definitions for definitional queries
-        # Each tuple: (table, text_col, id_col, extra_cols_for_context)
-        # extra_cols_for_context: list of (col_name, field_name_in_metadata)
-        tables = [
-            ("dictionary", "zolai", "zolai", [("english_clean", "definition"), ("pos", "pos")]),
-            ("dictionary_en_zo", "headword", "headword", [("translations_clean", "definition"), ("pos", "pos")]),
-            ("bible_verses", "zo_tdb77", "ref", [("en_kJV", "context"), ("zo_tedim2010", "alt_zo")]),
-            ("phrases", "zolai", "id", [("english", "definition"), ("category", "category")]),
-            ("grammar_patterns", "pattern", "pattern_id", [("description", "description"), ("function", "function")]),
-        ]
+        Lexical passes run best-score-first and every result is deduped by
+        ``(source, id)``, so the first hit for a row wins:
+
+        1. ``exact`` (1.0) — primary column equals the query
+        2. ``english_exact`` (1.0) — an English/parallel column equals the query
+        3. ``prefix`` (0.9) — primary column starts with the query
+        4. ``contains`` (0.7) — primary column contains the whole query
+        5. ``token_or`` (0.6) — any token (stopwords dropped, max
+           :data:`MAX_SEARCH_TOKENS`) matches any matchable column via LIKE
+
+        A query with no usable tokens skips the token-OR pass and keeps the
+        whole-string behaviour above.
+        """
+        results: list[SearchResult] = []
+        seen: set[tuple[str, str]] = set()
+        tokens = tokenize_query(query)
 
         with self.engine.connect() as conn:
-            # 1. Exact match priority (for definitional queries like "pasian", "tapa", "vantung")
-            for table, text_col, id_col, extra_cols in tables:
+            for table, id_col, primary_col, matchable_cols, context_cols in SEARCH_TABLES:
                 if source_filter and table not in source_filter:
                     continue
-                try:
-                    # Build SELECT with extra columns
-                    extra_select = ", ".join([f"{col}" for col, _ in extra_cols])
-                    select_clause = f"{id_col}, {text_col}"
-                    if extra_select:
-                        select_clause += f", {extra_select}"
+                select_clause = self._select_clause(id_col, primary_col, context_cols)
 
-                    rows = conn.execute(
-                        text(f"SELECT {select_clause} FROM {table} WHERE {text_col} = :q LIMIT 10"),
+                # 1. Exact match on the primary (identity) column.
+                self._extend(
+                    results,
+                    seen,
+                    table,
+                    context_cols,
+                    self._execute_like(
+                        conn,
+                        f"SELECT {select_clause} FROM {table} WHERE {primary_col} = :q LIMIT {SEARCH_PASS_LIMIT}",
                         {"q": query},
-                    ).fetchall()
-                    for r in rows:
-                        meta = {"match_type": "exact"}
-                        # Add extra columns to metadata
-                        for idx, (_, field_name) in enumerate(extra_cols):
-                            meta[field_name] = r[2 + idx] if 2 + idx < len(r) else None
-                        results.append(SearchResult(
-                            id=f"{table}:{r[0]}",
-                            text=r[1],
-                            score=1.0,  # Exact match = highest score
-                            source=table,
-                            metadata=meta,
-                        ))
-                except Exception:
-                    pass
+                    ),
+                    match_type="exact",
+                    score=1.0,
+                )
 
-            # 2. Prefix match (starts with query)
-            for table, text_col, id_col, extra_cols in tables:
-                if source_filter and table not in source_filter:
-                    continue
-                try:
-                    extra_select = ", ".join([f"{col}" for col, _ in extra_cols])
-                    select_clause = f"{id_col}, {text_col}"
-                    if extra_select:
-                        select_clause += f", {extra_select}"
+                # 2. Exact match on English / parallel columns.
+                secondary_cols = [c for c in matchable_cols if c != primary_col]
+                if secondary_cols:
+                    predicate = " OR ".join(f"{col} = :q" for col in secondary_cols)
+                    self._extend(
+                        results,
+                        seen,
+                    table,
+                        context_cols,
+                        self._execute_like(
+                            conn,
+                            f"SELECT {select_clause} FROM {table} WHERE ({predicate}) LIMIT {SEARCH_PASS_LIMIT}",
+                            {"q": query},
+                        ),
+                        match_type="english_exact",
+                        score=1.0,
+                    )
 
-                    rows = conn.execute(
-                        text(f"SELECT {select_clause} FROM {table} WHERE {text_col} LIKE :q LIMIT 10"),
+                # 3. Prefix match on the primary column.
+                self._extend(
+                    results,
+                    seen,
+                    table,
+                    context_cols,
+                    self._execute_like(
+                        conn,
+                        f"SELECT {select_clause} FROM {table} WHERE {primary_col} LIKE :q LIMIT {SEARCH_PASS_LIMIT}",
                         {"q": f"{query}%"},
-                    ).fetchall()
-                    for r in rows:
-                        # Avoid duplicates from exact match
-                        if not any(res.text == r[1] and res.source == table for res in results):
-                            meta = {"match_type": "prefix"}
-                            for idx, (_, field_name) in enumerate(extra_cols):
-                                meta[field_name] = r[2 + idx] if 2 + idx < len(r) else None
-                            results.append(SearchResult(
-                                id=f"{table}:{r[0]}",
-                                text=r[1],
-                                score=0.9,  # Prefix match = high score
-                                source=table,
-                                metadata=meta,
-                            ))
-                except Exception:
-                    pass
+                    ),
+                    match_type="prefix",
+                    score=0.9,
+                )
 
-            # 3. Contains match (substring) — expanded for definitional queries
-            for table, text_col, id_col, extra_cols in tables:
-                if source_filter and table not in source_filter:
-                    continue
-                try:
-                    extra_select = ", ".join([f"{col}" for col, _ in extra_cols])
-                    select_clause = f"{id_col}, {text_col}"
-                    if extra_select:
-                        select_clause += f", {extra_select}"
-
-                    rows = conn.execute(
-                        text(f"SELECT {select_clause} FROM {table} WHERE {text_col} LIKE :q LIMIT 10"),
+                # 4. Whole-string contains on the primary column.
+                self._extend(
+                    results,
+                    seen,
+                    table,
+                    context_cols,
+                    self._execute_like(
+                        conn,
+                        f"SELECT {select_clause} FROM {table} WHERE {primary_col} LIKE :q LIMIT {SEARCH_PASS_LIMIT}",
                         {"q": f"%{query}%"},
-                    ).fetchall()
-                    for r in rows:
-                        # Avoid duplicates
-                        if not any(res.text == r[1] and res.source == table for res in results):
-                            meta = {"match_type": "contains"}
-                            for idx, (_, field_name) in enumerate(extra_cols):
-                                meta[field_name] = r[2 + idx] if 2 + idx < len(r) else None
-                            results.append(SearchResult(
-                                id=f"{table}:{r[0]}",
-                                text=r[1],
-                                score=0.7,  # Contains match = medium score
-                                source=table,
-                                metadata=meta,
-                            ))
-                except Exception:
-                    pass
+                    ),
+                    match_type="contains",
+                    score=0.7,
+                )
 
-            # 4. FTS5 enhanced search for dictionary and phrases (if FTS5 tables exist)
+                # 5. Token-OR across every matchable column (skipped when the
+                #    query tokenizes to nothing — never an empty token list).
+                if tokens:
+                    params = {f"t{i}": f"%{token}%" for i, token in enumerate(tokens)}
+                    predicate = " OR ".join(
+                        f"{col} LIKE :t{i}"
+                        for i in range(len(tokens))
+                        for col in matchable_cols
+                    )
+                    self._extend(
+                        results,
+                        seen,
+                    table,
+                        context_cols,
+                        self._execute_like(
+                            conn,
+                            f"SELECT {select_clause} FROM {table} WHERE ({predicate}) LIMIT {SEARCH_PASS_LIMIT}",
+                            params,
+                        ),
+                        match_type="token_or",
+                        score=0.6,
+                    )
+
+            # 6. FTS5 enhanced search for dictionary and phrases (if FTS5 tables exist)
             fts_tables = [
                 ("dictionary_fts", "zolai", "rowid", [("english_clean", "definition")]),
                 ("phrases_fts", "zolai", "rowid", [("english", "definition")]),
@@ -336,10 +420,11 @@ class UnifiedRetriever:
                         select_clause += f", {extra_select}"
 
                     # FTS5 MATCH query
-                    rows = conn.execute(
-                        text(f"SELECT {select_clause} FROM {table} WHERE {text_col} MATCH :q LIMIT 10"),
-                        {"q": query},
-                    ).fetchall()
+                    fts_sql = (
+                        f"SELECT {select_clause} FROM {table} "
+                        f"WHERE {text_col} MATCH :q LIMIT {SEARCH_PASS_LIMIT}"
+                    )
+                    rows = conn.execute(text(fts_sql), {"q": query}).fetchall()
                     for r in rows:
                         if not any(res.text == r[1] and res.source == table for res in results):
                             meta = {"match_type": "fts5"}
@@ -355,7 +440,7 @@ class UnifiedRetriever:
                 except Exception:
                     pass  # FTS5 tables may not exist, that's OK
 
-        # 5. Vector search fallback (if embedder available)
+        # 7. Vector search fallback (if embedder available)
         embedder = self._get_embedder()
         if embedder is not None:
             try:
@@ -370,6 +455,47 @@ class UnifiedRetriever:
         # Sort by score descending and return top results
         results.sort(key=lambda r: r.score, reverse=True)
         return results[:limit]
+
+    @staticmethod
+    def _select_clause(id_col: str, primary_col: str, context_cols: list[tuple[str, str]]) -> str:
+        """Build the SELECT column list shared by every lexical pass."""
+        cols = [id_col, primary_col] + [col for col, _ in context_cols]
+        return ", ".join(cols)
+
+    @staticmethod
+    def _execute_like(conn: Any, sql: str, params: dict[str, Any]) -> list[Any]:
+        """Run one lexical pass, tolerating tables missing from a given schema."""
+        try:
+            return conn.execute(text(sql), params).fetchall()
+        except Exception:
+            return []
+
+    @staticmethod
+    def _extend(
+        results: list[SearchResult],
+        seen: set[tuple[str, str]],
+        table: str,
+        context_cols: list[tuple[str, str]],
+        rows: list[Any],
+        match_type: str,
+        score: float,
+    ) -> None:
+        """Append rows as results, deduping by (source, id) — first hit wins."""
+        for row in rows:
+            key = (table, str(row[0]))
+            if key in seen:
+                continue
+            seen.add(key)
+            meta: dict[str, Any] = {"match_type": match_type}
+            for idx, (_, field_name) in enumerate(context_cols):
+                meta[field_name] = row[2 + idx] if 2 + idx < len(row) else None
+            results.append(SearchResult(
+                id=f"{table}:{row[0]}",
+                text=row[1] or "",
+                score=score,
+                source=table,
+                metadata=meta,
+            ))
 
     def _vector_search(self, query: str, limit: int, source_filter: list[str] | None = None) -> list[SearchResult]:
         """Vector similarity search using sentence-transformers."""
