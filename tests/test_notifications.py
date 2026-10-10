@@ -179,5 +179,115 @@ class TestNotificationServiceDisabled:
         reset_notification_service()
 
 
+SMTP_ENV_KEYS = [
+    "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM", "SMTP_TLS",
+    "SMTP_SSL", "MAIL_SMTP_HOST", "MAIL_SMTP_PORT", "MAIL_SMTP_USER",
+    "MAIL_SMTP_PASS", "MAIL_SMTP_SECURE", "MAIL_SMTP_SSL", "MAIL_SMTP_TLS",
+    "MAIL_FROM", "ADMIN_EMAILS",
+]
+
+
+@pytest.fixture
+def clean_smtp_env(monkeypatch):
+    """Drop every SMTP/MAIL variable so resolution is fully controlled."""
+    for key in SMTP_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
+
+class TestEmailConfigResolution:
+    """SMTP_* wins over MAIL_SMTP_* aliases; transport follows port/SSL flags."""
+
+    def test_primary_env_names_win_over_aliases(self, clean_smtp_env, monkeypatch):
+        monkeypatch.setenv("SMTP_HOST", "smtp.primary.example")
+        monkeypatch.setenv("MAIL_SMTP_HOST", "smtp.alias.example")
+        monkeypatch.setenv("SMTP_PORT", "587")
+        monkeypatch.setenv("MAIL_SMTP_PORT", "465")
+        monkeypatch.setenv("SMTP_USER", "primary@example.com")
+        monkeypatch.setenv("MAIL_SMTP_USER", "alias@example.com")
+        monkeypatch.setenv("SMTP_PASS", "primary-pass")
+        monkeypatch.setenv("MAIL_SMTP_PASS", "alias-pass")
+        monkeypatch.setenv("SMTP_FROM", "primary@example.com")
+        monkeypatch.setenv("MAIL_FROM", "alias@example.com")
+
+        config = EmailConfig()
+        assert config.host == "smtp.primary.example"
+        assert config.port == 587
+        assert config.user == "primary@example.com"
+        assert config.password == "primary-pass"
+        assert config.from_email == "primary@example.com"
+
+    def test_mail_smtp_aliases_are_accepted(self, clean_smtp_env, monkeypatch):
+        monkeypatch.setenv("MAIL_SMTP_HOST", "smtp.gmail.com")
+        monkeypatch.setenv("MAIL_SMTP_PORT", "587")
+        monkeypatch.setenv("MAIL_SMTP_USER", "alerts@example.com")
+        monkeypatch.setenv("MAIL_SMTP_PASS", "alias-app-password")
+        monkeypatch.setenv("MAIL_FROM", "Zolai <alerts@example.com>")
+
+        config = EmailConfig()
+        assert config.host == "smtp.gmail.com"
+        assert config.port == 587
+        assert config.user == "alerts@example.com"
+        assert config.password == "alias-app-password"
+        assert config.from_email == "Zolai <alerts@example.com>"
+
+    def test_port_587_defaults_to_starttls(self, clean_smtp_env, monkeypatch):
+        monkeypatch.setenv("MAIL_SMTP_PORT", "587")
+        config = EmailConfig()
+        assert config.use_tls is True
+        assert config.use_ssl is False
+
+    def test_port_465_defaults_to_implicit_ssl(self, clean_smtp_env, monkeypatch):
+        monkeypatch.setenv("MAIL_SMTP_PORT", "465")
+        config = EmailConfig()
+        assert config.use_ssl is True
+        assert config.use_tls is False
+
+    def test_smtp_ssl_forces_ssl_regardless_of_port(self, clean_smtp_env, monkeypatch):
+        monkeypatch.setenv("SMTP_PORT", "587")
+        monkeypatch.setenv("SMTP_SSL", "true")
+        config = EmailConfig()
+        assert config.use_ssl is True
+        assert config.use_tls is False
+
+    def test_mail_smtp_secure_false_keeps_starttls(self, clean_smtp_env, monkeypatch):
+        """Deployment env shape: MAIL_SMTP_SECURE=false + port 587 -> STARTTLS."""
+        monkeypatch.setenv("MAIL_SMTP_PORT", "587")
+        monkeypatch.setenv("MAIL_SMTP_SECURE", "false")
+        config = EmailConfig()
+        assert config.use_ssl is False
+        assert config.use_tls is True
+
+    def test_explicit_constructor_values_beat_env(self, clean_smtp_env, monkeypatch):
+        monkeypatch.setenv("SMTP_HOST", "smtp.env.example")
+        config = EmailConfig(host="smtp.explicit.example", port=2525, use_tls=False, use_ssl=False)
+        assert config.host == "smtp.explicit.example"
+        assert config.port == 2525
+        assert config.use_tls is False
+        assert config.use_ssl is False
+
+
+class TestEmailConfigDescribe:
+    def test_describe_masks_password_and_reports_flags(self, clean_smtp_env, monkeypatch):
+        monkeypatch.setenv("MAIL_SMTP_HOST", "smtp.gmail.com")
+        monkeypatch.setenv("MAIL_SMTP_PORT", "587")
+        monkeypatch.setenv("MAIL_SMTP_USER", "alerts@example.com")
+        monkeypatch.setenv("MAIL_SMTP_PASS", "super-secret-app-password")
+
+        described = EmailConfig().describe()
+        assert described["host"] == "smtp.gmail.com"
+        assert described["port"] == 587
+        assert described["tls"] is True
+        assert described["ssl"] is False
+        assert described["user_set"] is True
+        assert described["password_set"] is True
+        assert "password" not in described or described.get("password") is None
+        assert "super-secret-app-password" not in repr(described)
+
+    def test_describe_reports_unset_credentials(self, clean_smtp_env):
+        described = EmailConfig().describe()
+        assert described["user_set"] is False
+        assert described["password_set"] is False
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
