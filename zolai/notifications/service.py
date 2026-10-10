@@ -20,22 +20,101 @@ from zolai.resilience import get_circuit_breaker
 logger = logging.getLogger(__name__)
 
 
+def _env_first(*names: str, default: str = "") -> str:
+    """First non-empty value among ``names``.
+
+    Primary names win over aliases: ``SMTP_*`` is checked before the
+    ``MAIL_SMTP_*`` / ``MAIL_FROM`` aliases used by deployment env files.
+    """
+    for name in names:
+        value = os.environ.get(name)
+        if value is not None and value.strip() != "":
+            return value.strip()
+    return default
+
+
+def _env_bool(*names: str, default: bool = False) -> bool:
+    """First truthy value among ``names``, else ``default``."""
+    raw = _env_first(*names)
+    if raw == "":
+        return default
+    return raw.lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass
 class EmailConfig:
-    """SMTP email configuration."""
+    """SMTP email configuration.
 
-    host: str = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-    port: int = int(os.environ.get("SMTP_PORT", "587"))
-    user: str = os.environ.get("SMTP_USER", "")
-    password: str = os.environ.get("SMTP_PASS", "")
-    from_email: str = os.environ.get("SMTP_FROM", "pcore.system@gmail.com")
-    use_tls: bool = os.environ.get("SMTP_TLS", "true").lower() == "true"
-    admin_emails: list[str] = None  # type: ignore
+    Env resolution order — ``SMTP_*`` first, then the ``MAIL_SMTP_*`` aliases
+    that deployment env files use:
+
+    ==================  ==========================================
+    Field               Env names (in precedence order)
+    ==================  ==========================================
+    host                SMTP_HOST, MAIL_SMTP_HOST
+    port                SMTP_PORT, MAIL_SMTP_PORT
+    user                SMTP_USER, MAIL_SMTP_USER
+    password            SMTP_PASS, MAIL_SMTP_PASS
+    from_email          SMTP_FROM, MAIL_FROM
+    use_ssl             SMTP_SSL, MAIL_SMTP_SSL, MAIL_SMTP_SECURE
+    use_tls             SMTP_TLS, MAIL_SMTP_TLS
+    ==================  ==========================================
+
+    Transport defaults are port-driven: **587 → STARTTLS**
+    (``use_tls=True``), **465 → implicit SSL** (``use_ssl=True``,
+    ``use_tls=False``). An explicit ``SMTP_SSL`` / ``MAIL_SMTP_SSL`` /
+    ``MAIL_SMTP_SECURE=true`` forces implicit SSL regardless of port, and an
+    explicit ``SMTP_TLS`` / ``MAIL_SMTP_TLS`` wins over the port default.
+    Explicit constructor values always beat the environment.
+    """
+
+    host: str = ""
+    port: int = 0
+    user: str = ""
+    password: str = ""
+    from_email: str = ""
+    use_tls: bool | None = None
+    use_ssl: bool | None = None
+    admin_emails: list[str] | None = None
 
     def __post_init__(self):
+        self.host = self.host or _env_first("SMTP_HOST", "MAIL_SMTP_HOST", default="smtp.gmail.com")
+        self.port = self.port or int(_env_first("SMTP_PORT", "MAIL_SMTP_PORT", default="587"))
+        self.user = self.user or _env_first("SMTP_USER", "MAIL_SMTP_USER")
+        self.password = self.password or _env_first("SMTP_PASS", "MAIL_SMTP_PASS")
+        self.from_email = self.from_email or _env_first(
+            "SMTP_FROM", "MAIL_FROM", default="pcore.system@gmail.com"
+        )
+
+        # Implicit SSL (SMTPS, typically port 465) beats STARTTLS.
+        if self.use_ssl is None:
+            self.use_ssl = _env_bool(
+                "SMTP_SSL", "MAIL_SMTP_SSL", "MAIL_SMTP_SECURE", default=self.port == 465
+            )
+        if self.use_tls is None:
+            if _env_first("SMTP_TLS", "MAIL_SMTP_TLS") != "":
+                # Explicit flag, but never upgrade a connection that already
+                # negotiated implicit TLS.
+                self.use_tls = _env_bool("SMTP_TLS", "MAIL_SMTP_TLS", default=True) and not self.use_ssl
+            else:
+                self.use_tls = not self.use_ssl
+
         if self.admin_emails is None:
-            admin_raw = os.environ.get("ADMIN_EMAILS", "")
+            admin_raw = _env_first("ADMIN_EMAILS")
             self.admin_emails = [e.strip() for e in admin_raw.split(",") if e.strip()]
+
+    def describe(self) -> dict[str, Any]:
+        """Masked, log-safe view of this config — never includes the password."""
+        return {
+            "host": self.host,
+            "port": self.port,
+            "tls": bool(self.use_tls),
+            "ssl": bool(self.use_ssl),
+            "user_set": bool(self.user),
+            "password_set": bool(self.password),
+            "from_email": self.from_email,
+            "admin_email_count": len(self.admin_emails or []),
+        }
 
 
 @dataclass
@@ -186,13 +265,16 @@ class NotificationService:
             msg.attach(MIMEText(body_html, "html", "utf-8"))
 
         try:
+            # aiosmtplib: use_tls = implicit TLS session (SMTPS/465),
+            # start_tls = opportunistic STARTTLS upgrade (587).
             await aiosmtplib.send(
                 msg,
                 hostname=self.config.host,
                 port=self.config.port,
                 username=self.config.user,
                 password=self.config.password,
-                use_tls=self.config.use_tls,
+                use_tls=bool(self.config.use_ssl),
+                start_tls=bool(self.config.use_tls) and not self.config.use_ssl,
                 timeout=30,
             )
             logger.info("Email sent successfully to %s", to)
