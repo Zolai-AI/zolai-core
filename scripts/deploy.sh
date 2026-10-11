@@ -68,6 +68,20 @@ log "Pre-flight checks..."
 [[ -f "$COMPOSE_FILE" ]] || { err "Missing $COMPOSE_FILE"; exit 1; }
 command -v docker >/dev/null || { err "Docker not installed"; exit 1; }
 docker compose -f "$COMPOSE_FILE" version >/dev/null || { err "Docker Compose v2 required"; exit 1; }
+
+# CRITICAL: Verify we're running from the authoritative checkout
+# The server has two zolai-core checkouts; only /home/ubuntu/zolai-core is authoritative
+AUTHORITATIVE_DIR="/home/ubuntu/zolai-core"
+CURRENT_DIR=$(pwd -P)
+if [[ "$CURRENT_DIR" != "$AUTHORITATIVE_DIR" ]]; then
+    err "DEPLOY BLOCKED: This script must run from $AUTHORITATIVE_DIR"
+    err "Current directory: $CURRENT_DIR"
+    err "The running container was built from $AUTHORITATIVE_DIR"
+    err "Running from anywhere else will silently roll back fixes (see OPEN-ISSUES.md S1)"
+    exit 1
+fi
+ok "Directory check passed: $CURRENT_DIR"
+
 ok "Pre-flight passed"
 
 # Source env for verification

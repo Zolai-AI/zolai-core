@@ -41,6 +41,43 @@ def _env_bool(*names: str, default: bool = False) -> bool:
     return raw.lower() in {"1", "true", "yes", "on"}
 
 
+def classify_smtp_failure(exc: BaseException) -> str:
+    """Turn an SMTP exception into something an operator can act on.
+
+    The distinction that matters most in practice: a credentials problem and an
+    *egress* problem look identical on the wire. Gmail accepts the TCP
+    connection, completes TLS and EHLO, then drops the connection at AUTH — and
+    does so for a valid user, a wrong password and a non-existent account
+    alike. That trio means the sending host is being refused at the IP level, so
+    rotating credentials or switching to an App Password will not help.
+    """
+    name = type(exc).__name__
+    text = str(exc).lower()
+
+    if "serverdisconnected" in name.lower() or "unexpected eof" in text:
+        return (
+            "the server closed the connection during AUTH. Credentials are usually "
+            "NOT the cause: verify by trying the same login from a different host. "
+            "If it fails everywhere, the sending IP is blocked - use a transactional "
+            "relay (SES/SendGrid/Resend) instead of a consumer mailbox."
+        )
+    if "535" in text or "authentication" in text or "credentials" in text:
+        return (
+            "authentication was rejected. With Gmail this means the account password "
+            "is being used instead of a 16-character App Password (2FA must be on)."
+        )
+    if "certificate" in text or "ssl" in name.lower():
+        return "TLS negotiation failed. Check the port: 587 expects STARTTLS, 465 implicit TLS."
+    if "name or service not known" in text or "getaddrinfo" in text:
+        return "the SMTP host could not be resolved."
+    if "connection refused" in text or "error connecting" in text or name.endswith("ConnectError"):
+        return (
+            "could not establish the SMTP connection. Check the host, the port "
+            "(587 STARTTLS / 465 implicit TLS) and the egress firewall."
+        )
+    return f"unclassified SMTP error ({name})."
+
+
 @dataclass
 class EmailConfig:
     """SMTP email configuration.
@@ -280,7 +317,17 @@ class NotificationService:
             logger.info("Email sent successfully to %s", to)
             return True, None
         except Exception as exc:
-            logger.exception("Failed to send email to %s", to)
+            # A bare `logger.exception` printed a 12-line traceback per attempt and
+            # said nothing actionable, so a *permanent* failure looked like
+            # transient noise. This deployment failed every send for days with
+            # only "SMTPServerDisconnected" to go on. Classify it instead.
+            logger.warning(
+                "Email to %s failed (%s): %s",
+                to,
+                type(exc).__name__,
+                classify_smtp_failure(exc),
+            )
+            logger.debug("SMTP failure detail", exc_info=True)
             return False, str(exc)
 
     async def send_notification(
