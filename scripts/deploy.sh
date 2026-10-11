@@ -136,17 +136,25 @@ else:
 
     # Test provider connection
     log "Testing provider connection..."
-    ADMIN_TOKEN=$(docker exec zolai-core-api-1 python3 -c "
-from zolai.data.database import get_manager
-from zolai.api.auth import create_session_token
-mgr = get_manager()
-with mgr.engine.connect() as conn:
-    from sqlalchemy import text
-    row = conn.execute(text(\"SELECT id FROM users WHERE username='peterlianpi'\")).fetchone()
-    if row:
-        token = create_session_token(row[0], 'admin', ['user:manage'])
-        print(token)
-")
+    # Sign in through the real endpoint rather than minting a token in-process:
+    # `create_session_token` no longer exists, so this step raised ImportError on
+    # every deploy and took the whole script down *after* the app was already
+    # verified and serving. A credential from the environment is used so no
+    # password is committed.
+    ADMIN_USER=${ADMIN_USER:-${ZOLAI_ADMIN_USER:-}}
+    ADMIN_PASS=${ADMIN_PASS:-${ZOLAI_ADMIN_PASS:-}}
+    if [[ -z "$ADMIN_USER" || -z "$ADMIN_PASS" ]]; then
+        warn "ADMIN_USER/ADMIN_PASS not set - skipping the provider connection test"
+        warn "(set them, or export ZOLAI_ADMIN_USER / ZOLAI_ADMIN_PASS)"
+    else
+    ADMIN_TOKEN=$(curl -sf -X POST -H 'Content-Type: application/json' \
+        -d "$(python3 -c "import json,sys; print(json.dumps({'username': sys.argv[1], 'password': sys.argv[2]}))" "$ADMIN_USER" "$ADMIN_PASS")" \
+        http://127.0.0.1:8001/api/v1/auth/login | \
+        python3 -c "import sys, json; print(json.load(sys.stdin).get('token', ''))")
+    if [[ -z "$ADMIN_TOKEN" ]]; then
+        err "Could not obtain an admin token - provider connection test failed"
+        exit 1
+    fi
     curl -sf -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
         http://127.0.0.1:8001/api/v1/admin/ai-providers/pcore-brain/test | \
         python3 -c "
@@ -158,6 +166,7 @@ print('Model:', data.get('model'))
 print('Latency:', data.get('latency_ms'), 'ms')
 "
     ok "Provider connection verified"
+    fi
 fi
 
 # Summary
