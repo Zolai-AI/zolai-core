@@ -67,6 +67,9 @@ AI_KEY_ENV_VARS: tuple[str, ...] = (
     "GEMINI_API_KEY",
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
+    "AI_BRAIN_API_KEY",
+    "PCORE_BRIDGE_API_KEY",
+    "AI_API_KEY",
 )
 
 

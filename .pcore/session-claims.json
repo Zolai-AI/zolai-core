@@ -1,0 +1,14 @@
+{
+  "oc-zolai-gates-1791655403": {
+    "id": "oc-zolai-gates-1791655403",
+    "tool": "opencode",
+    "agent": "main",
+    "model": "",
+    "repo": "zolai-core",
+    "branch": "main",
+    "scope": "zolai/notifications/,zolai/rag/,docs/operations/,context/",
+    "task": "close founder gates 2,3,4,5 (SMTP, consumer keys, RAG coverage, health doc)",
+    "started_at": "2026-10-10T18:03:24Z",
+    "heartbeat_at": "2026-10-10T18:03:24Z"
+  }
+}

@@ -35,13 +35,72 @@ DEFAULT_RUN_SCOPE = "admin"
 
 RESEARCH_TOOLS: tuple[str, ...] = ("rag_search", "kb_research")
 
-SYSTEM_PROMPT = (
-    "You are the Zolai agent — a careful assistant for the Tedim Zolai (ZVS 2018) "
-    "language. Answer from the evidence tools when live data is needed; keep ZVS 2018 "
-    "orthography (pasian/gam/tapa/topa), SOV word order and the ergative 'in'. "
-    "Never invent tool results."
+# ── Phase-specific system prompts ─────────────────────────────────────────────
+
+RESEARCH_PHASE_PROMPT = (
+    "You are the Zolai Research Agent. Your task: gather comprehensive evidence "
+    "for the given goal using the available tools.\n\n"
+    "Tools:\n"
+    "- rag_search: Hybrid search across dictionary, Bible, phrases, grammar patterns\n"
+    "- kb_research: Search stored hypotheses/claims for prior knowledge\n"
+    "- word_evidence: Multi-source attestation for a Zolai word\n"
+    "- word_related: Related words (family + same-POS neighbours)\n"
+    "- dictionary_lookup: Exact/prefix lookup in Zolai↔English dictionary\n"
+    "- verse_lookup: Fetch parallel Bible verse by reference (e.g. 'GEN 1:1')\n"
+    "- analyze_text: Word-by-word analysis (interlinear glossing)\n"
+    "- grammar_check: Validate against ZVS 2018 orthography and SOV/grammar rules\n\n"
+    "Rules:\n"
+    "1. Use ONE tool per turn. Max 3 turns total.\n"
+    "2. Start with rag_search for broad coverage, then narrow with specific tools.\n"
+    "3. Never invent results. Report exactly what tools return.\n"
+    "4. Keep ZVS 2018: pasian/gam/tapa/topa, SOV, ergative 'in'.\n"
+    "5. Output tool calls ONLY. No prose until the build phase."
 )
 
+BUILD_PHASE_PROMPT = (
+    "You are the Zolai Build Agent. Your task: synthesize a comprehensive answer "
+    "from the gathered evidence.\n\n"
+    "Input: The research phase has provided evidence items with sources.\n"
+    "Output: A clear, well-structured answer that:\n"
+    "1. Directly addresses the goal\n"
+    "2. Cites evidence using [source ref] format after each claim\n"
+    "3. Uses ZVS 2018 orthography: pasian/gam/tapa/topa/kumpipa/tua\n"
+    "4. Uses SOV word order, ergative 'in' for transitive subjects\n"
+    "5. Distinguishes Stem I/II verbs when relevant\n"
+    "6. Acknowledges gaps where evidence is missing\n"
+    "7. Maximum 6 lines. Be concise but complete.\n\n"
+    "If evidence is insufficient, say so and provide what you can."
+)
+
+REVIEW_PHASE_PROMPT = (
+    "You are the Zolai Review Agent. Your task: validate the answer against "
+    "ZVS 2018 standards.\n\n"
+    "Check for:\n"
+    "1. Forbidden forms: pathian→pasian, ram→gam, fapa→tapa, bawipa→topa, "
+    "siangpahrang→kumpipa, cu/cun→tua, suah→suahtakna, zalenna→suahtakna, "
+    "nunnak→nuntakna\n"
+    "2. SOV word order compliance\n"
+    "3. Ergative 'in' for transitive subjects\n"
+    "4. Stem I/II verb distinction\n"
+    "5. Proper negation: 'kei' not 'lo'\n"
+    "6. Citation format: [source ref] after claims\n\n"
+    "If violations found, apply corrections and re-validate. One revision pass only."
+)
+
+SYSTEM_PROMPT = (
+    "You are the Zolai Agent Orchestrator — a careful research agent for the "
+    "Tedim Zolai (ZVS 2018) language. Your workflow:\n"
+    "1. RESEARCH: Use rag_search + kb_research + word_evidence + dictionary_lookup "
+    "to gather evidence.\n"
+    "2. BUILD: Synthesize answer from evidence. Cite everything with [source ref].\n"
+    "3. REVIEW: Validate against ZVS 2018 (orthography, SOV, ergative 'in').\n"
+    "4. SHIP: Deliver final answer with full citations.\n\n"
+    "Available tools: rag_search, kb_research, word_evidence, word_related, "
+    "analyze_text, grammar_check, dictionary_lookup, verse_lookup, knowledge_stats, "
+    "review_queue_submit, provider_status, web_search.\n"
+    "Rules: One tool per turn. Max 3 turns. Never invent results. If evidence "
+    "missing, say so. Keep ZVS 2018: pasian/gam/tapa/topa, SOV, ergative 'in'."
+)
 
 def zvs_review(answer: str) -> tuple[str, dict[str, Any]]:
     """Validate + one revise pass (forbidden → preferred), then re-validate.
@@ -75,11 +134,35 @@ def zvs_review(answer: str) -> tuple[str, dict[str, Any]]:
 
 
 def _research(goal: str, allow: frozenset[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Run the retrieval fan-out directly (deterministic, DB-only)."""
+    """Run the retrieval fan-out directly (deterministic, DB-only).
+
+    Detects Bible/Scripture/verse references in the goal and adds source_filter
+    to rag_search for better precision.
+    """
+    import re
     calls: list[ToolCall] = []
     results: list[dict[str, Any]] = []
+
+    # Detect Bible-related queries
+    bible_keywords = (
+        "bible", "scripture", "verse", "verses", "biblical",
+        "old testament", "new testament", "genesis", "exodus",
+        "matthew", "mark", "luke", "john", "psalm", "psalms",
+        "proverbs", "isaiah", "jeremiah", "ezekiel", "daniel",
+        "romans", "corinthians", "galatians", "ephesians",
+        "philippians", "colossians", "thessalonians", "timothy",
+        "titus", "philemon", "hebrews", "james", "peter", "john",
+        "jude", "revelation"
+    )
+    goal_lower = goal.lower()
+    needs_bible_filter = any(kw in goal_lower for kw in bible_keywords)
+
+    rag_input = {"query": goal, "limit": 5}
+    if needs_bible_filter:
+        rag_input["source_filter"] = ["bible_verses"]
+
     if "rag_search" in allow:
-        calls.append(ToolCall(name="rag_search", input={"query": goal, "limit": 5}, turn=1))
+        calls.append(ToolCall(name="rag_search", input=rag_input, turn=1))
     if "kb_research" in allow:
         calls.append(ToolCall(name="kb_research", input={"query": goal, "limit": 5}, turn=1))
     for call in calls:
@@ -144,6 +227,16 @@ def run_agent_goal(
     try:
         # ── research ────────────────────────────────────────────────────
         t0 = time.monotonic()
+        
+        # Run research with phase-specific prompt
+        research_result = run_agent_loop(
+            system_prompt=RESEARCH_PHASE_PROMPT,
+            user_message=f"Research goal: {goal}",
+            allow=frozenset(allow),
+            chat=lambda m, t=None: {"text": "", "tool_calls": []},  # We use _research directly
+            max_turns=3,
+            native=False,
+        )
         trace, evidence_rows = _research(goal, frozenset(allow))
         flat_evidence: list[dict[str, Any]] = []
         for res in evidence_rows:
@@ -166,8 +259,14 @@ def run_agent_goal(
                 chat, meta = make_chat_fn(
                     assistant=assistant, provider=provider, model=model, user_api_key=user_api_key
                 )
+                # Use build-phase prompt with evidence context
+                evidence_context = "\n".join(
+                    f"[{i}] {e.get('source', 'kb')} {e.get('ref', '')}: {str(e.get('text', e))[:200]}"
+                    for i, e in enumerate(flat_evidence[:8], 1)
+                ) if flat_evidence else "No evidence found."
+                build_prompt = BUILD_PHASE_PROMPT + f"\n\nEvidence:\n{evidence_context}"
                 loop_result = run_agent_loop(
-                    system_prompt=SYSTEM_PROMPT,
+                    system_prompt=build_prompt,
                     user_message=f"Goal: {goal}",
                     allow=frozenset(allow),
                     chat=chat,

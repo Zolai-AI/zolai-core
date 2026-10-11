@@ -181,3 +181,54 @@ class TestAdminAssistant:
         ).fetchone()
         conn.close()
         assert row == ("succeeded", "chat", "admin-chat")
+
+
+class TestAssistantFeedback:
+    def test_feedback_endpoint_is_public(self) -> None:
+        assert ("POST", "/api/v1/assistant/feedback") in rbac.PUBLIC_ROUTES
+
+    def test_feedback_records_successfully(self, client, data_db) -> None:
+        resp = client.post(
+            "/api/v1/assistant/feedback",
+            json={
+                "message": "What is pasian?",
+                "response": "Pesian is God.",
+                "mode": "public",
+                "retrieval_only": True,
+                "provider": "",
+                "model": "",
+                "score": 1,
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+        # Verify data persisted
+        conn = sqlite3.connect(data_db)
+        row = conn.execute(
+            "SELECT message, response, score FROM assistant_chat_feedback"
+        ).fetchone()
+        conn.close()
+        assert row == ("What is pasian?", "Pesian is God.", 1)
+
+    def test_negative_feedback_records(self, client, data_db) -> None:
+        resp = client.post(
+            "/api/v1/assistant/feedback",
+            json={
+                "message": "What is gam?",
+                "response": "Gam is place.",
+                "mode": "public",
+                "retrieval_only": True,
+                "provider": "",
+                "model": "",
+                "score": -1,
+            },
+        )
+        assert resp.status_code == 200
+
+        conn = sqlite3.connect(data_db)
+        row = conn.execute(
+            "SELECT score FROM assistant_chat_feedback ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+        assert row == (-1,)

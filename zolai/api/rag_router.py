@@ -121,6 +121,10 @@ class SearchResponse(BaseModel):
 class RAGRequest(BaseModel):
     question: str
     limit: int = 5
+    #: Optional per-request provider / model override, resolved exactly as the
+    #: assistant resolves them (one shared path, validated against the row).
+    provider: str | None = None
+    model: str | None = None
 
 
 class RAGResponse(BaseModel):
@@ -129,6 +133,15 @@ class RAGResponse(BaseModel):
     citations: list[dict[str, Any]]
     answer: str
     retrieved_count: int
+    #: True when a model wrote ``answer``; False when it is retrieved evidence.
+    generated: bool = False
+    #: True when no model was called. Mirrors the assistant's contract so a
+    #: caller can never mistake the two, and never has to parse prose to tell.
+    retrieval_only: bool = True
+    #: Which provider/model actually wrote the answer ("" when none resolved).
+    provider: str = ""
+    model: str = ""
+    provider_error: str = ""
 
 
 class KnowledgeVersionResponse(BaseModel):
@@ -340,8 +353,17 @@ async def rag_query(
     request: RAGRequest,
     retriever: UnifiedRetriever = Depends(get_retriever),
 ) -> RAGResponse:
-    """Full RAG: question → retrieval → answer with citations."""
-    result = retriever.rag_query(request.question, request.limit)
+    """Full RAG: question → retrieval → a model-written answer with citations.
+
+    Falls back to the retrieved evidence (and says so via ``retrieval_only``)
+    when no provider resolves or the call fails.
+    """
+    result = retriever.rag_query(
+        request.question,
+        request.limit,
+        provider=request.provider,
+        model=request.model,
+    )
     return RAGResponse(**result)
 
 

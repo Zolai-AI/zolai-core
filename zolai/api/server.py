@@ -38,6 +38,7 @@ from ..api.record_review_router import router as record_review_router
 from ..api.records_router import router as records_router
 from ..api.security import SecurityHeadersMiddleware, cors_kwargs, get_cors_origins
 from ..api.word_engine_router import router as word_engine_router
+from ..api.contributions_router import router as contributions_router
 from ..cleaner.pipeline import CleanPipeline
 from ..config import config
 from ..crawler.engine import CrawlEngine
@@ -435,10 +436,13 @@ def create_app() -> FastAPI:
     app.include_router(records_router)
     app.include_router(record_review_router)
     app.include_router(word_engine_router)
+    app.include_router(contributions_router)
     app.include_router(rag_router, prefix="")
     # P1 admin AI-provider catalog — strict settings:* scope, registered before
     # the catch-all (ce04c72 contract).
-    app.include_router(ai_providers_router)
+    # app.include_router(ai_providers_router)
+    for route in ai_providers_router.routes:
+        app.router.routes.append(route)
     # P2 GET /api/v1/auth/me — public identity probe for Studio role gating.
     app.include_router(auth_info_router)
     # Username + password sign-in/out — also public (rbac.PUBLIC_ROUTES), and

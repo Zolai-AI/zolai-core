@@ -1,6 +1,6 @@
 # Zolai Project — TODO & Roadmap
 
-> Last updated: 2026-09-04
+> Last updated: 2026-10-12
 
 > **Note:** All training data is hosted on HuggingFace. The `data/` directory is gitignored and not tracked in this repo.
 
@@ -73,6 +73,19 @@
 - [ ] Run `zolai audit-jsonl` on latest training snapshots
 - [ ] Deduplicate `data/corpus/sentences_master_v1.jsonl`
 - [ ] Review synthetic data quality (`data/corpus/synthetic/`)
+
+---
+
+## 🐛 Bug Fixes — 2026-10-12 (Production Deploy)
+
+- [x] **SECRET_ENCRYPTION_UNAVAILABLE** — Added `cryptography>=42.0.0` to dependencies and `ZOLAI_PROVIDER_SECRET_KEY` env var for Fernet encryption of pasted API keys
+- [x] **CORS blocking studio.zolai.space** — Fixed `ZOLAI_CORS_ORIGINS=*` (invalid with credentials) → unset to use trusted defaults including `studio.zolai.space`
+- [x] **Missing Notification models** — Added `NotificationRecord`, `NotificationPreferenceRecord`, `NotificationTemplateRecord` to `zolai.data.models`
+- [x] **Unterminated string in assistant_router.py** — Fixed `PUBLIC_ASSISTANT_PROMPT` triple-quoted string literal
+- [x] **Router registration issue** — Fixed ai_providers_router paths (removed prefix, used full paths + manual registration in server.py)
+- [x] **pcore-brain provider working** — Verified `/admin/ai-providers/pcore-brain/test` returns 200 OK, assistant chat with provider works
+- [x] **Secret encryption end-to-end** — `PUT /admin/ai-providers/openai {"secret": "sk-..."}` → `mode: encrypted, configured: true`
+- [x] **Env var reference** — `PUT /admin/ai-providers/anthropic {"secret_env": "ANTHROPIC_API_KEY"}` → `mode: env, configured: true`
 
 ---
 

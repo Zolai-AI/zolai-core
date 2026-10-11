@@ -59,7 +59,15 @@ def _require_str(inp: dict[str, Any], key: str) -> str:
 
 def _rag_search(inp: dict[str, Any]) -> Any:
     query = _require_str(inp, "query")
-    results = _retriever().search(query, limit=_opt_int(inp, "limit", 10))
+    limit = _opt_int(inp, "limit", 10)
+    source_filter = inp.get("source_filter")
+    if source_filter is not None:
+        # Validate source_filter values
+        allowed = {"dictionary", "dictionary_en_zo", "bible_verses", "phrases", "grammar_patterns"}
+        source_filter = [s for s in source_filter if s in allowed]
+        if not source_filter:
+            source_filter = None
+    results = _retriever().search(query, limit=limit, source_filter=source_filter)
     return [
         {
             "source": r.source,

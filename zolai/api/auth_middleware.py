@@ -109,12 +109,18 @@ def extract_key(headers: Any) -> str | None:
     happens to ride along in ``Authorization`` must never take precedence over a
     real key.  With only one of the two headers the result is identical to a
     first-match scan, so the existing key path is unchanged.
+
+    **Important**: Session tokens (``zolai_ss_*``) are **rejected** when presented
+    as ``X-API-Key`` — they are only valid as ``Authorization: Bearer``.
     """
     if not headers:
         return None
     for name, value in headers:
         if name == b"x-api-key":
             token = value.decode("latin-1").strip()
+            if token and token.startswith("zolai_ss_"):
+                # Session tokens are NOT valid as X-API-Key; they must use Authorization: Bearer
+                return None
             if token:
                 return token
     for name, value in headers:

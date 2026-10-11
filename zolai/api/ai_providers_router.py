@@ -37,7 +37,7 @@ from .ai_provider_schemas import (
     RefreshModelsOut,
 )
 
-router = APIRouter(prefix="/api/v1/admin/ai-providers", tags=["admin-ai"])
+router = APIRouter(tags=["admin-ai"])
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +158,7 @@ def _catalog_models(row: dict[str, Any]) -> list[str]:
     return _parse_models(row.get("models"))
 
 
-@router.get("", response_model=ProviderListOut, dependencies=[READ_DEP])
+@router.get("/api/v1/admin/ai-providers", response_model=ProviderListOut, dependencies=[READ_DEP])
 def list_ai_providers() -> ProviderListOut:
     """Catalog rows + masked secret + active flag (never a plaintext key)."""
     rows = settings.list_provider_rows()
@@ -166,7 +166,7 @@ def list_ai_providers() -> ProviderListOut:
     return ProviderListOut(items=items, count=len(items))
 
 
-@router.put("/{catalog_id}", response_model=ProviderOut, dependencies=[WRITE_DEP])
+@router.put("/api/v1/admin/ai-providers/{catalog_id}", response_model=ProviderOut, dependencies=[WRITE_DEP])
 def update_ai_provider(catalog_id: str, body: ProviderUpdateIn) -> ProviderOut:
     """Upsert display/behaviour fields; optional write-only secret.
 
@@ -204,7 +204,7 @@ def update_ai_provider(catalog_id: str, body: ProviderUpdateIn) -> ProviderOut:
     return _to_out(row)
 
 
-@router.post("/{catalog_id}/activate", response_model=ActivateOut, dependencies=[WRITE_DEP])
+@router.post("/api/v1/admin/ai-providers/{catalog_id}/activate", response_model=ActivateOut, dependencies=[WRITE_DEP])
 def activate_ai_provider(catalog_id: str) -> ActivateOut:
     """Set the single global active row (every other row is cleared)."""
     try:
@@ -234,7 +234,7 @@ def activate_ai_provider(catalog_id: str) -> ActivateOut:
     return ActivateOut(catalog_id=catalog_id, is_active=True, active_count=active)
 
 
-@router.post("/{catalog_id}/test", response_model=ProviderTestOut, dependencies=[WRITE_DEP])
+@router.post("/api/v1/admin/ai-providers/{catalog_id}/test", response_model=ProviderTestOut, dependencies=[WRITE_DEP])
 def test_ai_provider(catalog_id: str) -> ProviderTestOut:
     """1-token chat probe → ``{ok, status, latency_ms, error}`` (button)."""
     try:
@@ -272,7 +272,7 @@ def test_ai_provider(catalog_id: str) -> ProviderTestOut:
     )
 
 
-@router.post("/{catalog_id}/refresh-models", response_model=RefreshModelsOut, dependencies=[WRITE_DEP])
+@router.post("/api/v1/admin/ai-providers/{catalog_id}/refresh-models", response_model=RefreshModelsOut, dependencies=[WRITE_DEP])
 def refresh_models(catalog_id: str) -> RefreshModelsOut:
     """Refresh the row's ``models`` list from the provider (button).
 
@@ -310,7 +310,7 @@ def refresh_models(catalog_id: str) -> RefreshModelsOut:
     return RefreshModelsOut(catalog_id=catalog_id, models=models, source=source)  # type: ignore[arg-type]
 
 
-@router.delete("/{catalog_id}", dependencies=[WRITE_DEP])
+@router.delete("/api/v1/admin/ai-providers/{catalog_id}", dependencies=[WRITE_DEP])
 def delete_ai_provider(catalog_id: str) -> dict[str, Any]:
     """Delete a ``custom`` row only; catalog rows answer 409 (disable instead)."""
     try:
