@@ -353,4 +353,5 @@ class TestHealthEndpoint:
         data = resp.json()
         assert data["status"] == "ok"
         assert "version" in data
-        assert "data_root" in data
+        # core#16: the public health shape must not leak the data path.
+        assert "data_root" not in data

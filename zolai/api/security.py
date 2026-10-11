@@ -6,12 +6,14 @@ API key rotation, input sanitization, CORS, request validation.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
+from starlette.datastructures import MutableHeaders
 from starlette.middleware.base import BaseHTTPMiddleware
 
 log = logging.getLogger(__name__)
@@ -174,12 +176,89 @@ class SanitizedInput(BaseModel):
 
 def create_cors_middleware(origins: list[str] | None = None) -> CORSMiddleware:
     """Create restrictive CORS middleware."""
-    allowed_origins = origins or ["https://zolai.space", "https://api.zolai.space"]
-    return CORSMiddleware(
-        allow_origins=allowed_origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-ID"],
-        expose_headers=["X-Request-ID", "X-RateLimit-Limit", "X-RateLimit-Remaining"],
-        max_age=86400,
-    )
+    return CORSMiddleware(**cors_kwargs(origins))
+
+
+#: Trusted browser origins.  ``ZOLAI_CORS_ORIGINS`` (comma-separated) overrides.
+#: ``allow_credentials=True`` REQUIRES an explicit allowlist — a wildcard would
+#: make Starlette reflect any ``Origin`` (including ``null``) with credentials.
+DEFAULT_CORS_ORIGINS: list[str] = [
+    "https://studio.zolai.space",
+    "https://zolai.space",
+    "https://api.zolai.space",
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+
+#: Explicit method/header allow-lists (no ``*``) so credentials stay safe.
+CORS_METHODS: list[str] = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+CORS_HEADERS: list[str] = ["Authorization", "Content-Type", "X-API-Key", "X-Request-ID"]
+CORS_EXPOSE_HEADERS: list[str] = [
+    "X-Request-ID",
+    "X-RateLimit-Limit",
+    "X-RateLimit-Remaining",
+]
+CORS_MAX_AGE = 86400
+
+
+def get_cors_origins() -> list[str]:
+    """Resolve the CORS allowlist, honouring ``ZOLAI_CORS_ORIGINS``.
+
+    The env var is a comma-separated list; blank entries are dropped.  When it
+    is unset/empty the trusted :data:`DEFAULT_CORS_ORIGINS` are used.
+    """
+    raw = os.environ.get("ZOLAI_CORS_ORIGINS", "")
+    if raw.strip():
+        origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+        if origins:
+            return origins
+    return list(DEFAULT_CORS_ORIGINS)
+
+
+def cors_kwargs(origins: list[str] | None = None) -> dict:
+    """Build ``CORSMiddleware`` kwargs with an explicit origin allowlist."""
+    return {
+        "allow_origins": list(origins or DEFAULT_CORS_ORIGINS),
+        "allow_credentials": True,
+        "allow_methods": list(CORS_METHODS),
+        "allow_headers": list(CORS_HEADERS),
+        "expose_headers": list(CORS_EXPOSE_HEADERS),
+        "max_age": CORS_MAX_AGE,
+    }
+
+
+#: Hardening response headers applied to every API response.
+SECURITY_HEADERS: dict[str, str] = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "X-XSS-Protection": "1; mode=block",
+    "Content-Security-Policy": "default-src 'self'",
+}
+
+
+class SecurityHeadersMiddleware:
+    """Attach :data:`SECURITY_HEADERS` to every HTTP response — headers only.
+
+    Deliberately does **no** request filtering (unlike
+    :class:`SecurityMiddleware`): a JSON API must accept large ``/rag`` bodies
+    and arbitrary query strings without a false-positive ``400``.  Implemented
+    as raw ASGI so streaming responses are never buffered or rewritten.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message) -> None:
+            if message.get("type") == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                for name, value in SECURITY_HEADERS.items():
+                    headers[name] = value
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)

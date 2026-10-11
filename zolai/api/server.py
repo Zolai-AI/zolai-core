@@ -10,12 +10,13 @@ from pathlib import Path
 from typing import Any, Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..analyzer.corpus import CorpusAnalyzer
+from ..api import auth
 from ..api.admin_api_keys_router import router as admin_api_keys_router
 from ..api.admin_users_router import router as admin_users_router
 from ..api.agent_router import router as agent_router
@@ -35,6 +36,7 @@ from ..api.rag_router import router as rag_router
 from ..api.rbac import auth_router as auth_info_router
 from ..api.record_review_router import router as record_review_router
 from ..api.records_router import router as records_router
+from ..api.security import SecurityHeadersMiddleware, cors_kwargs, get_cors_origins
 from ..api.word_engine_router import router as word_engine_router
 from ..cleaner.pipeline import CleanPipeline
 from ..config import config
@@ -153,10 +155,23 @@ ZOLAI_BILINGUAL_PROMPT = (
 
 
 class HealthResponse(BaseModel):
+    """Public health shape.
+
+    Deliberately carries **no** ``data_root``/filesystem path — the public
+    ``/health`` and ``/api/v1/health`` must not leak server internals
+    (core#16).  The detailed variant lives behind admin auth
+    (:class:`HealthDetailResponse`).
+    """
+
     status: str = "ok"
     version: str = "1.0.0"
-    data_root: str
     uptime_s: float | None = None
+
+
+class HealthDetailResponse(HealthResponse):
+    """Authenticated health shape — includes internals (``data_root``)."""
+
+    data_root: str
 
 
 class CrawlRequest(BaseModel):
@@ -450,13 +465,11 @@ def create_app() -> FastAPI:
             return FileResponse(str(html_path))
         return {"status": "ok", "version": "0.3.0", "api": "running"}
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # CORS: explicit allowlist only (core#1). A wildcard + allow_credentials
+    # makes Starlette reflect any ``Origin`` (incl. ``null``) with credentials;
+    # ``get_cors_origins`` reads ``ZOLAI_CORS_ORIGINS`` (comma-separated) or the
+    # trusted defaults (studio/space/api + localhost dev).
+    app.add_middleware(CORSMiddleware, **cors_kwargs(get_cors_origins()))
     # API-key auth on /api/v1 only (ZOLAI_API_AUTH=warn|enforce|off). Added
     # after CORS and *before* MetricsMiddleware so the metrics wrapper stays
     # outermost and 401/429 responses are counted in zolai_http_requests_total.
@@ -464,6 +477,10 @@ def create_app() -> FastAPI:
     # HTTP metrics: added last so it wraps everything above; labels are route
     # templates only (never raw paths), so cardinality stays bounded.
     app.add_middleware(MetricsMiddleware)
+    # Hardening headers on *every* response (core#17). Added last/outermost so
+    # 401/429 (ApiKeyMiddleware) and CORS preflight responses carry them too;
+    # no request filtering, so large /rag payloads are untouched.
+    app.add_middleware(SecurityHeadersMiddleware)
 
     # --- Exception Handlers ---
     # These capture unhandled exceptions and emit error notifications.
@@ -535,9 +552,9 @@ def create_app() -> FastAPI:
     async def health():
         from ..monitoring.store import PROCESS_STARTED_AT
 
+        # No data_root: public health must not leak the data path (core#16).
         return HealthResponse(
             status="ok",
-            data_root=str(config.paths.data),
             uptime_s=round(time.time() - PROCESS_STARTED_AT, 3),
         )
 
@@ -545,7 +562,26 @@ def create_app() -> FastAPI:
     async def api_v1_health():
         from ..monitoring.store import PROCESS_STARTED_AT
 
+        # No data_root: public health must not leak the data path (core#16).
         return HealthResponse(
+            status="ok",
+            uptime_s=round(time.time() - PROCESS_STARTED_AT, 3),
+        )
+
+    @app.get(
+        "/api/v1/admin/health",
+        response_model=HealthDetailResponse,
+        dependencies=[Depends(auth.require_scope("settings:read", strict=True))],
+    )
+    async def admin_health():
+        """Detailed health — authenticated (strict ``settings:read``).
+
+        The only place ``data_root`` is exposed; anonymous callers get 401 in
+        both ``warn`` and ``enforce`` (only ``ZOLAI_API_AUTH=off`` bypasses).
+        """
+        from ..monitoring.store import PROCESS_STARTED_AT
+
+        return HealthDetailResponse(
             status="ok",
             data_root=str(config.paths.data),
             uptime_s=round(time.time() - PROCESS_STARTED_AT, 3),
