@@ -319,68 +319,87 @@ class UnifiedRetriever:
                     continue
                 select_clause = self._select_clause(id_col, primary_col, context_cols)
 
+                # Every strong pass below used to compare the **whole query
+                # string** against the column, so any multi-token input ("what is
+                # pasian", "pasian is god") failed all of them and every hit fell
+                # through to the weak, unordered token_or pass — which returned
+                # the head of an alphabetical index scan (abba, adonai, allah…)
+                # instead of pasian. Each pass now runs for the whole string first
+                # and then per meaningful token, with token matches scored just
+                # below their whole-string equivalents so ranking is unchanged for
+                # single-word queries.
+                terms = [(query, 1.0)] + [(tok, 0.95) for tok in tokens]
+
                 # 1. Exact match on the primary (identity) column.
-                self._extend(
-                    results,
-                    seen,
-                    table,
-                    context_cols,
-                    self._execute_like(
-                        conn,
-                        f"SELECT {select_clause} FROM {table} WHERE {primary_col} = :q LIMIT {SEARCH_PASS_LIMIT}",
-                        {"q": query},
-                    ),
-                    match_type="exact",
-                    score=1.0,
-                )
+                for term, decay in terms:
+                    self._extend(
+                        results,
+                        seen,
+                        table,
+                        context_cols,
+                        self._execute_like(
+                            conn,
+                            f"SELECT {select_clause} FROM {table} WHERE {primary_col} = :q "
+                            f"ORDER BY {primary_col} LIMIT {SEARCH_PASS_LIMIT}",
+                            {"q": term},
+                        ),
+                        match_type="exact",
+                        score=1.0 * decay,
+                    )
 
                 # 2. Exact match on English / parallel columns.
                 secondary_cols = [c for c in matchable_cols if c != primary_col]
                 if secondary_cols:
-                    predicate = " OR ".join(f"{col} = :q" for col in secondary_cols)
+                    for term, decay in terms:
+                        predicate = " OR ".join(f"{col} = :q" for col in secondary_cols)
+                        self._extend(
+                            results,
+                            seen,
+                            table,
+                            context_cols,
+                            self._execute_like(
+                                conn,
+                                f"SELECT {select_clause} FROM {table} WHERE ({predicate}) "
+                                f"ORDER BY {primary_col} LIMIT {SEARCH_PASS_LIMIT}",
+                                {"q": term},
+                            ),
+                            match_type="english_exact",
+                            score=1.0 * decay,
+                        )
+
+                # 3. Prefix match on the primary column.
+                for term, decay in terms:
                     self._extend(
                         results,
                         seen,
-                    table,
+                        table,
                         context_cols,
                         self._execute_like(
                             conn,
-                            f"SELECT {select_clause} FROM {table} WHERE ({predicate}) LIMIT {SEARCH_PASS_LIMIT}",
-                            {"q": query},
+                            f"SELECT {select_clause} FROM {table} WHERE {primary_col} LIKE :q "
+                            f"ORDER BY {primary_col} LIMIT {SEARCH_PASS_LIMIT}",
+                            {"q": f"{term}%"},
                         ),
-                        match_type="english_exact",
-                        score=1.0,
+                        match_type="prefix",
+                        score=0.9 * decay,
                     )
 
-                # 3. Prefix match on the primary column.
-                self._extend(
-                    results,
-                    seen,
-                    table,
-                    context_cols,
-                    self._execute_like(
-                        conn,
-                        f"SELECT {select_clause} FROM {table} WHERE {primary_col} LIKE :q LIMIT {SEARCH_PASS_LIMIT}",
-                        {"q": f"{query}%"},
-                    ),
-                    match_type="prefix",
-                    score=0.9,
-                )
-
-                # 4. Whole-string contains on the primary column.
-                self._extend(
-                    results,
-                    seen,
-                    table,
-                    context_cols,
-                    self._execute_like(
-                        conn,
-                        f"SELECT {select_clause} FROM {table} WHERE {primary_col} LIKE :q LIMIT {SEARCH_PASS_LIMIT}",
-                        {"q": f"%{query}%"},
-                    ),
-                    match_type="contains",
-                    score=0.7,
-                )
+                # 4. Contains on the primary column.
+                for term, decay in terms:
+                    self._extend(
+                        results,
+                        seen,
+                        table,
+                        context_cols,
+                        self._execute_like(
+                            conn,
+                            f"SELECT {select_clause} FROM {table} WHERE {primary_col} LIKE :q "
+                            f"ORDER BY {primary_col} LIMIT {SEARCH_PASS_LIMIT}",
+                            {"q": f"%{term}%"},
+                        ),
+                        match_type="contains",
+                        score=0.7 * decay,
+                    )
 
                 # 5. Token-OR across every matchable column (skipped when the
                 #    query tokenizes to nothing — never an empty token list).
@@ -398,7 +417,8 @@ class UnifiedRetriever:
                         context_cols,
                         self._execute_like(
                             conn,
-                            f"SELECT {select_clause} FROM {table} WHERE ({predicate}) LIMIT {SEARCH_PASS_LIMIT}",
+                            f"SELECT {select_clause} FROM {table} WHERE ({predicate}) "
+                            f"ORDER BY {primary_col} LIMIT {SEARCH_PASS_LIMIT}",
                             params,
                         ),
                         match_type="token_or",
