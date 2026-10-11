@@ -2231,6 +2231,7 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "observation_tables": create_observation_tables(mgr),
         "ai_provider_tables": create_ai_provider_tables(mgr),
         "agent_runs_table": create_agent_runs_table(mgr),
+        "assistant_chat_feedback_table": create_assistant_chat_feedback_table(mgr),
         "notification_tables": create_notification_tables(mgr),
         "eval_tables": create_eval_tables(mgr),
     }
@@ -2554,3 +2555,52 @@ def create_notification_tables(mgr: DatabaseManager) -> dict[str, Any]:
     except Exception as exc:
         errors.append(f"notification_tables: {exc}")
     return {"created": created, "skipped": skipped, "errors": errors}
+
+# ---------------------------------------------------------------------------
+# P4 — assistant_chat_feedback (additive; feedback on assistant chat responses)
+# ---------------------------------------------------------------------------
+
+ASSISTANT_CHAT_FEEDBACK_DDL = """
+CREATE TABLE IF NOT EXISTS assistant_chat_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    message TEXT NOT NULL,
+    response TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    retrieval_only INTEGER NOT NULL DEFAULT 0,
+    provider TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    score INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    ip_hash TEXT
+)
+"""
+
+ASSISTANT_CHAT_FEEDBACK_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_assistant_chat_feedback_created_at ON assistant_chat_feedback(created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_assistant_chat_feedback_mode ON assistant_chat_feedback(mode)",
+]
+
+
+def create_assistant_chat_feedback_table(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create the P4 ``assistant_chat_feedback`` table (idempotent, additive only)."""
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+    try:
+        with mgr.engine.connect() as conn:
+            if "assistant_chat_feedback" in existing_tables:
+                skipped.append("assistant_chat_feedback (already exists)")
+            else:
+                conn.execute(text(ASSISTANT_CHAT_FEEDBACK_DDL))
+                created.append("assistant_chat_feedback")
+            for idx_sql in ASSISTANT_CHAT_FEEDBACK_INDEXES:
+                conn.execute(text(idx_sql))
+            conn.commit()
+    except Exception as exc:
+        errors.append(f"assistant_chat_feedback: {exc}")
+    return {"created": created, "skipped": skipped, "errors": errors}
+

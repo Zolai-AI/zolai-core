@@ -118,6 +118,7 @@ ADMIN_EXTRA_SCOPES: tuple[str, ...] = (
     "settings:write",
     "user:manage",
     "role:manage",
+    "audit:read",
 )
 ADMIN_SCOPES: tuple[str, ...] = MEMBER_SCOPES + ADMIN_EXTRA_SCOPES
 

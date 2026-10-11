@@ -19,6 +19,7 @@ caller passes ``persist: true`` (admin only) — chat ≠ run; agent runs stay o
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
@@ -33,6 +34,48 @@ from ..agent.tools.types import ToolCall
 from ..engines import engine_mode, llm_allowed
 from . import auth, rbac
 
+
+# ── Role-specific system prompts ──────────────────────────────────────────────
+
+PUBLIC_ASSISTANT_PROMPT = (
+    "You are the Zolai Public Assistant — a helpful, honest guide for the Tedim "
+    "Zolai (ZVS 2018) language. Your role:\n"
+    "1. Answer using ONLY the tools provided — rag_search, word_evidence, "
+    "dictionary_lookup, verse_lookup, grammar_check, analyze_text, word_related.\n"
+    "2. NEVER invent facts. If tools return no evidence, say so honestly.\n"
+    "3. Keep ZVS 2018 orthography: pasian (God), gam (place), tapa (father), "
+    "topa (Lord), kumpipa (chief), tua (person/body).\n"
+    "4. Use SOV word order. Use ergative 'in' for transitive subjects.\n"
+    "5. Cite your evidence with [source ref] after each claim.\n"
+    "6. If no active LLM provider, you are in retrieval-only mode — say so.\n"
+    "7. Maximum 4 lines per response. Be concise."
+)
+
+ADMIN_ASSISTANT_PROMPT = (
+    "You are the Zolai Admin Assistant — full tool access for knowledge "
+    "management and debugging. Your role:\n"
+    "1. All public tools PLUS: knowledge_stats, kb_research, review_queue_submit, "
+    "provider_status, web_search (when enabled).\n"
+    "2. Use kb_research to search hypotheses/claims. Use knowledge_stats for "
+    "database overview. Use review_queue_submit to propose new facts.\n"
+    "3. Show tool trace transparently. Keep ZVS 2018 compliance.\n"
+    "4. Maximum 6 lines. Include citations and tool results."
+)
+
+AGENT_ORCHESTRATOR_PROMPT = (
+    "You are the Zolai Agent Orchestrator — a careful research agent for the "
+    "Tedim Zolai (ZVS 2018) language. Your workflow:\n"
+    "1. RESEARCH: Use rag_search + kb_research to gather evidence.\n"
+    "2. BUILD: Synthesize a draft answer from evidence. Use additional tools as needed.\n"
+    "3. REVIEW: Validate against ZVS 2018 (orthography, SOV, ergative 'in').\n"
+    "4. SHIP: Deliver final answer with full citations.\n"
+    "5. NEVER invent tool results. If evidence is missing, say so.\n"
+    "6. Available tools: rag_search, kb_research, word_evidence, word_related, "
+    "analyze_text, grammar_check, dictionary_lookup, verse_lookup, knowledge_stats, "
+    "review_queue_submit, provider_status, web_search.\n"
+    "7. One tool per turn. Max 3 turns. Cite everything."
+)
+
 logger = logging.getLogger(__name__)
 
 public_router = APIRouter(prefix="/api/v1/assistant", tags=["assistant"])
@@ -41,8 +84,16 @@ admin_router = APIRouter(prefix="/api/v1/admin/assistant", tags=["assistant-admi
 ADMIN_ROLE_DEP = Depends(rbac.require_role("admin", strict=True))
 ADMIN_SCOPE_DEP = Depends(auth.require_scope("agent:run", strict=True))
 
-#: Retrieval-only fallback tools for the public assistant.
-RETRIEVAL_TOOLS: tuple[str, ...] = ("rag_search", "dictionary_lookup")
+#: Retrieval-only fallback tools for the public assistant (all public tools).
+RETRIEVAL_TOOLS: tuple[str, ...] = (
+    "rag_search",
+    "word_evidence",
+    "word_related",
+    "analyze_text",
+    "grammar_check",
+    "dictionary_lookup",
+    "verse_lookup",
+)
 
 
 class ChatIn(BaseModel):
@@ -70,6 +121,23 @@ class ChatIn(BaseModel):
     user_provider: str | None = None
 
 
+class ChatFeedbackIn(BaseModel):
+    """POST /api/v1/assistant/feedback body.
+
+    Public feedback on an assistant chat response. No authentication required
+    since the chat itself is public (rbac.PUBLIC_ROUTES).
+    """
+
+    message: str = Field(min_length=1, max_length=8000)
+    response: str = Field(min_length=1, max_length=16000)
+    mode: str = Field(pattern="^(public|admin)$")
+    retrieval_only: bool = False
+    provider: str = ""
+    model: str = ""
+    score: int = Field(ge=-1, le=1)
+
+
+
 def _sanitize(answer: str) -> tuple[str, dict[str, Any]]:
     """ZVS 2018 validation + one revise pass before returning to the client."""
     from ..agent.orchestrator import zvs_review
@@ -87,9 +155,29 @@ def _first_token(text: str) -> str:
 
 def _retrieval_only(message: str, allow: frozenset[str]) -> dict[str, Any]:
     """Deterministic retrieval answer — zero sockets, honest labelling."""
+    import re
     started = time.monotonic()
     trace: list[dict[str, Any]] = []
-    calls = [ToolCall(name="rag_search", input={"query": message, "limit": 5})]
+
+    # Detect Bible-related queries
+    bible_keywords = (
+        "bible", "scripture", "verse", "verses", "biblical",
+        "old testament", "new testament", "genesis", "exodus",
+        "matthew", "mark", "luke", "john", "psalm", "psalms",
+        "proverbs", "isaiah", "jeremiah", "ezekiel", "daniel",
+        "romans", "corinthians", "galatians", "ephesians",
+        "philippians", "colossians", "thessalonians", "timothy",
+        "titus", "philemon", "hebrews", "james", "peter", "john",
+        "jude", "revelation"
+    )
+    message_lower = message.lower()
+    needs_bible_filter = any(kw in message_lower for kw in bible_keywords)
+
+    rag_input = {"query": message, "limit": 5}
+    if needs_bible_filter:
+        rag_input["source_filter"] = ["bible_verses"]
+
+    calls = [ToolCall(name="rag_search", input=rag_input)]
     token = _first_token(message)
     if token and "dictionary_lookup" in allow:
         calls.append(ToolCall(name="dictionary_lookup", input={"word": token}))
@@ -153,6 +241,9 @@ def run_assistant(
     allow = allow_list("admin" if admin else "public")
     started = time.monotonic()
 
+    # Select role-specific system prompt
+    system_prompt = ADMIN_ASSISTANT_PROMPT if admin else PUBLIC_ASSISTANT_PROMPT
+
     if not llm_allowed():
         out = _retrieval_only(message, allow)
         return _finish(
@@ -176,11 +267,7 @@ def run_assistant(
         )
 
     loop_result = run_agent_loop(
-        system_prompt=(
-            "You are the Zolai assistant. Answer in the user's language, keep ZVS 2018 "
-            "orthography (pasian/gam/tapa/topa), cite your tool evidence, and never "
-            "invent tool results. If you lack evidence, say so."
-        ),
+        system_prompt=system_prompt,
         user_message=message,
         allow=allow,
         chat=chat,
@@ -312,3 +399,236 @@ def admin_chat(body: ChatIn, request: Request) -> dict[str, Any]:
         body.message, admin=True, persist=body.persist,
         provider=body.provider, model=body.model, api_key=body.api_key, user_provider=body.user_provider,
     )
+
+
+# Rate limit bucket for feedback (10 per minute per IP)
+_feedback_bucket: dict[str, list[float]] = {}
+FEEDBACK_LIMIT = 10
+FEEDBACK_WINDOW_S = 60.0
+
+
+def _check_feedback_rate(request: Request) -> None:
+    """Rate limit feedback to 10/min/IP."""
+    import time
+    client_ip = request.client.host if request.client else "unknown"
+    bucket_key = f"fb:{client_ip}"
+    now = time.monotonic()
+    hits = [t for t in _feedback_bucket.get(bucket_key, []) if now - t < FEEDBACK_WINDOW_S]
+    if len(hits) >= FEEDBACK_LIMIT:
+        retry_after = max(1, int(FEEDBACK_WINDOW_S - (now - hits[0])))
+        raise HTTPException(
+            status_code=429,
+            detail={"error": "rate_limited", "scope": "assistant_feedback", "limit": FEEDBACK_LIMIT, "retry_after": retry_after},
+            headers={"Retry-After": str(retry_after)},
+        )
+    hits.append(now)
+    _feedback_bucket[bucket_key] = hits
+
+
+@public_router.post("/feedback")
+def assistant_feedback(body: ChatFeedbackIn, request: Request) -> dict[str, Any]:
+    """Record feedback on an assistant chat response.
+
+    Public endpoint — no authentication required. Stores the feedback with
+    the message/response pair for later analysis.
+    Rate limited to 10 requests/minute/IP.
+    """
+    from ..data.repositories import get_engine
+    from sqlalchemy import text as sa_text
+
+    _check_feedback_rate(request)
+
+    # Hash the client IP for basic deduplication (not PII)
+    client_ip = request.client.host if request.client else "unknown"
+    import hashlib
+    ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()[:16]
+
+    engine = get_engine()
+    with engine.begin() as conn:
+        # Ensure table exists (lazy creation for tests and fresh deployments)
+        conn.execute(
+            sa_text("""
+                CREATE TABLE IF NOT EXISTS assistant_chat_feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message TEXT NOT NULL,
+                    response TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    retrieval_only INTEGER NOT NULL DEFAULT 0,
+                    provider TEXT NOT NULL DEFAULT '',
+                    model TEXT NOT NULL DEFAULT '',
+                    score INTEGER NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    ip_hash TEXT
+                )
+            """)
+        )
+        cursor = conn.execute(
+            sa_text("""
+                INSERT INTO assistant_chat_feedback
+                (message, response, mode, retrieval_only, provider, model, score, ip_hash)
+                VALUES (:message, :response, :mode, :retrieval_only, :provider, :model, :score, :ip_hash)
+            """),
+            {
+                "message": body.message,
+                "response": body.response,
+                "mode": body.mode,
+                "retrieval_only": 1 if body.retrieval_only else 0,
+                "provider": body.provider,
+                "model": body.model,
+                "score": body.score,
+                "ip_hash": ip_hash,
+            },
+        )
+        feedback_id = cursor.lastrowid
+
+    return {"ok": True, "message": "Feedback recorded", "feedback_id": feedback_id}
+
+@admin_router.get("/feedback/stats", dependencies=[ADMIN_ROLE_DEP, ADMIN_SCOPE_DEP])
+def admin_feedback_stats(
+    mode: str | None = None,
+    since: str | None = None,
+    limit: int = 100,
+) -> dict[str, Any]:
+    """Get feedback statistics (admin only).
+
+    Query params:
+    - mode: filter by 'public' or 'admin'
+    - since: ISO datetime string (e.g. '2026-01-01')
+    - limit: max rows to return for recent feedback list
+    """
+    from ..data.repositories import get_engine
+    from sqlalchemy import text as sa_text
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        # Ensure table exists
+        conn.execute(
+            sa_text("""
+                CREATE TABLE IF NOT EXISTS assistant_chat_feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message TEXT NOT NULL,
+                    response TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    retrieval_only INTEGER NOT NULL DEFAULT 0,
+                    provider TEXT NOT NULL DEFAULT '',
+                    model TEXT NOT NULL DEFAULT '',
+                    score INTEGER NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    ip_hash TEXT
+                )
+            """)
+        )
+
+        # Build WHERE clause
+        where_clauses = []
+        params: dict[str, Any] = {"limit": limit}
+        if mode:
+            where_clauses.append("mode = :mode")
+            params["mode"] = mode
+        if since:
+            where_clauses.append("created_at >= :since")
+            params["since"] = since
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        # Overall stats
+        stats = conn.execute(
+            sa_text(f"""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN score = 1 THEN 1 ELSE 0 END) as positive,
+                    SUM(CASE WHEN score = -1 THEN 1 ELSE 0 END) as negative,
+                    SUM(CASE WHEN score = 0 THEN 1 ELSE 0 END) as neutral,
+                    COUNT(DISTINCT ip_hash) as unique_ips
+                FROM assistant_chat_feedback
+                {where_sql}
+            """),
+            params,
+        ).fetchone()
+
+        # Recent feedback
+        recent = conn.execute(
+            sa_text(f"""
+                SELECT id, message, response, mode, retrieval_only, provider, model, score, created_at, ip_hash
+                FROM assistant_chat_feedback
+                {where_sql}
+                ORDER BY created_at DESC
+                LIMIT :limit
+            """),
+            params,
+        ).fetchall()
+
+        # By mode breakdown
+        by_mode = conn.execute(
+            sa_text("""
+                SELECT mode, COUNT(*) as count,
+                    SUM(CASE WHEN score = 1 THEN 1 ELSE 0 END) as positive,
+                    SUM(CASE WHEN score = -1 THEN 1 ELSE 0 END) as negative
+                FROM assistant_chat_feedback
+                GROUP BY mode
+            """)
+        ).fetchall()
+
+        # By provider/model breakdown
+        by_provider = conn.execute(
+            sa_text("""
+                SELECT provider, model, COUNT(*) as count,
+                    SUM(CASE WHEN score = 1 THEN 1 ELSE 0 END) as positive,
+                    SUM(CASE WHEN score = -1 THEN 1 ELSE 0 END) as negative
+                FROM assistant_chat_feedback
+                WHERE provider != '' OR model != ''
+                GROUP BY provider, model
+                ORDER BY count DESC
+            """)
+        ).fetchall()
+
+        # Daily trend (last 30 days)
+        daily = conn.execute(
+            sa_text("""
+                SELECT date(created_at) as day, COUNT(*) as count,
+                    SUM(CASE WHEN score = 1 THEN 1 ELSE 0 END) as positive,
+                    SUM(CASE WHEN score = -1 THEN 1 ELSE 0 END) as negative
+                FROM assistant_chat_feedback
+                WHERE created_at >= date('now', '-30 days')
+                GROUP BY date(created_at)
+                ORDER BY day DESC
+            """)
+        ).fetchall()
+
+    return {
+        "summary": {
+            "total": stats.total or 0,
+            "positive": stats.positive or 0,
+            "negative": stats.negative or 0,
+            "neutral": stats.neutral or 0,
+            "unique_ips": stats.unique_ips or 0,
+            "positive_rate": round((stats.positive or 0) / max(stats.total or 1, 1) * 100, 1),
+        },
+        "by_mode": [
+            {"mode": r.mode, "count": r.count, "positive": r.positive, "negative": r.negative}
+            for r in by_mode
+        ],
+        "by_provider": [
+            {"provider": r.provider, "model": r.model, "count": r.count, "positive": r.positive, "negative": r.negative}
+            for r in by_provider
+        ],
+        "daily_trend": [
+            {"day": r.day, "count": r.count, "positive": r.positive, "negative": r.negative}
+            for r in daily
+        ],
+        "recent": [
+            {
+                "id": r.id,
+                "message": r.message[:100] + ("..." if len(r.message) > 100 else ""),
+                "response": r.response[:100] + ("..." if len(r.response) > 100 else ""),
+                "mode": r.mode,
+                "retrieval_only": bool(r.retrieval_only),
+                "provider": r.provider,
+                "model": r.model,
+                "score": r.score,
+                "created_at": r.created_at,
+            }
+            for r in recent
+        ],
+    }
+
+

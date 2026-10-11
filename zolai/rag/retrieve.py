@@ -639,27 +639,193 @@ class UnifiedRetriever:
         return out[:limit]
 
     # --- RAG ---
-    def rag_query(self, question: str, limit: int = 5) -> dict[str, Any]:
-        """Full RAG: question → retrieval → answer with citations."""
-        # Retrieve relevant evidence
+    @staticmethod
+    def _evidence_line(index: int, result: SearchResult) -> str:
+        """One grounded evidence line, carrying the row's *content*.
+
+        The old context was ``[1] dictionary: pasian`` — the bare word and
+        nothing else, so a model reading it had no proposition to work from.
+        Every search table publishes context columns (``definition``, ``pos``,
+        ``context``); those are the answerable text.
+        """
+        parts = [f"[{index}] {result.source}: {result.text}"]
+        details = []
+        for field in ("definition", "context", "pos", "alt_zo", "frequency"):
+            value = result.metadata.get(field)
+            if value is None:
+                continue
+            text_value = str(value).strip()
+            if text_value and text_value.lower() not in {"unknown", "n", "none", ""}:
+                details.append(f"{field}={text_value}")
+        if details:
+            parts.append(f" ({'; '.join(details)})")
+        return "".join(parts)
+
+    def rag_query(
+        self,
+        question: str,
+        limit: int = 5,
+        provider: str | None = None,
+        model: str | None = None,
+    ) -> dict[str, Any]:
+        """Full RAG: question → retrieval → a **model-written** answer.
+
+        The answer used to be a hardcoded template::
+
+            f"Based on {len(search_results)} sources: {context[:500]}..."
+
+        — no model was ever called, so ``/rag`` could not answer anything. It
+        now resolves the deployment's configured provider through the same
+        :func:`~zolai.agent.synthesis.make_chat_fn` the assistant uses, so there
+        is one provider-resolution path rather than two that can disagree.
+
+        When no provider resolves (or the call fails), the response says so via
+        ``retrieval_only: true`` and returns the retrieved evidence instead of a
+        fabricated answer. Callers can therefore never mistake the two.
+        """
         search_results = self.search(question, limit=10)
 
-        # Build context from search results
-        context_parts = []
-        citations = []
+        context_parts: list[str] = []
+        citations: list[dict[str, Any]] = []
         for i, r in enumerate(search_results):
-            context_parts.append(f"[{i+1}] {r.source}: {r.text}")
-            citations.append({"id": i+1, "source": r.source, "text": r.text[:200]})
+            context_parts.append(self._evidence_line(i + 1, r))
+            citation: dict[str, Any] = {
+                "id": i + 1,
+                "source": r.source,
+                "text": r.text[:200],
+            }
+            definition = r.metadata.get("definition") or r.metadata.get("context")
+            if definition:
+                citation["definition"] = str(definition)[:400]
+            citations.append(citation)
 
         context = "\n".join(context_parts)
 
-        return {
+        base: dict[str, Any] = {
             "question": question,
             "context": context,
             "citations": citations,
-            "answer": f"Based on {len(search_results)} sources: {context[:500]}...",  # Placeholder
             "retrieved_count": len(search_results),
         }
+
+        # Imported lazily, and *inside* the try: the retriever is a low-level
+        # dependency of the agent tooling so a module-level import risks a
+        # cycle, and an import failure must degrade to the evidence fallback
+        # rather than 500 the endpoint.
+        try:
+            from ..agent.synthesis import make_chat_fn
+
+            chat, meta = make_chat_fn(assistant="public", provider=provider, model=model)
+        except Exception as exc:  # no provider configured / row disabled
+            log.debug("rag: no provider resolved: %s", exc)
+            return {
+                **base,
+                "answer": self._fallback_answer(question, search_results, "no_active_provider"),
+                "generated": False,
+                "retrieval_only": True,
+                "provider": "",
+                "model": "",
+                "provider_error": str(exc)[:200],
+            }
+
+        system = (
+            "You answer questions about the Zolai (Zomi) language using ONLY the "
+            "evidence given below. The evidence is retrieved corpus rows, each "
+            "tagged [n] with its source table. Cite the bracketed numbers you "
+            "rely on. If the evidence does not answer the question, say so "
+            "plainly and name what is missing — never fill the gap with "
+            "general knowledge or invented translations."
+        )
+        user = (
+            f"Evidence:\n{context or '(no evidence retrieved)'}\n\n"
+            f"Question: {question}\n\nAnswer using the evidence above."
+        )
+
+        try:
+            reply = chat(
+                [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                None,
+            )
+        except Exception as exc:
+            log.warning("rag: provider call failed: %s", exc)
+            return {
+                **base,
+                "answer": self._fallback_answer(question, search_results, "call_failed"),
+                "generated": False,
+                "retrieval_only": True,
+                "provider": str(meta.get("catalog_id") or ""),
+                "model": str(meta.get("model") or ""),
+                "provider_error": str(exc)[:200],
+            }
+
+        # ChatFn returns {"text", "tool_calls", "latency_ms"} - not "content".
+        # Accepting both keeps this resilient if the adapter ever normalises.
+        answer = ""
+        try:
+            payload = reply or {}
+            raw = payload.get("text") or payload.get("content") or ""
+            answer = str(raw).strip()
+        except Exception:
+            answer = ""
+
+        if not answer:
+            return {
+                **base,
+                "answer": self._fallback_answer(question, search_results, "empty_reply"),
+                "generated": False,
+                "retrieval_only": True,
+                "provider": str(meta.get("catalog_id") or ""),
+                "model": str(meta.get("model") or ""),
+                "provider_error": "empty_reply",
+            }
+
+        return {
+            **base,
+            "answer": answer,
+            "generated": True,
+            "retrieval_only": False,
+            "provider": str(meta.get("catalog_id") or ""),
+            "model": str(meta.get("model") or ""),
+        }
+
+    @staticmethod
+    def _fallback_answer(
+        question: str,
+        results: list[SearchResult],
+        reason: str = "no_active_provider",
+    ) -> str:
+        """Honest no-model answer: the evidence, not a synthesised claim.
+
+        ``reason`` distinguishes "nothing was configured" from "the call was
+        made and failed" — collapsing the two into "no active LLM provider"
+        would send operators hunting for a missing key while the real problem
+        was a timeout or an empty completion.
+        """
+        if not results:
+            return (
+                "No evidence was retrieved for this question, so there is "
+                "nothing to answer from. The corpus has no row matching it."
+            )
+        if reason == "empty_reply":
+            lead = "The model returned an empty answer"
+        elif reason == "no_active_provider":
+            lead = "No active LLM provider"
+        else:
+            lead = "The model call failed"
+        lines = [
+            f"{lead}, so this is the retrieved evidence for "
+            f"{question!r} — not a written answer:"
+        ]
+        for i, r in enumerate(results[:8], 1):
+            detail = ""
+            definition = r.metadata.get("definition") or r.metadata.get("context")
+            if definition:
+                detail = f" — {str(definition).strip()[:160]}"
+            lines.append(f"[{i}] {r.source}: {r.text}{detail}")
+        return "\n".join(lines)
 
     # --- Knowledge version/stats ---
     def get_knowledge_version(self) -> dict[str, Any]:

@@ -249,3 +249,104 @@ class TestSQLShape:
         exact = [(stmt, params) for stmt, params in sql_log if "WHERE zolai = ?" in stmt]
         assert exact, "expected an exact-match pass"
         assert exact[0][1] == ("zomi",)
+
+
+class TestRagQuery:
+    """`/rag` must call a model when one is configured, and never fake an answer."""
+
+    def test_fallback_answer_names_the_question_and_the_sources(self, retriever):
+        answer = retriever._fallback_answer("what is zomi", retriever.search("zomi"))
+        assert "zomi" in answer
+        assert "not a written answer" in answer
+        assert "dictionary" in answer
+
+    def test_fallback_with_no_results_says_there_is_no_evidence(self, retriever):
+        answer = retriever._fallback_answer("xyzzy nonsense", [])
+        assert "no evidence" in answer.lower()
+
+    def test_evidence_line_carries_the_definition_not_just_the_word(self, retriever):
+        """The old context was `[1] dictionary: zomi` — nothing to answer from."""
+        line = retriever._evidence_line(1, retriever.search("zomi")[0])
+        assert line.startswith("[1] dictionary:")
+        assert "definition=" in line, f"evidence line carries no content: {line!r}"
+
+    def test_rag_query_without_a_provider_is_honestly_flagged(self, retriever, monkeypatch):
+        """retrieval_only must be True and the answer must not claim to be written."""
+        import builtins
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name.endswith("synthesis") or name == "zolai.agent.synthesis":
+                raise RuntimeError("no provider configured")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        out = retriever.rag_query("What is zomi?")
+        assert out["retrieval_only"] is True
+        assert out["generated"] is False
+        assert out["provider"] == "" and out["model"] == ""
+        assert "not a written answer" in out["answer"] or "No evidence" in out["answer"]
+
+    def test_rag_query_reports_generated_when_the_model_answers(self, retriever, monkeypatch):
+        import sys
+        import types
+        import builtins
+
+        module = types.ModuleType("zolai.agent.synthesis")
+
+        def make_chat_fn(**_kwargs):
+            def chat(messages, tools):
+                assert "Evidence:" in messages[1]["content"], "model got no evidence"
+                # ChatFn returns {"text", ...} — not "content". This shape is the
+                # regression: reading "content" silently yielded empty_reply.
+                return {"text": "Zomi means 'people of Mizoram'. [1]"}
+
+            return chat, {"catalog_id": "test-provider", "model": "test-model"}
+
+        module.make_chat_fn = make_chat_fn
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name in ("zolai.agent.synthesis",) or name.endswith("agent.synthesis"):
+                return module
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setitem(sys.modules, "zolai.agent.synthesis", module)
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        out = retriever.rag_query("What is zomi?")
+        assert out["generated"] is True
+        assert out["retrieval_only"] is False
+        assert out["provider"] == "test-provider"
+        assert out["model"] == "test-model"
+        assert "Mizoram" in out["answer"]
+
+    def test_empty_text_reply_is_flagged_not_silently_faked(self, retriever, monkeypatch):
+        """An empty completion must degrade to evidence, never to a template answer."""
+        import sys, types, builtins
+
+        module = types.ModuleType("zolai.agent.synthesis")
+
+        def make_chat_fn(**_kwargs):
+            return (lambda messages, tools: {"text": "   "}), {
+                "catalog_id": "test-provider", "model": "test-model",
+            }
+
+        module.make_chat_fn = make_chat_fn
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name in ("zolai.agent.synthesis",) or name.endswith("agent.synthesis"):
+                return module
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setitem(sys.modules, "zolai.agent.synthesis", module)
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        out = retriever.rag_query("What is zomi?")
+        assert out["retrieval_only"] is True
+        assert out["generated"] is False
+        assert out["provider_error"] == "empty_reply"
+        assert "empty answer" in out["answer"]

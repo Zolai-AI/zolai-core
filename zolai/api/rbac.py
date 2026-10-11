@@ -86,6 +86,8 @@ PUBLIC_ROUTES: tuple[tuple[str | None, str], ...] = (
     ("POST", "/api/v1/auth/logout"),
     # Public assistant (P4) — anonymous chat stays open under enforce.
     ("POST", "/api/v1/assistant/chat"),
+    # Public assistant feedback (P4) — anonymous feedback stays open under enforce.
+    ("POST", "/api/v1/assistant/feedback"),
     # Anonymous Studio reads (plan §B table).
     ("GET", "/api/v1/search"),
     ("POST", "/api/v1/search"),
@@ -96,6 +98,8 @@ PUBLIC_ROUTES: tuple[tuple[str | None, str], ...] = (
     # Public provider catalog (Phase B) — enabled rows, zero secrets, so a
     # client can see what it may target before it asks for a chat/run.
     ("GET", "/api/v1/providers"),
+    # Public contributions — anyone may submit dictionary improvements.
+    ("POST", "/api/v1/contributions"),
 )
 
 #: Prefix entries: ``(method, prefix)`` — ``/api/v1/word`` covers every

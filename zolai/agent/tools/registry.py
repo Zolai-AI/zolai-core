@@ -27,7 +27,11 @@ def _obj(properties: dict[str, Any], required: list[str] | None = None) -> dict[
 
 
 _PUB_QUERY = _obj(
-    {"query": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 20}},
+    {
+        "query": {"type": "string"},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+        "source_filter": {"type": "array", "items": {"type": "string", "enum": ["dictionary", "dictionary_en_zo", "bible_verses", "phrases", "grammar_patterns"]}},
+    },
 )
 _WORD = _obj({"word": {"type": "string", "minLength": 1}})
 _TEXT = _obj({"text": {"type": "string", "minLength": 1}})
@@ -58,7 +62,7 @@ OPTIONAL_TOOLS: tuple[str, ...] = ("web_search",)
 SPECS: dict[str, ToolSpec] = {
     "rag_search": ToolSpec(
         name="rag_search",
-        description="Hybrid search across dictionary, Bible, phrases and grammar patterns.",
+        description="Hybrid search across dictionary, Bible, phrases and grammar patterns. Optional source_filter limits results to specific tables: dictionary, dictionary_en_zo, bible_verses, phrases, grammar_patterns.",
         parameters=_PUB_QUERY,
     ),
     "word_evidence": ToolSpec(
