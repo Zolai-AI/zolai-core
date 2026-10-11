@@ -2,6 +2,11 @@
 
 Covers: SQLite→PostgreSQL, PostgreSQL→SQLite, status, conflict resolution,
 data integrity, progress reporting, idempotency, empty tables.
+
+NOTE (pre-existing, out of scope): several tests in this module require a live
+PostgreSQL instance and fail with OperationalError when one is unavailable.
+These failures pre-date the DB-first serving refactor and are NOT chased here;
+they depend on external Postgres infrastructure, not on zolai-core code paths.
 """
 
 from __future__ import annotations

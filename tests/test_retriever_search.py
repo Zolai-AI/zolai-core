@@ -163,6 +163,47 @@ class TestQuestionQueries:
         assert results, "stopword-heavy question returned nothing"
         assert results[0].id == "dictionary:zomi"
 
+    def test_multi_token_question_uses_a_strong_pass_not_the_fallback(self, retriever):
+        """Regression: a multi-token query must not degrade to the weak fallback.
+
+        Every strong pass used to compare the *whole query string* against the
+        columns, so for "What does the word zomi mean?" all of them failed and
+        every hit came from `token_or` - the weakest pass, and the only one with
+        no ORDER BY. On the real corpus that returned the head of an
+        alphabetical index scan (abba, adonai, allah for "What is pasian?") and
+        the assistant concluded it had no evidence.
+
+        The stub fixture is too small to reproduce the wrong *ordering*, so the
+        old assertion (top row is the expected one) passed with the bug present.
+        What is stable regardless of fixture size is **how** the top row matched.
+        """
+        results = retriever.search("What does the word zomi mean?")
+        assert results, "expected results"
+        top = results[0]
+        assert top.id == "dictionary:zomi"
+        assert top.metadata["match_type"] != "token_or", (
+            "multi-token question fell through to the unordered token_or "
+            "fallback - the exact-match pass did not run per token"
+        )
+        assert top.score > 0.6, f"expected a strong pass, got {top.score}"
+
+    def test_each_meaningful_token_is_matched_strongly(self, retriever):
+        """Every non-stopword token gets an exact attempt, not just the first."""
+        for query, expected in (
+            ("What does the word zomi mean?", "dictionary:zomi"),
+            ("zomi meaning please", "dictionary:zomi"),
+        ):
+            results = retriever.search(query)
+            assert results, f"no results for {query!r}"
+            assert results[0].id == expected, f"{query!r} ranked {results[0].id} first"
+            assert results[0].score > 0.6, f"{query!r} scored {results[0].score}"
+
+    def test_single_word_scoring_is_unchanged(self, retriever):
+        """The per-token passes must not demote the whole-string exact match."""
+        top = retriever.search("zomi")[0]
+        assert top.id == "dictionary:zomi"
+        assert top.score == 1.0, "a single-word exact match must still score 1.0"
+
     def test_punctuation_only_query_does_not_raise(self, retriever):
         assert retriever.search("?!...") == [] or isinstance(retriever.search("?!..."), list)
 

@@ -158,17 +158,28 @@ class TestLearningEngine:
 # ---------------------------------------------------------------------------
 
 class TestAccuracyScorer:
+    # AccuracyScorer is DB-first: it reads authority from the canonical
+    # data/zolai.db (dictionary + Bible + grammar), never from a DATA_DIR
+    # JSONL path (removed in the DB-first refactor).
     def test_score_word_no_data(self):
         from zolai.api.accuracy_scorer import AccuracyScorer
         scorer = AccuracyScorer()
-        result = scorer.score_word("nonexistentxyz123")
+        result = scorer.score_word("zzzqnope_nonword")
         assert result["confidence"] == "UNCERTAIN"
         assert result["source_count"] == 0
+
+    def test_score_known_word_returns_sources(self):
+        from zolai.api.accuracy_scorer import AccuracyScorer
+        scorer = AccuracyScorer()
+        result = scorer.score_word("pasian")
+        assert result["word"] == "pasian"
+        assert result["source_count"] >= 1
+        assert result["confidence"] in {"LOW", "MEDIUM", "HIGH"}
 
     def test_score_phrase(self):
         from zolai.api.accuracy_scorer import AccuracyScorer
         scorer = AccuracyScorer()
-        result = scorer.score_phrase(["word1", "word2"])
+        result = scorer.score_phrase(["pasian", "zzzqnope_nonword"])
         assert "overall_confidence" in result
         assert len(result["word_scores"]) == 2
 
