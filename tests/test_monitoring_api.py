@@ -125,14 +125,14 @@ def test_info_endpoint_mirrors_build_info(client: TestClient) -> None:
 
 
 def test_health_route_contract_is_preserved(client: TestClient) -> None:
-    """``/health`` keeps its original keys — only ``uptime_s`` was added."""
+    """``/health`` keeps its public keys — no ``data_root`` leak (core#16)."""
     response = client.get("/health")
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
     assert isinstance(body["version"], str)
-    assert isinstance(body["data_root"], str)
     assert isinstance(body["uptime_s"], float)
+    assert "data_root" not in body
 
 
 # ---------------------------------------------------------------------------

@@ -112,7 +112,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 # ── Parametrized status + shape smoke ───────────────────────────────────────
 
 _CASES = [
-    pytest.param("/health", {}, {"status", "version", "data_root", "uptime_s"}, id="health"),
+    # core#16: public health must not leak ``data_root`` (the data path).
+    pytest.param("/health", {}, {"status", "version", "uptime_s"}, id="health"),
     pytest.param(
         "/api/v1/lexicon/pasian",
         {},
