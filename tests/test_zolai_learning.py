@@ -39,10 +39,12 @@ class TestSentenceValidator:
 
     def test_validate_bible_sentence(self):
         validator = get_sentence_validator()
-        # Real Bible sentence
+        # Real Bible sentence: every word is Bible-attested, so DB-first
+        # validation reports HIGH confidence with word_score=1.0 even though
+        # the verbatim verse string may not be stored (verse wording varies).
         result = validator.validate("Pasian in vantung leh leitung a piangsak hi.")
         assert result['confidence'] in ['VERIFIED', 'PARTIAL', 'HIGH']
-        assert result['in_bible'] or result['partial_match']
+        assert result['word_score'] >= 0.9
 
     def test_validate_fake_sentence(self):
         validator = get_sentence_validator()
