@@ -167,6 +167,8 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     version: str = "1.0.0"
     uptime_s: float | None = None
+    engine_mode: str | None = None
+    llm_allowed: bool | None = None
 
 
 class HealthDetailResponse(HealthResponse):
@@ -555,21 +557,27 @@ def create_app() -> FastAPI:
     @app.get("/health", response_model=HealthResponse)
     async def health():
         from ..monitoring.store import PROCESS_STARTED_AT
+        from ..engines import engine_mode, llm_allowed
 
         # No data_root: public health must not leak the data path (core#16).
         return HealthResponse(
             status="ok",
             uptime_s=round(time.time() - PROCESS_STARTED_AT, 3),
+            engine_mode=engine_mode(),
+            llm_allowed=llm_allowed(),
         )
 
     @app.get("/api/v1/health", response_model=HealthResponse)
     async def api_v1_health():
         from ..monitoring.store import PROCESS_STARTED_AT
+        from ..engines import engine_mode, llm_allowed
 
         # No data_root: public health must not leak the data path (core#16).
         return HealthResponse(
             status="ok",
             uptime_s=round(time.time() - PROCESS_STARTED_AT, 3),
+            engine_mode=engine_mode(),
+            llm_allowed=llm_allowed(),
         )
 
     @app.get(
