@@ -39,6 +39,7 @@ RECORDS_WHITELIST: dict[str, tuple[str, ...]] = {
     "grammar_patterns": ("pattern_id", "pattern", "description", "function", "examples"),
     "phrases": ("zolai", "english", "examples"),
     "vocabulary": ("headword", "english", "examples"),
+    "contributions": ("word", "type", "suggested_value", "status", "email"),
 }
 
 
