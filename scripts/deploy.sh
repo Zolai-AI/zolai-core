@@ -45,6 +45,29 @@ ok() { echo -e "${GREEN}[OK]${NC} $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 err() { echo -e "${RED}[ERR]${NC} $*"; }
 
+# Resolve our own directory so the guard below compares real paths.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+EXPECTED_DEPLOY_DIR="${EXPECTED_DEPLOY_DIR:-/home/ubuntu/zolai-core}"
+
+# Refuse to deploy from a checkout that is not the one serving production.
+#
+# The server had two copies of this repo - /home/ubuntu/zolai-core and
+# /opt/zolai-core - and BOTH are named "zolai-core". `docker compose` derives the
+# project name from the directory basename, so deploying from either one targets
+# the same Docker project while the env file actually in force comes from
+# whichever copy last recreated the container. The trees were 40 files apart and
+# a deploy from the wrong copy silently reverted a shipped fix with no error.
+#
+# Override with EXPECTED_DEPLOY_DIR=... if the authoritative path ever moves.
+if [[ "$SCRIPT_DIR" != "$EXPECTED_DEPLOY_DIR" ]]; then
+    err "Refusing to deploy from $SCRIPT_DIR"
+    err "Production is served from $EXPECTED_DEPLOY_DIR"
+    err "Two checkouts both named zolai-core target the same Docker project, so a"
+    err "deploy from the wrong one applies the wrong tree and the wrong env file."
+    err "Run this from $EXPECTED_DEPLOY_DIR, or set EXPECTED_DEPLOY_DIR if that moved."
+    exit 1
+fi
+
 usage() {
     grep '^#' "$0" | cut -c4-
     exit 0

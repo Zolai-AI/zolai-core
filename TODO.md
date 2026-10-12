@@ -86,6 +86,11 @@
 - [x] **pcore-brain provider working** — Verified `/admin/ai-providers/pcore-brain/test` returns 200 OK, assistant chat with provider works
 - [x] **Secret encryption end-to-end** — `PUT /admin/ai-providers/openai {"secret": "sk-..."}` → `mode: encrypted, configured: true`
 - [x] **Env var reference** — `PUT /admin/ai-providers/anthropic {"secret_env": "ANTHROPIC_API_KEY"}` → `mode: env, configured: true`
+- [x] **Sidebar collapse button at TOP** — Moved from bottom to top, pinned while nav scrolls independently
+- [x] **Sidebar sticky correctly** — `sticky top-0` + `h-screen` with scrollable content area
+- [x] **Public Contribute route** — `/contribute` with form for new words, meanings, usage, corrections (no auth required)
+- [x] **Contributions API** — `POST /api/v1/contributions` (public, no auth required)
+- [x] **Contributions in Review whitelist** — Added `contributions` table to `RECORDS_WHITELIST` for admin review queue
 
 ---
 
