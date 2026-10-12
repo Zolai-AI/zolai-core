@@ -269,3 +269,52 @@ class TestMultiWordDictionaryLookup:
 
         assert _first_token("what is pasian") == "pasian"
         assert _first_token("!!!") == ""
+
+
+class TestUngroundedAnswerIsGrounded:
+    """A model that answers without calling tools must not ship ungrounded.
+
+    ``run_agent_loop`` returns the instant a turn contains no ``<<<TOOL>>>`
+    block, so a memory-only reply reached the user with zero citations. For
+    "nang bang hih thei" that produced a confident grammar verdict and an
+    admission of "no dictionary evidence" -- while all four words were in the
+    dictionary the whole time.
+    """
+
+    def test_no_tool_call_triggers_a_grounding_pass(self, monkeypatch):
+        from zolai.api import assistant_router as ar
+
+        seen: list[int] = []
+
+        def memory_only_chat(messages, tools=None):
+            # First turn: answers from memory, calls nothing.
+            if not any("TOOL_RESULT" in str(m.get("content", "")) for m in messages):
+                return {"text": "I cannot look that up right now."}
+            # Second turn (grounding): acknowledges the injected evidence.
+            seen.append(1)
+            return {"text": "nang = weak, bang = what [dictionary]."}
+
+        monkeypatch.setattr(ar, "llm_allowed", lambda: True)
+        monkeypatch.setattr(ar, "make_chat_fn", lambda **kw: (memory_only_chat, {"catalog_id": "stub", "model": "stub"}))
+
+        result = ar.run_assistant("nang bang hih thei", persist=False)
+
+        assert seen, "grounding turn never happened -- ungrounded reply shipped"
+        assert result["retrieval_only"] is False, "must still generate, not degrade"
+        assert result["tool_calls"], "no evidence recorded despite grounding"
+        assert result["citations"], "grounded reply still has no citations"
+
+    def test_honest_no_evidence_is_not_treated_as_a_defect(self, monkeypatch):
+        from zolai.api import assistant_router as ar
+
+        def empty_kb_chat(messages, tools=None):
+            return {"text": "I have no evidence for that."}
+
+        monkeypatch.setattr(ar, "llm_allowed", lambda: True)
+        monkeypatch.setattr(ar, "make_chat_fn", lambda **kw: (empty_kb_chat, {"catalog_id": "stub", "model": "stub"}))
+
+        # A greeting the KB has nothing for: keep the model's reply as-is.
+        result = ar.run_assistant("hello there", persist=False)
+
+        assert result["retrieval_only"] is False
+        assert "no evidence" in result["answer"].lower() or result["answer"]
