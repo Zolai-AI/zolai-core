@@ -35,6 +35,9 @@ VALID_CAPABILITIES = ["pos", "morphology", "collocation", "sentence_patterns", "
 class DiscoverySummary:
     """Summary of a discovery build run."""
     capabilities_run: list[str] = field(default_factory=list)
+    # build_discovery() assigned summary.dry_run but the field never existed and
+    # to_dict() never emitted it, so callers hit KeyError 'dry_run'.
+    dry_run: bool = False
     elapsed_seconds: float = 0.0
     pos: dict[str, Any] = field(default_factory=dict)
     morphology: dict[str, Any] = field(default_factory=dict)
@@ -47,6 +50,7 @@ class DiscoverySummary:
         return {
             "pipeline_version": "phase3-v1",
             "capabilities_run": self.capabilities_run,
+            "dry_run": self.dry_run,
             "elapsed_seconds": round(self.elapsed_seconds, 2),
             "pos": self.pos,
             "morphology": self.morphology,

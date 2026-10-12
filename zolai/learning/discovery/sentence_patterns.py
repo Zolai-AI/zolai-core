@@ -288,12 +288,18 @@ def build_sentence_pattern_hypotheses(
             log.warning("Failed to write pattern %s: %s", pattern_data.get("pattern_id"), exc)
             skipped += 1
 
+    # Which pattern types were actually seen - a summary the caller can read
+    # without scanning grammar_patterns itself.
+    pattern_types = sorted(
+        {str(p.get("pattern_type")) for p in all_patterns if p.get("pattern_type")}
+    )
     return {
         "capability": "sentence_patterns",
         "patterns_written": patterns_written,
         "status_counts": status_counts,
         "skipped": skipped,
         "candidates_considered": len(all_patterns),
+        "pattern_types": pattern_types,
     }
 class SentencePatternDiscovery:
     """Wrapper class for sentence pattern discovery matching test expectations."""

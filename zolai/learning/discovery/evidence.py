@@ -101,7 +101,7 @@ def upsert_evidence(
                 "INSERT INTO foundation_evidence "
                 "(fact_type, fact_key, tier, source, confidence, provenance_hash, "
                 "payload, method, extractor, created_at) "
-                "VALUES (:ft, :fk, :tier, :src, :conf, :phash, :payload, :mth, :ext, :now)"
+                "VALUES (:ft, :fk, :tier, :src, :conf, :phash, :payload, :mth, :ext, :now) RETURNING id"
             ),
             {
                 "ft": fact_type,
@@ -116,7 +116,7 @@ def upsert_evidence(
                 "now": now,
             },
         )
-        return result.inserted_primary_key[0]
+        return result.scalar_one()
 
 
 def upsert_evidence_bulk(
@@ -183,7 +183,7 @@ def upsert_evidence_bulk(
                         "INSERT INTO foundation_evidence "
                         "(fact_type, fact_key, tier, source, confidence, provenance_hash, "
                         "payload, method, extractor, created_at) "
-                        "VALUES (:ft, :fk, :tier, :src, :conf, :phash, :payload, :mth, :ext, :now)"
+                        "VALUES (:ft, :fk, :tier, :src, :conf, :phash, :payload, :mth, :ext, :now) RETURNING id"
                     ),
                     {
                         "ft": fact_type,
@@ -198,6 +198,6 @@ def upsert_evidence_bulk(
                         "now": now,
                     },
                 )
-                ids.append(result.inserted_primary_key[0])
+                ids.append(result.scalar_one())
 
     return ids
