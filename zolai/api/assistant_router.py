@@ -145,12 +145,37 @@ def _sanitize(answer: str) -> tuple[str, dict[str, Any]]:
     return zvs_review(answer)
 
 
+#: How many distinct words of a question get a direct dictionary lookup.
+MAX_DICTIONARY_LOOKUPS = 4
+
+
 def _first_token(text: str) -> str:
+    tokens = _content_tokens(text)
+    return tokens[0] if tokens else ""
+
+
+def _content_tokens(text: str) -> list[str]:
+    """Distinct, meaningful words of a question, in order, deduplicated.
+
+    The assistant used to look up only the *first* word, so "nang bang hih thei"
+    produced one dictionary entry and the model — correctly, from the evidence it
+    was given — reported no meaning for the other three while they sat in the
+    corpus. Every word gets its own lookup, bounded so a long question cannot
+    fan out into a dozen calls.
+    """
+    from ..rag.retrieve import STOPWORDS
+
+    out: list[str] = []
+    seen: set[str] = set()
     for token in str(text or "").split():
         stripped = "".join(ch for ch in token.lower() if ch.isalpha() or ch == "-")
-        if len(stripped) >= 2:
-            return stripped
-    return ""
+        if len(stripped) < 2 or stripped in STOPWORDS or stripped in seen:
+            continue
+        seen.add(stripped)
+        out.append(stripped)
+        if len(out) >= MAX_DICTIONARY_LOOKUPS:
+            break
+    return out
 
 
 def _retrieval_only(message: str, allow: frozenset[str]) -> dict[str, Any]:
@@ -178,9 +203,10 @@ def _retrieval_only(message: str, allow: frozenset[str]) -> dict[str, Any]:
         rag_input["source_filter"] = ["bible_verses"]
 
     calls = [ToolCall(name="rag_search", input=rag_input)]
-    token = _first_token(message)
-    if token and "dictionary_lookup" in allow:
-        calls.append(ToolCall(name="dictionary_lookup", input={"word": token}))
+    if "dictionary_lookup" in allow:
+        # One lookup per content word, not one per question.
+        for token in _content_tokens(message):
+            calls.append(ToolCall(name="dictionary_lookup", input={"word": token}))
     for call in calls:
         result = execute_tool(call, allow)
         entry = result.to_dict()

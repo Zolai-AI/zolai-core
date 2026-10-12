@@ -68,15 +68,24 @@ def _rag_search(inp: dict[str, Any]) -> Any:
         if not source_filter:
             source_filter = None
     results = _retriever().search(query, limit=limit, source_filter=source_filter)
-    return [
-        {
+    # The row's own content travels with the hit. Without it the tool returned
+    # only the headword — "dictionary:bang" — and the model, having been handed
+    # a list of words with no meanings, correctly reported "no evidence for
+    # bang" while `bang = what` sat in the corpus the whole time.
+    out: list[dict[str, Any]] = []
+    for r in results:
+        item: dict[str, Any] = {
             "source": r.source,
             "ref": r.id,
             "text": (r.text or "")[:300],
             "score": r.score,
         }
-        for r in results
-    ]
+        for field in ("definition", "context", "pos"):
+            value = r.metadata.get(field)
+            if value not in (None, "", "unknown"):
+                item[field] = str(value)[:300]
+        out.append(item)
+    return out
 
 
 def _word_evidence(inp: dict[str, Any]) -> Any:

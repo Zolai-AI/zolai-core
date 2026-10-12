@@ -232,3 +232,40 @@ class TestAssistantFeedback:
         ).fetchone()
         conn.close()
         assert row == (-1,)
+
+
+class TestMultiWordDictionaryLookup:
+    """A question made of several words must look up each of them.
+
+    Only the *first* word was looked up, so for "nang bang hih thei" the model
+    received one dictionary entry and reported no meaning for the other three —
+    correctly, given the evidence, but useless. All four words were in the
+    corpus.
+    """
+
+    def test_content_tokens_drops_stopwords_and_dedupes(self):
+        from zolai.api.assistant_router import _content_tokens
+
+        assert _content_tokens("nang bang hih thei") == ["nang", "bang", "hih", "thei"]
+        assert _content_tokens("what is pasian") == ["pasian"]
+        assert _content_tokens("pasian pasian phat") == ["pasian", "phat"]
+        assert _content_tokens("what does it mean") == []
+
+    def test_content_tokens_is_bounded(self):
+        from zolai.api.assistant_router import MAX_DICTIONARY_LOOKUPS, _content_tokens
+
+        # Digits are stripped before the length check, so "w0" -> "w" is rejected
+        # as too short and "token0" -> "token" dedupes to one. The fixture needs
+        # distinct alphabetic words.
+        words = [
+            "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta",
+            "iota", "kappa", "lambda", "mu", "nu", "xi", "omicron", "pi",
+            "rho", "sigma", "tau", "upsilon",
+        ]
+        assert len(_content_tokens(" ".join(words))) == MAX_DICTIONARY_LOOKUPS
+
+    def test_first_token_still_works(self):
+        from zolai.api.assistant_router import _first_token
+
+        assert _first_token("what is pasian") == "pasian"
+        assert _first_token("!!!") == ""
