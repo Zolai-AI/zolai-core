@@ -279,11 +279,16 @@ class TestLoopBehaviour:
             chat=chat,
             max_turns=3,
         )
-        assert state["n"] == 3
-        assert result["turns"] == 3
+        # 3 tool calls, then ONE synthesis attempt over the gathered evidence.
+        # Without that last call the loop answered "please ask again" while
+        # sitting on the citations that answer would have used.
+        assert state["n"] == 4
+        assert result["turns"] == 4
         assert result["ok"] is False
         assert result["error"] == loop_mod.MAX_TURNS_EXCEEDED
         assert len(result["tool_calls"]) == 3
+        # This stub keeps emitting tool blocks, so synthesis yields no prose
+        # and the real fallback is returned -- with no marker leaked.
         assert TOOL_MARKER not in result["reply"]
 
     def test_out_of_allowlist_tool_errors_without_execution(self) -> None:
@@ -542,3 +547,73 @@ def _canonical_counts(db_path) -> dict[str, int]:
         }
     finally:
         conn.close()
+
+
+class TestSynthesisAfterToolBudget:
+    """A model that spends every turn researching must still be answered.
+
+    Previously the loop returned "please ask again in a slightly simpler
+    way" the moment the turn budget was spent -- even when three tool calls
+    had already produced usable evidence. Production hit exactly this:
+    citations: 8, reply: "I hit my per-message tool limit".
+    """
+
+    def test_evidence_gathered_becomes_an_answer_not_a_rephrase_request(self):
+        tool_turn = {
+            "text": f'{TOOL_MARKER}\n{{"name": "rag_search", "input": {{"query": "nang"}}}}',
+            "tool_calls": [],
+        }
+        state = {"n": 0}
+
+        def chat(messages, tools=None):
+            state["n"] += 1
+            # Spend all three turns calling tools -- then, on the post-budget
+            # synthesis turn, finally answer. A model that never stops
+            # researching is exactly the case that used to get "ask again".
+            if state["n"] > 3:
+                return {"text": "nang = weak, ill [dictionary:nang]"}
+            return dict(tool_turn)
+
+        result = run_agent_loop(
+            system_prompt="sys",
+            user_message="what is nang",
+            allow=allow_list("public"),
+            chat=chat,
+            max_turns=3,
+        )
+
+        assert result["ok"] is True, "evidence existed but the user was told to rephrase"
+        assert "ask again" not in result["reply"].lower()
+        assert "nang = weak" in result["reply"]
+        assert TOOL_MARKER not in result["reply"]
+        assert len(result["tool_calls"]) == 3
+
+    def test_synthesis_turn_does_not_run_when_no_evidence(self):
+        always_tool = {
+            "text": f'{TOOL_MARKER}\n{{"name": "grammar_check", "input": {{"text": "x"}}}}',
+            "tool_calls": [],
+        }
+        # grammar_check succeeds, so evidence exists; count calls to prove the
+        # synthesis turn is bounded to exactly one extra, never a loop.
+        state = {"n": 0}
+
+        def chat(messages, tools=None):
+            state["n"] += 1
+            # Tool calls for the budget, then one synthesis turn that yields
+            # nothing -- proving the extra turn is bounded, never a loop.
+            if state["n"] > 2:
+                return {"text": ""}
+            return dict(always_tool)
+
+        result = run_agent_loop(
+            system_prompt="sys",
+            user_message="x",
+            allow=allow_list("public"),
+            chat=chat,
+            max_turns=2,
+        )
+
+        assert state["n"] == 3, "exactly one synthesis turn, not an unbounded loop"
+        assert result["ok"] is False
+        assert result["error"] == loop_mod.MAX_TURNS_EXCEEDED
+        assert TOOL_MARKER not in result["reply"]

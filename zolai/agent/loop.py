@@ -11,7 +11,10 @@ prompt-embedded JSON:
 - results ride back as ``<<<TOOL_RESULT>>>`` follow-up turns that keep the
   original question in the user message.
 
-Rules enforced here: **≤1 tool per turn**, default ``AGENT_MAX_TURNS=3``,
+Rules enforced here: **≤1 tool per turn**, default ``AGENT_MAX_TURNS=3``
+tool calls followed by at most **one** final synthesis turn when evidence
+was gathered (so a model that spends every turn researching still answers
+instead of being told to rephrase),
 native ``tools`` offered on turn 1 **only** for ``openai``/``openrouter``
 rows, and :class:`TokenGate` (``HOLD_CHARS=16``) so a marker never leaks to
 the UI.  The loop always terminates — on exhaustion it returns a real
@@ -174,8 +177,10 @@ def build_tools_section(names: Iterable[str]) -> str:
     return "\n".join(
         [
             "## TOOLS",
-            "You have access to the following tools. Only call a tool when the answer",
-            "actually needs live data — otherwise answer directly.",
+            "These tools ARE available to you in this session. For any question about",
+            "Zolai words, meaning, grammar or scripture you MUST call one before",
+            "answering -- answering from memory is not acceptable here, and saying the",
+            "tools are unavailable is false.",
             "To call a tool, reply with EXACTLY this block and nothing else:",
             "",
             TOOL_MARKER,
@@ -185,8 +190,10 @@ def build_tools_section(names: Iterable[str]) -> str:
             json.dumps(schemas, ensure_ascii=False, indent=2),
             "",
             f"Call at most ONE tool per turn. After a {TOOL_RESULT_MARKER} block arrives",
-            "use it to write the final answer. Never invent tool results.",
-            f"Maximum {AGENT_MAX_TURNS} turns per user message.",
+            "those are real results for this question: use them to write the final",
+            "answer and cite each claim as [source ref]. Never invent tool results,",
+            "and never claim a tool is missing once you have called it.",
+            f"At most {AGENT_MAX_TURNS} tool calls per user message; after that you",
         ]
     )
 
@@ -271,7 +278,11 @@ def run_agent_loop(
     on_token: Callable[[str], None] | None = None,
     on_tool_event: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
-    """Run the tool loop: ≤1 tool/turn, at most ``max_turns`` model turns.
+    """Run the tool loop: ≤1 tool/turn, at most ``max_turns`` tool calls.
+
+    A single extra synthesis turn follows when the budget is spent and
+    evidence exists, so the user gets an answer rather than "please ask
+    again" next to the citations that answer would have used.
 
     Args:
         system_prompt: Base system prompt (``## TOOLS`` is appended).
@@ -367,6 +378,37 @@ def run_agent_loop(
                 }
             )
         message = build_followup_prompt(user_message, [result])
+
+    # Turns exhausted but evidence WAS gathered. Hand it back for one final
+    # synthesis rather than telling the user to rephrase -- shipping
+    # "please ask again" alongside eight citations is strictly worse than
+    # answering from them.
+    if results:
+        # Counted: it is a real model turn, so the reported budget stays
+        # honest rather than silently running one call past max_turns.
+        turns_used += 1
+        try:
+            final = chat(
+                [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": build_followup_prompt(user_message, results)},
+                ],
+                None,
+            )
+            raw = str(final.get("text") or "")
+        except Exception:
+            raw = ""
+        # The model may answer with yet another tool block; there is no turn
+        # left to run it, so keep only the prose. A marker must never reach
+        # the UI, and prose that is really a tool call is not an answer.
+        reply = parse_tool_calls(raw).text.strip()
+        if reply:
+            return {
+                "reply": reply,
+                "tool_calls": list(trace),
+                "turns": turns_used,
+                "ok": True,
+            }
 
     return {
         "reply": (
