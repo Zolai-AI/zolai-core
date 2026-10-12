@@ -243,6 +243,63 @@ def _retrieval_only(message: str, allow: frozenset[str]) -> dict[str, Any]:
     }
 
 
+def _ground_with_evidence(
+    message: str,
+    *,
+    allow: frozenset[str],
+    chat: Any,
+    system_prompt: str,
+    trace: list[dict[str, Any]],
+) -> tuple[str, bool] | None:
+    """One grounding turn for answers that arrived with no tool call at all.
+
+    The loop returns the moment a model turn contains no ``<<<TOOL>>>`` block,
+    so a model that simply answers from memory ships an ungrounded reply with
+    zero citations -- which is what happened for "nang bang hih thei": the
+    model declined to call tools, then claimed it had no evidence, while all
+    four words sat in the dictionary.
+
+    Evidence is gathered here deterministically (same calls the retrieval-only
+    path makes) and handed back for a single synthesis turn. Returns
+    ``(answer, ok)`` when grounding ran, or ``None`` when nothing was found --
+    the caller keeps the model's original reply in that case, because an
+    honest "no evidence" is not a defect.
+    """
+    from ..agent.loop import build_followup_prompt
+
+    calls = [ToolCall(name="rag_search", input={"query": message, "limit": 5})]
+    if "dictionary_lookup" in allow:
+        for token in _content_tokens(message):
+            calls.append(ToolCall(name="dictionary_lookup", input={"word": token}))
+
+    results = []
+    for call in calls:
+        result = execute_tool(call, allow)
+        entry = result.to_dict()
+        entry["input"] = call.input
+        entry["status"] = "completed" if result.ok else "failed"
+        trace.append(entry)
+        if result.ok:
+            results.append(result)
+
+    if not any(citations_from_results([e]) for e in trace):
+        return None  # genuinely nothing to ground on
+
+    try:
+        turn = chat(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": build_followup_prompt(message, results)},
+            ],
+            None,
+        )
+    except Exception:
+        return None
+
+    reply = str(turn.get("text") or "").strip()
+    return (reply, True) if reply else None
+
+
 def run_assistant(
     message: str,
     *,
@@ -303,6 +360,18 @@ def run_assistant(
     answer = str(loop_result.get("reply") or "").strip()
     trace = list(loop_result.get("tool_calls") or [])
     citations = citations_from_results(trace)
+
+    if answer and not trace:
+        # The model answered without consulting the knowledge base. Give it
+        # one deterministic evidence pass rather than shipping a reply that
+        # asserts things about Zolai it never looked up.
+        grounded = _ground_with_evidence(
+            message, allow=allow, chat=chat, system_prompt=system_prompt, trace=trace
+        )
+        if grounded is not None:
+            answer, _ok = grounded
+            citations = citations_from_results(trace)
+
     if not answer:
         # Provider failed mid-loop → honest fallback, never a blank 200.
         out = _retrieval_only(message, allow)
