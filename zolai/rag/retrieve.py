@@ -114,13 +114,35 @@ class UnifiedRetriever:
         self._embedder = None
 
     def _get_embedder(self):
-        """Lazy-load sentence transformer for vector search."""
+        """Lazy-load sentence transformer for vector search.
+
+        The local HF cache is tried first. Loading from the hub issues a HEAD
+        for ``video_preprocessor_config.json`` even when every weight is already
+        on disk, so an engine declared ``network=False`` reached out to
+        huggingface.co purely to confirm a file it had -- and the offline
+        contract tests recorded that as an outbound attempt.
+
+        Network is touched only when nothing is cached yet, so a fresh machine
+        still downloads the model instead of silently losing vector search.
+        """
         if self._embedder is None:
             try:
                 from sentence_transformers import SentenceTransformer
-                self._embedder = SentenceTransformer("all-MiniLM-L6-v2")
-            except (ImportError, OSError):
+            except ImportError:
                 log.warning("sentence-transformers not available; vector search disabled")
+                return None
+            try:
+                self._embedder = SentenceTransformer(
+                    "all-MiniLM-L6-v2", local_files_only=True
+                )
+            except OSError:
+                # Not cached: allow the one-time download.
+                try:
+                    self._embedder = SentenceTransformer("all-MiniLM-L6-v2")
+                except Exception as exc:  # ImportError / OSError / guard raising
+                    log.warning(
+                        "sentence-transformers unavailable; vector search disabled: %s", exc
+                    )
         return self._embedder
 
     # --- Word-centric retrieval (§20) ---
