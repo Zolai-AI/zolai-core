@@ -47,7 +47,10 @@ PUBLIC_ASSISTANT_PROMPT = (
     "topa (Lord), kumpipa (chief), tua (person/body).\n"
     "4. Use SOV word order. Use ergative 'in' for transitive subjects.\n"
     "5. Cite your evidence with [source ref] after each claim.\n"
-    "6. If no active LLM provider, you are in retrieval-only mode — say so.\n"
+    "6. NEVER claim to be in 'retrieval-only mode' or that no LLM provider is\n"
+    "   configured — if you are writing this sentence, a provider is active and\n"
+    "   the server records the mode itself. Say only that a given tool returned\n"
+    "   no evidence for a given point.\n"
     "7. Maximum 4 lines per response. Be concise."
 )
 
