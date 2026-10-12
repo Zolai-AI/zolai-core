@@ -6,6 +6,8 @@ This package provides:
 - Runner: CLI for running evaluations
 """
 
+from .baseline import below_floor, load_baseline
+from .datasets import DbRef, load_dataset, resolve_set
 from .metrics import (
     GrammarMetrics,
     MorphologyMetrics,
@@ -31,6 +33,13 @@ from .store import (
 )
 
 __all__ = [
+    # Baseline gating
+    "load_baseline",
+    "below_floor",
+    # Datasets
+    "DbRef",
+    "resolve_set",
+    "load_dataset",
     # Metrics
     "TokenizationMetrics",
     "POSMetrics",
