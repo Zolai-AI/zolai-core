@@ -21,11 +21,13 @@ def test_morphology_discovery_runs(db_engine: Engine) -> None:
     with db_engine.connect() as conn:
         result = discovery.run(conn)
 
-    assert "words_analyzed" in result
+    # The builder has always returned "words_processed" (as pos.py does);
+    # "words_analyzed" was written aspirationally and never matched.
+    assert "words_processed" in result
     assert "relations_written" in result
     assert "status_counts" in result
     assert result["relations_written"] >= 0
-    assert result["words_analyzed"] >= 0
+    assert result["words_processed"] >= 0
 
 
 def test_morphology_hypotheses_written_have_evidence(db_engine: Engine) -> None:

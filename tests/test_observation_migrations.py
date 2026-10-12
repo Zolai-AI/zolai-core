@@ -34,6 +34,31 @@ from zolai.data.migrations import (
 
 MIGRATIONS_PATH = Path(__file__).resolve().parents[1] / "zolai" / "data" / "migrations.py"
 
+
+def _docstring_lines(source: str) -> set[int]:
+    """Line numbers spanned by module/class/function docstrings.
+
+    The additive-only guard must not flag prose such as the docstring that
+    reads "No DROP / RENAME / ALTER of existing tables" -- but it must still
+    see DDL written inside ordinary string literals.
+    """
+    import ast
+
+    tree = ast.parse(source)
+    spans: set[int] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            start = getattr(node, "lineno", None)
+            end = getattr(node, "end_lineno", None)
+            if start and end:
+                spans.update(range(start, end + 1))
+    return spans
+
+
 NEW_TABLE_DDL = {
     "observations": OBSERVATIONS_DDL,
     "word_observation_stats": WORD_OBSERVATION_STATS_DDL,
@@ -327,11 +352,17 @@ class TestAdditiveOnlySourceScan:
     def test_no_destructive_ddl_outside_comments(self) -> None:
         source = MIGRATIONS_PATH.read_text(encoding="utf-8")
         forbidden = re.compile(r"\b(DROP|RENAME|TRUNCATE)\b")
+        docstring_lines = _docstring_lines(source)
         violations: list[str] = []
         for lineno, line in enumerate(source.splitlines(), start=1):
             stripped = line.lstrip()
             if stripped.startswith("#"):
                 continue  # rollback documentation comments are allowed
+            if lineno in docstring_lines:
+                # Prose, not executable DDL. Skipping whole string literals
+                # instead would gut this gate: real destructive SQL hides in
+                # text("DROP TABLE ..."), so only AST docstring spans are exempt.
+                continue
             if forbidden.search(line):
                 violations.append(f"L{lineno}: {stripped}")
         assert violations == [], f"destructive DDL outside comments: {violations}"
