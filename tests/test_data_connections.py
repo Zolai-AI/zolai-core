@@ -73,8 +73,8 @@ def test_parallel_pairs_exists():
 
 # ────────────────────────────────────────────────────────────────────────────
 # PRE-EXISTING, OPTIONAL-DATA DEPENDENT (NOT part of the DB-first refactor):
-# The Myanmar dictionary (WordAttestation._words) and the online -corpus /
-# -zolai-dictionary text files below are optional shared-data artifacts under
+# The Myanmar dictionary (WordAttestation._words) and the online zolai-web-corpus /
+# zolai-extra-dictionary text files below are optional shared-data artifacts under
 # ../data/online that are not girt in this repo. The DB-first serving reads
 # (dictionary / Bible / grammar / translations) do NOT depend on these files
 # and are covered by the passing attestation tests above. These four tests
@@ -84,7 +84,7 @@ def test_parallel_pairs_exists():
 
 def test__corpus_exists():
     """ corpus files exist."""
-    corpus_dir = DATA_DIR / "online" / "-corpus"
+    corpus_dir = DATA_DIR / "online" / "zolai-web-corpus"
     assert corpus_dir.exists(), f"Missing: {corpus_dir}"
     files = list(corpus_dir.glob("zomi_clean_p*.txt"))
     assert len(files) >= 1, f"No zomi_clean_p*.txt files in {corpus_dir}"
@@ -92,7 +92,7 @@ def test__corpus_exists():
 
 def test__dictionary_exists():
     """ dictionary exists."""
-    path = DATA_DIR / "online" / "-zolai-dictionary" / "words.json"
+    path = DATA_DIR / "online" / "zolai-extra-dictionary" / "words.json"
     assert path.exists(), f"Missing: {path}"
 
 

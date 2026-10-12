@@ -74,6 +74,9 @@ ALLOWLIST_RELS = {
     "eval/datasets.py",  # eval fixtures
     "eval/store.py",  # eval JSONL <-> DB interchange (import/export/seed)
     "eval/cli.py",  # eval interchange flags (--import/--export examples)
+    "eval/runner.py",  # eval gold-set import/export interchange (mirrors eval/store)
+    "publishing/artifact.py",  # build-time DB -> artifact export, not a serving read
+    "publishing/sync.py",  # artifact publish/upload of the exported bundle
     "knowledge/__init__.py",  # docstring only
     "trainer/__init__.py",  # trainer dataset build/export (train/val/test jsonl)
     "knowledge/ingest.py",  # export bundle artifact

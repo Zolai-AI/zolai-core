@@ -29,12 +29,27 @@ def test_discovery_pipeline_runs(db_engine: Engine) -> None:
 
 
 def test_discovery_pipeline_dry_run(db_engine: Engine) -> None:
-    """Test that dry-run returns summary without writing."""
+    """Dry-run analyses the capability but must not persist anything."""
+    with db_engine.connect() as conn:
+        before = conn.execute(
+            text("SELECT COUNT(*) FROM hypotheses WHERE kind = 'pos'")
+        ).scalar_one()
+
     pipeline = DiscoveryPipeline(db_engine, capabilities=["pos"], limit=5, dry_run=True)
     result = pipeline.build()
 
+    with db_engine.connect() as conn:
+        after = conn.execute(
+            text("SELECT COUNT(*) FROM hypotheses WHERE kind = 'pos'")
+        ).scalar_one()
+
     assert result["dry_run"] is True
-    assert result["capabilities_run"] == []
+    # The builder still runs -- it reports what it *would* write -- so the
+    # capability is listed. Asserting [] here would only prove the summary is
+    # empty; what matters is that no row reached the database.
+    assert result["capabilities_run"] == ["pos"]
+    assert after == before, "dry-run wrote rows"
+    assert result["pos"], "dry-run produced no analysis to report"
 
 
 def test_build_discovery_convenience(db_engine: Engine) -> None:

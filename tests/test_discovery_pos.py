@@ -34,7 +34,10 @@ def test_pos_hypotheses_written_have_evidence(db_engine: Engine) -> None:
     with db_engine.connect() as conn:
         discovery.run(conn)
 
-    # Check hypotheses table
+    # Full-table scan: every persisted POS hypothesis must be well-formed.
+    # This failed when 43 promotion-fixture rows (NULL confidence, PID-suffixed
+    # subjects) leaked into the shared DB -- that pollution was real and also
+    # showed up in the admin review UI, so the test was right to fail.
     with db_engine.connect() as conn:
         rows = conn.execute(
             text(
@@ -42,6 +45,8 @@ def test_pos_hypotheses_written_have_evidence(db_engine: Engine) -> None:
                 "confidence FROM hypotheses WHERE kind = 'pos'"
             )
         ).fetchall()
+
+    assert rows, "no POS hypotheses to check -- fixture rows missing?"
 
     for row in rows:
         assert row.kind == "pos"
