@@ -117,13 +117,15 @@ def get_engine(db_path=None):
     return _get_engine(db_path)
 
 
-def get_repositories(db_path=None) -> dict[str, BaseRepository]:
+def get_repositories(db_path=None, engine=None) -> dict[str, BaseRepository]:
     """Return an ``{entity_name: repository}`` map for both legacy + extended repos.
 
     Convenience factory used by serving modules and the API to instantiate every
     repository against a single engine.
     """
-    engine = get_engine(db_path)
+    from ..schema_v2 import get_engine as _get_engine
+    if engine is None:
+        engine = _get_engine(db_path)
     repos = {
         "dictionary": DictionaryRepository(engine),
         "dictionary_en_zo": DictionaryEnZoRepository(engine),
