@@ -669,7 +669,44 @@ class UnifiedRetriever:
         nothing else, so a model reading it had no proposition to work from.
         Every search table publishes context columns (``definition``, ``pos``,
         ``context``); those are the answerable text.
+
+        For Bible verses, we format with Zolai + English side by side for clarity.
         """
+        source = result.source
+
+        # Special handling for Bible verses - show Zolai + English side by side
+        if source == "bible_verses":
+            zo_text = result.text
+            en_text = result.metadata.get("context", "")  # en_kJV
+            alt_zo = result.metadata.get("alt_zo", "")   # zo_tedim2010
+            ref = result.metadata.get("ref", result.id)
+
+            # Format: [n] REF - Zo text | EN translation
+            parts = [f"[{index}] {ref}"]
+            if zo_text:
+                parts.append(f"Zo: {zo_text[:300]}")
+            if en_text and en_text != zo_text:
+                parts.append(f"EN: {en_text[:300]}")
+            if alt_zo and alt_zo != zo_text:
+                parts.append(f"Alt: {alt_zo[:200]}")
+            return " | ".join(parts)
+
+        # Special handling for dictionary entries
+        if source in ("dictionary", "dictionary_en_zo"):
+            parts = [f"[{index}] {source}: {result.text}"]
+            details = []
+            for field in ("definition", "pos", "alt_zo"):
+                value = result.metadata.get(field)
+                if value is None:
+                    continue
+                text_value = str(value).strip()
+                if text_value and text_value.lower() not in {"unknown", "n", "none", ""}:
+                    details.append(f"{field}={text_value}")
+            if details:
+                parts.append(f" ({'; '.join(details)})")
+            return "".join(parts)
+
+        # Default handling for other sources
         parts = [f"[{index}] {result.source}: {result.text}"]
         details = []
         for field in ("definition", "context", "pos", "alt_zo", "frequency"):
