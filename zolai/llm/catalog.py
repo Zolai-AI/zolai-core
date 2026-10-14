@@ -86,12 +86,21 @@ AI_PROVIDER_CATALOG: tuple[CatalogProvider, ...] = (
         # Resolved from config at request time — never a static string, so a
         # boot picks up a changed AI_BRAIN_URL.
         base_url="",
-        # Only models that actually return a completion are offered (matches
-        # the pcore-assistant probe results — no dead ids in the model picker).
+        # Seed list only, and it had gone stale: four ids were hardcoded from one
+        # probe while the Brain served nine. `refresh-models` now discovers the
+        # live list (the row's `base_url` is blank on purpose — it resolves from
+        # AI_BRAIN_URL at request time, which is what used to break discovery).
+        # Re-run `POST /admin/ai-providers/pcore-brain/refresh-models` after the
+        # Brain's catalogue changes; this list is only the first-boot fallback.
         models=(
+            "auto",
             "opencode/nemotron-3-ultra-free",
+            "opencode/nemotron-3.5-lightning-free",
             "opencode/mimo-v2.6-flash-free",
             "opencode/muse-spark-1.3-contributor-free",
+            "opencode/space-bunny-free",
+            "opencode/ling-3.0-flash-fin-free",
+            "opencode/longcat-2.5-preview-free",
             "opencode/big-pickle",
         ),
         docs="https://pcore-system.site",

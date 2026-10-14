@@ -124,12 +124,28 @@ class TestCatalogSeed:
             "PCORE_BRIDGE_API_KEY",
             "AI_API_KEY",
         )
-        assert list(entry.models) == [
+        # The seed had drifted from the Brain's real catalogue: four hardcoded
+        # ids from a single probe, while the Brain served nine. This asserts the
+        # property that matters — the seed is a complete, duplicate-free list
+        # carrying the Brain's `auto` router — rather than pinning a count that
+        # goes stale the next time the Brain adds a model. `refresh-models`
+        # discovers the live list.
+        models = list(entry.models)
+        assert models, "the Brain seed must offer at least one model"
+        assert len(models) == len(set(models)), "duplicate model id in the Brain seed"
+        assert "auto" in models
+        assert models[0] == "auto"
+        # Every seeded id is namespaced to the Brain's `opencode/` provider (or
+        # is the router itself); a bare vendor id here would be unresolvable.
+        assert all(m == "auto" or m.startswith("opencode/") for m in models)
+        # The ids the old seed knew must not have been dropped in the update.
+        for kept in (
             "opencode/nemotron-3-ultra-free",
             "opencode/mimo-v2.6-flash-free",
             "opencode/muse-spark-1.3-contributor-free",
             "opencode/big-pickle",
-        ]
+        ):
+            assert kept in models
 
 
 # ---------------------------------------------------------------------------
