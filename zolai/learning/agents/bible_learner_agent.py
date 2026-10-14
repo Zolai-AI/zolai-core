@@ -296,33 +296,44 @@ class BibleLearnerAgent(BaseAgent):
         )
 
     # Background continuous learning
+    async def run_learning_cycle(self) -> dict:
+        """Run exactly one Bible learning cycle and return what it produced.
+
+        Split out of :meth:`continuous_learning_loop` because that method never
+        returns (it is ``while True``); callers that want a single pass must not
+        await it.
+        """
+        logger.info("BibleLearner: Running continuous learning cycle")
+
+        self.bible_learner.extract_patterns()
+
+        stats = self.bible_learner.get_pattern_stats()
+        self.pattern_frequency = stats.get("pattern_counts", {})
+
+        await self._extract_vocabulary({"limit": 100, "min_frequency": 1})
+
+        await self.emit_learning_signal(
+            query="Continuous Bible learning cycle",
+            response=(
+                f"Updated patterns: {self.pattern_frequency}, "
+                f"vocabulary: {len(self.learned_vocabulary)}"
+            ),
+            feedback_type=FeedbackType.EXPLICIT_UP,
+            confidence=0.9,
+            metadata={"cycle": "continuous", "stats": stats},
+        )
+
+        self.update_metrics("knowledge_items_learned", 1)
+        return {
+            "pattern_counts": self.pattern_frequency,
+            "vocabulary_size": len(self.learned_vocabulary),
+        }
+
     async def continuous_learning_loop(self, interval: int = 3600):
-        """Continuous learning from Bible - runs periodically."""
+        """Continuous learning from Bible - runs periodically until cancelled."""
         while True:
             try:
-                logger.info("BibleLearner: Running continuous learning cycle")
-                
-                # Extract new patterns from Bible
-                self.bible_learner.extract_patterns()
-                
-                # Update pattern frequency
-                stats = self.bible_learner.get_pattern_stats()
-                self.pattern_frequency = stats.get("pattern_counts", {})
-                
-                # Learn new vocabulary from Bible
-                await self._extract_vocabulary({"limit": 100, "min_frequency": 1})
-                
-                # Emit learning signal
-                await self.emit_learning_signal(
-                    query="Continuous Bible learning cycle",
-                    response=f"Updated patterns: {self.pattern_frequency}, vocabulary: {len(self.learned_vocabulary)}",
-                    feedback_type=FeedbackType.EXPLICIT_UP,
-                    confidence=0.9,
-                    metadata={"cycle": "continuous", "stats": stats}
-                )
-                
-                self.update_metrics("knowledge_items_learned", 1)
-                
+                await self.run_learning_cycle()
             except Exception as e:
                 logger.error(f"BibleLearner continuous learning error: {e}")
                 self.update_metrics("errors", 1)
