@@ -10,12 +10,11 @@ This agent:
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import re
 from typing import Any, Optional
 
-from .base_agent import BaseAgent, AgentConfig, AgentRole, AgentSkill, AgentMessage, DiscussionMixin, FeedbackType
+from .agent_registry import resolve_agent_config
+from .base_agent import BaseAgent, AgentMessage, DiscussionMixin, FeedbackType
 from ..bible_pattern_learner import get_bible_learner
 from ...zvs import validate as zvs_validate
 
@@ -44,19 +43,8 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
     """Grammar expert agent for ZVS 2018 compliance."""
 
     def __init__(self, engine=None):
-        config = AgentConfig(
-            agent_id="grammar_expert_001",
-            name="GrammarExpert",
-            role=AgentRole.GRAMMAR_EXPERT,
-            skills=[
-                AgentSkill.GRAMMAR_VALIDATION,
-                AgentSkill.ERROR_DETECTION,
-                AgentSkill.CONTINUOUS_LEARNING,
-            ],
-            bible_priority=True,
-            confidence_threshold=0.9,
-        )
-        super().__init__(config, engine)
+        # Identity, skills and tuning live in the registry (SQLite).
+        super().__init__(resolve_agent_config("grammar_expert_001", engine), engine)
         
         self.bible_learner = get_bible_learner()
         self.grammar_rules: dict = {}

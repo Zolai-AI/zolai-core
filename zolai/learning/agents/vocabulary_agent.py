@@ -10,12 +10,12 @@ This agent:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections import Counter
 from typing import Any, Optional
 
-from .base_agent import BaseAgent, AgentConfig, AgentRole, AgentSkill, AgentMessage, DiscussionMixin
+from .agent_registry import resolve_agent_config
+from .base_agent import BaseAgent, AgentMessage, DiscussionMixin
 from ..bible_pattern_learner import get_bible_learner
 
 logger = logging.getLogger(__name__)
@@ -25,19 +25,8 @@ class VocabularyAgent(BaseAgent, DiscussionMixin):
     """Vocabulary builder agent for Zolai language."""
 
     def __init__(self, engine=None):
-        config = AgentConfig(
-            agent_id="vocabulary_builder_001",
-            name="VocabularyBuilder",
-            role=AgentRole.VOCABULARY_BUILDER,
-            skills=[
-                AgentSkill.VOCABULARY_EXPANSION,
-                AgentSkill.CONTEXT_ANALYSIS,
-                AgentSkill.CONTINUOUS_LEARNING,
-            ],
-            bible_priority=True,
-            confidence_threshold=0.8,
-        )
-        super().__init__(config, engine)
+        # Identity, skills and tuning live in the registry (SQLite).
+        super().__init__(resolve_agent_config("vocabulary_builder_001", engine), engine)
         
         self.bible_learner = get_bible_learner()
         self.vocabulary: dict = {}
