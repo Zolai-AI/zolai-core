@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any
@@ -277,6 +278,7 @@ def run_agent_loop(
     native: bool = False,
     on_token: Callable[[str], None] | None = None,
     on_tool_event: Callable[[dict[str, Any]], None] | None = None,
+    timeout_s: float | None = None,
 ) -> dict[str, Any]:
     """Run the tool loop: ≤1 tool/turn, at most ``max_turns`` tool calls.
 
@@ -308,7 +310,27 @@ def run_agent_loop(
     gate = TokenGate(on_token)
     turns_used = 0
 
+    # Wall-clock budget, checked at the turn boundary.
+    #
+    # `max_turns` bounds how much *work* the loop does, not how long it takes.
+    # A run measured at 219s against a real provider while the route is
+    # documented as "≤60s" — and Cloudflare answers 524 at ~100s, so an
+    # unbounded run never reaches the caller at all. `timeout_s=None` keeps the
+    # previous unbounded behaviour for callers that pass it explicitly.
+    deadline = None if timeout_s is None else time.monotonic() + max(0.0, float(timeout_s))
+
     while turns_used < limit:
+        if deadline is not None and time.monotonic() >= deadline:
+            # Return what was gathered rather than running past the caller's
+            # budget, and say so — the run still reports its turns and trace.
+            return {
+                "reply": "",
+                "tool_calls": list(trace),
+                "turns": turns_used,
+                "ok": False,
+                "error": f"timeout: exceeded the {timeout_s:g}s budget after {turns_used} turn(s)",
+                "timed_out": True,
+            }
         turns_used += 1
         native_defs = native_tool_defs(list(allow)) if (native and turns_used == 1) else None
         try:

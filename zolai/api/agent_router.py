@@ -21,6 +21,10 @@ from pydantic import BaseModel, Field
 
 from . import auth
 
+# The documented per-run wall-clock budget. Imported at module scope (not inside
+# the health handler) because the run route now actually enforces it.
+from ..agent.loop import AGENT_TIMEOUT_S
+
 router = APIRouter(prefix="/api/v1/agent", tags=["agent"])
 
 RUN_DEP = Depends(auth.require_scope("agent:run", strict=True))
@@ -116,6 +120,7 @@ def create_run(body: RunIn, request: Request) -> dict[str, Any]:
             provider=body.provider,
             model=body.model,
             user_api_key=body.api_key,
+            timeout_s=AGENT_TIMEOUT_S,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": "invalid_goal", "detail": str(exc)}) from exc
