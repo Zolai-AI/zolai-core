@@ -65,15 +65,24 @@ class LearningOrchestrator:
         
         # Continuous learning state
         self.continuous_learning_active = False
+        self._processor_loop = None
+        self._processor_task = None
         self.learning_cycle_interval = 3600  # 1 hour default
         
         logger.info("LearningOrchestrator initialized with standard team")
 
     async def start(self):
-        """Start the orchestrator and all agents (idempotent)."""
-        if self.continuous_learning_active:
+        """Start the orchestrator and all agents (idempotent per event loop).
+
+        ``continuous_learning_active`` alone is not a sufficient guard: an
+        instance reused across event loops would keep the flag set while the
+        task processor belonging to the old loop is long gone, so
+        ``submit_and_wait`` would enqueue work nobody drains.
+        """
+        loop = asyncio.get_running_loop()
+        if self.continuous_learning_active and self._processor_loop is loop:
             return
-            
+
         logger.info("Starting LearningOrchestrator")
         
         # Start all agents
@@ -81,8 +90,9 @@ class LearningOrchestrator:
             asyncio.create_task(agent.start())
         
         # Start task processor
-        asyncio.create_task(self._process_task_queue())
-        
+        self._processor_loop = loop
+        self._processor_task = asyncio.create_task(self._process_task_queue())
+
         # Start continuous learning
         self.continuous_learning_active = True
         asyncio.create_task(self._continuous_learning_loop())
@@ -189,9 +199,11 @@ class LearningOrchestrator:
     async def submit_and_wait(self, task_type: str, payload: dict, 
                              timeout: float = 30.0) -> Optional[dict]:
         """Submit a task and wait for result."""
-        # Ensure orchestrator is started
-        if not self.continuous_learning_active:
-            await self.start()
+        # Always call start(): it is idempotent per event loop. Gating on
+        # continuous_learning_active here meant a reused instance kept a stale
+        # "already started" flag while the processor belonged to a dead loop, so
+        # the task was enqueued that nobody drained and every call timed out.
+        await self.start()
         
         task_id = await self.submit_task(task_type, payload)
         
@@ -291,7 +303,10 @@ class LearningOrchestrator:
                 # 1. Bible learner continuous learning
                 bible_learner = self.team_manager.agents.get("bible_learner_001")
                 if bible_learner:
-                    await bible_learner.continuous_learning_loop(interval=0)  # Run once
+                    # ONE pass. ``continuous_learning_loop`` is ``while True``
+                    # and never returns — awaiting it here spun the CPU at 100%
+                    # and starved _process_task_queue until every task timed out.
+                    await bible_learner.run_learning_cycle()
                 
                 # 2. Process feedback signals
                 await self._process_feedback_signals()
