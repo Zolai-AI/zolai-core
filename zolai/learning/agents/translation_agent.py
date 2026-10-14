@@ -126,7 +126,7 @@ class TranslationAgent(BaseAgent, DiscussionMixin):
         """Simple dictionary-based translation using Bible corpus."""
         from ...data.repositories import get_repositories
         
-        repos = get_repositories(self.engine)
+        repos = get_repositories(engine=self.engine)
         dict_repo = repos["dictionary"]
         
         words = text.split()
@@ -134,23 +134,20 @@ class TranslationAgent(BaseAgent, DiscussionMixin):
         
         for word in words:
             if source_lang == "zo" and target_lang == "en":
-                result = dict_repo.lookup_word(word)
-                if result:
-                    translated.append(result[0].get("english_clean") or result[0].get("english", word))
+                rows = dict_repo.lookup_exact(word)
+                if rows:
+                    row = rows[0]
+                    translated.append(
+                        row.get("english_clean") or row.get("english") or f"[{word}]"
+                    )
                 else:
                     translated.append(f"[{word}]")
             elif source_lang == "en" and target_lang == "zo":
-                # Reverse lookup
-                result = dict_repo.lookup_english(word)
-                if result:
-                    # Get first translation
-                    trans = result[0].get("translations_clean", "")
-                    if trans:
-                        translated.append(trans.split(",")[0].strip())
-                    else:
-                        translated.append(f"[{word}]")
-                else:
-                    translated.append(f"[{word}]")
+                rows = dict_repo.search_english(word, limit=1)
+                zolai = rows[0].get("zolai") if rows else None
+                translated.append(zolai if zolai else f"[{word}]")
+            else:
+                translated.append(f"[{word}]")
         
         return " ".join(translated)
 
