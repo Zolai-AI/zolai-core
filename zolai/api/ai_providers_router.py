@@ -73,6 +73,30 @@ def _parse_models(raw: Any) -> list[str]:
     return [str(m) for m in parsed] if isinstance(parsed, list) else []
 
 
+def _secret_view(row: dict[str, Any]) -> ProviderSecretOut:
+    """Masked secret view that reflects what actually resolves.
+
+    ``mask_secret_ref`` only inspects ``api_key_ref``, so a row that carries no
+    ref but takes its key from the environment — the Brain, via
+    ``AI_BRAIN_API_KEY`` and the catalog's ``env_keys`` — was reported as
+    ``configured: false`` while working perfectly. The Studio renders that flag
+    next to the row, so an operator reads a broken provider where none exists.
+
+    Only a boolean is added: the key itself is never read into the response.
+    Rows that need no key keep reporting ``configured: false``, which is honest —
+    there is nothing to configure.
+    """
+    view = dict(settings.mask_secret_ref(row.get("api_key_ref")))  # type: ignore[arg-type]
+    if not view.get("configured") and bool(row.get("requires_key", 1)):
+        try:
+            from ..llm import adapter as adapter_mod
+
+            view["configured"] = bool(adapter_mod.resolve_api_key(row))
+        except Exception:  # pragma: no cover - defensive: never fail a read
+            pass
+    return ProviderSecretOut(**view)  # type: ignore[arg-type]
+
+
 def _to_out(row: dict[str, Any]) -> ProviderOut:
     return ProviderOut(
         catalog_id=str(row.get("catalog_id") or ""),
@@ -87,9 +111,7 @@ def _to_out(row: dict[str, Any]) -> ProviderOut:
         is_active=bool(row.get("is_active", 0)),
         tier=str(row.get("tier") or "standard"),
         timeout_s=int(row.get("timeout_s") or 60),
-        secret=ProviderSecretOut(
-            **settings.mask_secret_ref(row.get("api_key_ref"))  # type: ignore[arg-type]
-        ),
+        secret=_secret_view(row),
     )
 
 

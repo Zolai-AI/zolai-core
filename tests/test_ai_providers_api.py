@@ -516,6 +516,44 @@ class TestAdminAPI:
         )
         assert resp.status_code == 200, resp.text
 
+    def test_secret_configured_reflects_the_env_fallback(
+        self, client, provider_db, admin_key, monkeypatch
+    ) -> None:
+        """The Brain works with a blank `api_key_ref` — so it must not read as
+        unconfigured. The Studio renders this flag on the row."""
+        monkeypatch.setenv("AI_BRAIN_API_KEY", "k" * 32)
+        resp = client.get("/api/v1/admin/ai-providers", headers=_headers(admin_key))
+        assert resp.status_code == 200, resp.text
+        brain = next(
+            i for i in resp.json()["items"] if i["catalog_id"] == "pcore-brain"
+        )
+        assert brain["secret"]["configured"] is True
+
+    def test_secret_configured_is_false_when_nothing_resolves(
+        self, client, provider_db, admin_key, monkeypatch
+    ) -> None:
+        monkeypatch.delenv("AI_BRAIN_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        resp = client.get("/api/v1/admin/ai-providers", headers=_headers(admin_key))
+        assert resp.status_code == 200, resp.text
+        gemini = next(
+            i for i in resp.json()["items"] if i["catalog_id"] == "google-gemini"
+        )
+        assert gemini["secret"]["configured"] is False
+
+    def test_keyless_row_still_reports_not_configured(
+        self, client, provider_db, admin_key
+    ) -> None:
+        """`configured: false` on a row that needs no key is honest — there is
+        nothing to configure — so the env fallback must not flip it."""
+        resp = client.get("/api/v1/admin/ai-providers", headers=_headers(admin_key))
+        assert resp.status_code == 200, resp.text
+        ollama = next(i for i in resp.json()["items"] if i["catalog_id"] == "ollama")
+        assert ollama["requires_key"] is False
+        assert ollama["secret"]["configured"] is False
+
     def test_activate_unknown_is_404(self, client, admin_key) -> None:
         response = client.post(
             "/api/v1/admin/ai-providers/ghost/activate", headers=_headers(admin_key)
