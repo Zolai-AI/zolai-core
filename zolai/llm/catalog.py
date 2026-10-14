@@ -92,16 +92,20 @@ AI_PROVIDER_CATALOG: tuple[CatalogProvider, ...] = (
         # AI_BRAIN_URL at request time, which is what used to break discovery).
         # Re-run `POST /admin/ai-providers/pcore-brain/refresh-models` after the
         # Brain's catalogue changes; this list is only the first-boot fallback.
+        # Order matters: `adapter.resolve_model` falls back to `models[0]` when
+        # a row has no `selected_model`. `auto` is the Brain's router, measured
+        # at ~35s per completion because it probes for a working model, versus
+        # ~2s for a named one — so it is offered but never the default.
         models=(
-            "auto",
+            "opencode/space-bunny-free",
             "opencode/nemotron-3-ultra-free",
             "opencode/nemotron-3.5-lightning-free",
             "opencode/mimo-v2.6-flash-free",
             "opencode/muse-spark-1.3-contributor-free",
-            "opencode/space-bunny-free",
             "opencode/ling-3.0-flash-fin-free",
             "opencode/longcat-2.5-preview-free",
             "opencode/big-pickle",
+            "auto",
         ),
         docs="https://pcore-system.site",
         env_keys=("AI_BRAIN_API_KEY", "PCORE_BRIDGE_API_KEY", "AI_API_KEY"),
