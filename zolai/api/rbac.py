@@ -124,7 +124,13 @@ MEMBER_PREFIXES: tuple[str, ...] = (
 )
 
 #: Strict admin surface (401 anon in warn *and* enforce + scope-gated).
-ADMIN_PREFIXES: tuple[str, ...] = ("/api/v1/admin",)
+ADMIN_PREFIXES: tuple[str, ...] = (
+    "/api/v1/admin",
+    # Multi-agent learning: registry management retunes live agents and the
+    # orchestrator endpoint runs them, so both are admin-only. (Distinct from
+    # the pre-existing /learning/* learner surface, which is its own thing.)
+    "/api/v1/learning",
+)
 
 #: Paths under the public assistant that get the stricter anonymous chat bucket.
 PUBLIC_CHAT_PATHS: tuple[str, ...] = ("/api/v1/assistant/chat",)
