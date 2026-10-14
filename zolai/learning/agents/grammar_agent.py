@@ -161,12 +161,6 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
             
         report = zvs_validate(text)
         corrected = report.text
-        review = {
-            "valid": report.is_valid,
-            "violations_before": len(report.violations),
-            "violations_after": 0 if report.is_valid else len(report.violations),
-        }
-        
         return {
             "original": text,
             "corrected": corrected,
@@ -176,7 +170,6 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
 
     async def _learn_grammar_patterns(self, task: dict[str, Any]) -> dict[str, Any]:
         """Learn grammar patterns from Bible."""
-        pattern_type = task.get("pattern_type", "grammar")
         limit = task.get("limit", 10)
         
         from ..bible_pattern_learner import get_bible_learner
@@ -184,7 +177,6 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
         
         # Get patterns from Bible
         pattern_types = ["sov", "question", "negation", "quotative", "ergative"]
-        all_patterns = {}
         
         for ptype in pattern_types:
             patterns = learner.get_patterns_for_type(ptype, limit=limit)
@@ -203,12 +195,6 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
             
         report = zvs_validate(text)
         corrected = report.text
-        review = {
-            "valid": report.is_valid,
-            "violations_before": len(report.violations),
-            "violations_after": 0 if report.is_valid else len(report.violations),
-        }
-        
         return {
             "text": text,
             "is_compliant": report.is_valid,

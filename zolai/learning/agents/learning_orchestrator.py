@@ -13,14 +13,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
-from .base_agent import BaseAgent, AgentConfig, AgentMessage, AgentRole
+from .base_agent import BaseAgent, AgentRole, DiscussionContext
 from .agent_team import AgentTeamManager, DiscussionFacilitator, create_standard_learning_team
-from .bible_learner_agent import BibleLearnerAgent
-from .translation_agent import TranslationAgent
-from .grammar_agent import GrammarAgent
-from .vocabulary_agent import VocabularyAgent
-from ..feedback_store import get_feedback_store, FeedbackType
-from ..bible_pattern_learner import get_bible_learner
+from ..feedback_store import get_feedback_store
 from ...data.repositories import get_engine as get_data_engine
 
 logger = logging.getLogger(__name__)

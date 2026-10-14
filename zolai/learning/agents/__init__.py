@@ -33,6 +33,15 @@ from .learning_orchestrator import (
     LearningTask,
     get_learning_orchestrator,
 )
+from .agent_registry import (
+    AgentRecord,
+    AgentRegistry,
+    SkillRecord,
+    get_agent_registry,
+    reset_agent_registry,
+    resolve_agent_config,
+)
+from . import agent_management
 
 __all__ = [
     # Base
@@ -59,5 +68,14 @@ __all__ = [
     "LearningOrchestrator",
     "LearningTask",
     "get_learning_orchestrator",
+
+    # Registry (agents + skills live in SQLite)
+    "AgentRegistry",
+    "AgentRecord",
+    "SkillRecord",
+    "get_agent_registry",
+    "reset_agent_registry",
+    "resolve_agent_config",
+    "agent_management",
 ]
 

@@ -15,9 +15,9 @@ import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Optional
+from typing import Optional
 
-from .base_agent import BaseAgent, AgentConfig, AgentMessage, AgentRole, AgentSkill, DiscussionContext
+from .base_agent import BaseAgent, AgentMessage, AgentRole, AgentSkill, DiscussionContext
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class AgentTeamManager:
     def unregister_agent(self, agent_id: str):
         """Unregister an agent."""
         if agent_id in self.agents:
-            agent = self.agents.pop(agent_id)
+            self.agents.pop(agent_id)
             if agent_id in self.agent_to_team:
                 team_id = self.agent_to_team.pop(agent_id)
                 if team_id in self.teams:
@@ -151,8 +151,11 @@ class AgentTeamManager:
         team = self.teams.get(team_id)
         if not team:
             return []
-        return list(set(agent.config.role for agent_id in team.members 
-                       if agent_id in self.agents))
+        return list(set(
+            self.agents[agent_id].role
+            for agent_id in team.members
+            if agent_id in self.agents
+        ))
 
 
 class DiscussionFacilitator:
@@ -180,15 +183,12 @@ class DiscussionFacilitator:
         
         # Notify all participants
         if initial_message:
-            msg = AgentMessage(
-                from_agent=initiator_id,
-                team_id=team_id,
-                message_type="discussion",
-                content=f"DISCUSSION STARTED: {topic}\n\n{initial_message}",
-                metadata={"topic": topic, "initiator": initiator_id}
+            await self.team_manager.broadcast_to_team(
+                initiator_id,
+                team_id,
+                "discussion",
+                f"DISCUSSION STARTED: {topic}\n\n{initial_message}",
             )
-            await self.team_manager.broadcast_to_team(initiator_id, team_id, "discussion", 
-                                                     f"DISCUSSION STARTED: {topic}\n\n{initial_message}")
         
         logger.info(f"Started discussion '{topic}' in team {team_id} by {initiator_id}")
         return context
@@ -219,18 +219,12 @@ class DiscussionFacilitator:
         context.status = "concluded"
         
         # Notify participants of conclusion
-        conclusion_msg = AgentMessage(
-            from_agent=facilitator_id,
-            team_id=context.messages[0].team_id if context.messages else None,
-            message_type="discussion_concluded",
-            content=f"DISCUSSION CONCLUDED: {topic}\n\nConsensus: {consensus or 'No consensus reached'}",
-            metadata={"topic": topic, "consensus": consensus}
-        )
-        
         if context.messages:
             await self.team_manager.broadcast_to_team(
-                facilitator_id, context.messages[0].team_id, "discussion_concluded",
-                f"DISCUSSION CONCLUDED: {topic}\n\nConsensus: {consensus or 'No consensus reached'}"
+                facilitator_id,
+                context.messages[0].team_id,
+                "discussion_concluded",
+                f"DISCUSSION CONCLUDED: {topic}\n\nConsensus: {consensus or 'No consensus reached'}",
             )
         
         # Archive and remove from active
