@@ -197,9 +197,6 @@ class TranslationAgent(BaseAgent, DiscussionMixin):
 
     async def _get_bible_context(self, text: str) -> dict[str, Any]:
         """Get Bible context for text."""
-        from ..bible_pattern_learner import get_bible_learner
-        
-        learner = get_bible_learner()
         words = text.lower().split()
         contexts = {}
         

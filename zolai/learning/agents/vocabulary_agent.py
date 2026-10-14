@@ -170,16 +170,10 @@ class VocabularyAgent(BaseAgent, DiscussionMixin):
     async def _find_word_relationships(self, task: dict[str, Any]) -> dict[str, Any]:
         """Find word relationships (synonyms, antonyms, etc.)."""
         word = task.get("word", "")
-        limit = task.get("limit", 10)
-        
+
         if not word:
             return {"error": "No word provided"}
             
-        learner = get_bible_learner()
-        
-        # Get Bible context for the word
-        context = learner.build_context_for_word(word, limit=5)
-        
         # For now, use collocations as proxy for relationships
         relationships = {
             "synonyms": [],
@@ -227,7 +221,6 @@ class VocabularyAgent(BaseAgent, DiscussionMixin):
     async def _expand_vocabulary(self, task: dict[str, Any]) -> dict[str, Any]:
         """Expand vocabulary with related words."""
         seed_words = task.get("seed_words", [])
-        limit = task.get("limit", 50)
         
         if not seed_words:
             # Use high-frequency words as seeds
