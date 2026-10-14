@@ -25,6 +25,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..llm import provider_settings as settings
+from ..llm.catalog import BRAIN_CATALOG_ID  # type: ignore[import-not-found]
 from ..notifications import get_notification_service
 from . import auth
 from .ai_provider_schemas import (
@@ -102,11 +103,17 @@ def _require_row(catalog_id: str) -> dict[str, Any]:
 
 
 #: Adapters whose remote listing is worth attempting (OpenAI-compatible
-#: ``GET {base}/models`` shape: ``{"data": [{"id": ...}]}``).  ``brain`` and
-#: ``custom`` have no stable listing endpoint — and the gemini catalog row is
-#: OpenAI-compat but Google lists a different shape — all three are
-#: catalog-declared, never fetched.
-_REMOTE_FETCH_ADAPTERS = frozenset({"openai", "openrouter"})
+#: ``GET {base}/models`` shape: ``{"data": [{"id": ...}]}``).
+#:
+#: ``brain`` **was** excluded here on the belief that it had no listing
+#: endpoint. It does: the Brain answers ``GET {AI_BRAIN_URL}/models`` with the
+#: OpenAI shape, and was serving nine model ids while the Studio's picker showed
+#: four. Excluding it meant ``refresh-models`` on the Brain could never
+#: discover anything and the seed list was the only thing ever shown.
+#: ``custom`` stays excluded — a custom base URL has no guarantee of any listing
+#: shape — and gemini stays catalog-only because Google lists a different shape
+#: (see ``_CATALOG_ONLY_IDS``).
+_REMOTE_FETCH_ADAPTERS = frozenset({"openai", "openrouter", "brain"})
 _CATALOG_ONLY_IDS = frozenset({"google-gemini"})
 
 
@@ -120,6 +127,24 @@ def _models_endpoint(base_url: str) -> str:
     return f"{base}/models"
 
 
+def _effective_base_url(row: dict[str, Any]) -> str:
+    """The endpoint this row actually calls, for a blank ``base_url`` too.
+
+    The Brain row is seeded with an **empty** ``base_url`` on purpose: its URL is
+    resolved from config at request time (``AI_BRAIN_URL`` / ``PCORE_BRAIN_URL``,
+    falling back to the public default). Reading the column directly therefore
+    raised "provider has no base_url", and ``refresh-models`` on the Brain
+    silently degraded to the catalog list every single time — which is why the
+    model picker showed four ids while the Brain served nine.
+    """
+    base = str(row.get("base_url") or "").strip()
+    if not base and str(row.get("catalog_id") or "").strip() == BRAIN_CATALOG_ID:
+        from ..llm.catalog import brain_completions_url
+
+        base = brain_completions_url()
+    return base
+
+
 def _fetch_remote_models(row: dict[str, Any], timeout_s: float = 15.0) -> list[str]:
     """GET the provider's ``/models`` endpoint with the row's key.
 
@@ -131,7 +156,7 @@ def _fetch_remote_models(row: dict[str, Any], timeout_s: float = 15.0) -> list[s
 
     from ..llm import adapter as adapter_mod
 
-    url = _models_endpoint(str(row.get("base_url") or ""))
+    url = _models_endpoint(_effective_base_url(row))
     if not url or url == "/models":
         raise ValueError(f"provider {row.get('catalog_id')!r} has no base_url")
     key = adapter_mod.resolve_api_key(row)

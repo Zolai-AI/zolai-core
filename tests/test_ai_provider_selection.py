@@ -10,8 +10,10 @@ Covers the plan's done-when:
 - ``seed_catalog`` activates ``pcore-brain`` when no row is active and never
   clobbers an admin choice (asserted in ``test_ai_providers_api``);
 - ``POST /admin/ai-providers/{id}/refresh-models``: a remote fetch persists
-  (``source="remote"``); any failure — and every brain/custom/gemini row —
-  degrades to the catalog list (``source="catalog"``, never 500);
+  (``source="remote"``); any failure — and rows whose listing shape does not
+  match, such as gemini — degrades to the catalog list (``source="catalog"``,
+  never 500). The Brain **does** publish a listing and is fetched; its blank
+  ``base_url`` resolves from ``AI_BRAIN_URL`` at request time;
 - ``GET /api/v1/providers``: public in every auth mode, enabled rows only,
   exactly five fields, zero secrets;
 - ``adapter.resolve_model`` falls back to ``models[0]`` for a blank
@@ -391,10 +393,37 @@ class TestRefreshModels:
         row = settings.get_provider_row("openai", provider_db)
         assert json.loads(row["models"]) == ["keep-me"]  # never persisted
 
-    @pytest.mark.parametrize("cid", ["pcore-brain", "google-gemini"])
-    def test_brain_and_gemini_never_fetch(
+    def test_brain_discovers_its_live_model_list(self, client, provider_db, admin_key, monkeypatch) -> None:
+        """The Brain *does* publish a listing, so refresh-models must reach it.
+
+        This row is seeded with a blank ``base_url`` because the URL is resolved
+        from ``AI_BRAIN_URL`` at request time. Reading the column directly raised
+        "has no base_url", so every refresh silently fell back to the seeded list
+        and the picker showed four ids while the Brain served nine.
+        """
+        calls: list[str] = []
+
+        def _recorder(row, timeout_s: float = 15.0) -> list[str]:
+            calls.append(str(row.get("catalog_id")))
+            return ["auto", "opencode/space-bunny-free"]
+
+        monkeypatch.setattr(ai_providers_router, "_fetch_remote_models", _recorder)
+        resp = client.post(
+            "/api/v1/admin/ai-providers/pcore-brain/refresh-models", headers=_headers(admin_key)
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["source"] == "remote"
+        assert body["models"] == ["auto", "opencode/space-bunny-free"]
+        assert calls == ["pcore-brain"]  # the fetch was actually attempted
+        row = settings.get_provider_row("pcore-brain", provider_db)
+        assert json.loads(row["models"]) == ["auto", "opencode/space-bunny-free"]
+
+    @pytest.mark.parametrize("cid", ["google-gemini"])
+    def test_gemini_still_degrades_to_catalog(
         self, client, provider_db, admin_key, monkeypatch, cid
     ) -> None:
+        """Gemini's OpenAI-compatibility layer has no usable listing shape."""
         calls: list[str] = []
 
         def _recorder(row, timeout_s: float = 15.0) -> list[str]:
@@ -409,7 +438,25 @@ class TestRefreshModels:
         body = resp.json()
         assert body["source"] == "catalog"
         assert body["models"] == list(catalog.find_catalog(cid).models)
-        assert calls == []  # never attempted (brain/custom have no listing; gemini shape differs)
+        assert calls == []  # never attempted: gemini's payload shape differs
+
+    def test_brain_base_url_resolves_from_config(self, monkeypatch) -> None:
+        """A blank ``base_url`` on the Brain row resolves to the Brain endpoint."""
+        monkeypatch.setenv("AI_BRAIN_URL", "https://example.invalid/v1")
+        monkeypatch.delenv("PCORE_BRAIN_URL", raising=False)
+        resolved = ai_providers_router._effective_base_url({"catalog_id": "pcore-brain", "base_url": ""})
+        assert resolved == "https://example.invalid/v1/chat/completions"
+        assert ai_providers_router._models_endpoint(resolved) == "https://example.invalid/v1/models"
+
+    def test_explicit_base_url_still_wins_over_the_brain_default(self) -> None:
+        row = {"catalog_id": "pcore-brain", "base_url": "https://explicit.invalid/v1"}
+        assert ai_providers_router._effective_base_url(row) == "https://explicit.invalid/v1"
+
+    def test_non_brain_blank_base_url_is_still_a_clear_error(self) -> None:
+        # Only the Brain resolves dynamically; a blank URL elsewhere stays a
+        # hard failure rather than silently hitting some default.
+        with pytest.raises(ValueError):
+            ai_providers_router._fetch_remote_models({"catalog_id": "openai", "base_url": ""})
 
     def test_unknown_id_is_404(self, client, admin_key) -> None:
         resp = client.post(
