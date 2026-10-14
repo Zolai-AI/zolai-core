@@ -10,12 +10,13 @@ This agent:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any, Optional
 
-from .base_agent import BaseAgent, AgentConfig, AgentRole, AgentSkill, AgentMessage, DiscussionMixin
+from .agent_registry import resolve_agent_config
+from .base_agent import BaseAgent, AgentMessage, DiscussionMixin
 from ..bible_pattern_learner import get_bible_learner
+from ..feedback_store import FeedbackType
 
 logger = logging.getLogger(__name__)
 
@@ -24,20 +25,8 @@ class TranslationAgent(BaseAgent, DiscussionMixin):
     """Translation agent with Bible grounding."""
 
     def __init__(self, engine=None):
-        config = AgentConfig(
-            agent_id="translator_001",
-            name="Translator",
-            role=AgentRole.TRANSLATOR,
-            skills=[
-                AgentSkill.BIBLE_TRANSLATION_GROUNDING,
-                AgentSkill.TRANSLATION_VALIDATION,
-                AgentSkill.CONTEXT_ANALYSIS,
-                AgentSkill.CONTINUOUS_LEARNING,
-            ],
-            bible_priority=True,
-            confidence_threshold=0.8,
-        )
-        super().__init__(config, engine)
+        # Identity, skills and tuning live in the registry (SQLite).
+        super().__init__(resolve_agent_config("translator_001", engine), engine)
         
         self.bible_learner = get_bible_learner()
         self.translation_memory: dict = {}  # Cache translations

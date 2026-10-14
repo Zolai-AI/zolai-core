@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
 
-from .base_agent import BaseAgent, AgentConfig, AgentRole, AgentSkill, AgentMessage, FeedbackType
+from .agent_registry import resolve_agent_config
+from .base_agent import BaseAgent, AgentMessage, FeedbackType
 from ..bible_pattern_learner import get_bible_learner
 
 logger = logging.getLogger(__name__)
@@ -26,20 +26,8 @@ class BibleLearnerAgent(BaseAgent):
     """Primary agent for learning Zolai from Bible corpus."""
 
     def __init__(self, engine=None):
-        config = AgentConfig(
-            agent_id="bible_learner_001",
-            name="BibleLearner",
-            role=AgentRole.BIBLE_LEARNER,
-            skills=[
-                AgentSkill.BIBLE_PATTERN_EXTRACTION,
-                AgentSkill.BIBLE_TRANSLATION_GROUNDING,
-                AgentSkill.SENTENCE_PATTERN_LEARNING,
-                AgentSkill.CONTINUOUS_LEARNING,
-            ],
-            bible_priority=True,
-            confidence_threshold=0.85,
-        )
-        super().__init__(config, engine)
+        # Identity, skills and tuning live in the registry (SQLite).
+        super().__init__(resolve_agent_config("bible_learner_001", engine), engine)
         
         self.bible_learner = get_bible_learner()
         self.extracted_patterns: dict = {}

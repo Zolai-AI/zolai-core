@@ -11,7 +11,6 @@ All agents inherit from this base class which provides:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import uuid
 from abc import ABC, abstractmethod
@@ -20,12 +19,11 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
 
-from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from ...data.repositories import get_engine, get_repositories
 from ...rag.retrieve import UnifiedRetriever
-from ..feedback_store import FeedbackStore, FeedbackType, LearningSignal, get_feedback_store
+from ..feedback_store import FeedbackType, LearningSignal, get_feedback_store
 from ..bible_pattern_learner import get_bible_learner
 
 logger = logging.getLogger(__name__)
@@ -105,22 +103,13 @@ class BaseAgent(ABC):
     """Base class for all learning agents."""
 
     def __init__(self, config: AgentConfig, engine: Optional[Engine] = None):
-        self.config = config
         self.engine = engine or get_engine()
         self.repos = get_repositories(engine=self.engine)
         self.retriever = UnifiedRetriever(self.engine)
         self.bible_learner = get_bible_learner()
         self.feedback_store = get_feedback_store()
-        
-        self.agent_id = config.agent_id
-        self.name = config.name
-        self.role = config.role
-        self.skills = config.skills
-        self.team_id = config.team_id
-        self.learning_rate = config.learning_rate
-        self.confidence_threshold = config.confidence_threshold
-        self.max_concurrent_tasks = config.max_concurrent_tasks
-        self.bible_priority = config.bible_priority
+
+        self._bind_config(config)
         
         # State
         self.active_tasks: dict[str, asyncio.Task] = {}
@@ -139,7 +128,24 @@ class BaseAgent(ABC):
         # Learning state
         self.learning_signals_buffer: list = []
         self.discussion_history: list[DiscussionContext] = []
-        
+
+    def _bind_config(self, config: AgentConfig) -> None:
+        """Bind a (database-resolved) config onto this agent.
+
+        Called from ``__init__`` and again whenever the registry hands out a
+        freshly tuned config for a runtime-created agent.
+        """
+        self.config = config
+        self.agent_id = config.agent_id
+        self.name = config.name
+        self.role = config.role
+        self.skills = config.skills
+        self.team_id = config.team_id
+        self.learning_rate = config.learning_rate
+        self.confidence_threshold = config.confidence_threshold
+        self.max_concurrent_tasks = config.max_concurrent_tasks
+        self.bible_priority = config.bible_priority
+
         logger.info(f"Agent {self.name} ({self.role}) initialized with skills: {[s.value for s in self.skills]}")
 
     @abstractmethod
