@@ -474,6 +474,48 @@ class TestAdminAPI:
         rows = settings.list_provider_rows(provider_db)
         assert [r["catalog_id"] for r in rows if r["is_active"]] == ["ollama"]
 
+    def test_activate_refuses_a_row_with_no_resolvable_key(
+        self, client, provider_db, admin_key
+    ) -> None:
+        """The row that caused the outage: active, but with no usable key.
+
+        Activating it made every assistant request fall back to retrieval_only
+        with no error anywhere. The refusal must also leave whatever was already
+        active untouched, so this asserts both the 409 and the untouched state.
+        """
+        settings.activate_provider("pcore-brain", provider_db)
+        # gemini needs a key and has none in the environment here.
+        resp = client.post(
+            "/api/v1/admin/ai-providers/google-gemini/activate", headers=_headers(admin_key)
+        )
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["detail"]["error"] == "provider_not_configured"
+        active = [r["catalog_id"] for r in settings.list_provider_rows(provider_db) if r["is_active"]]
+        assert active == ["pcore-brain"], "a refused activation must change nothing"
+
+    def test_activate_allows_a_row_that_resolves_its_key(
+        self, client, provider_db, admin_key, monkeypatch
+    ) -> None:
+        # The Brain is seeded with a blank api_key_ref and still works, because
+        # its key comes from AI_BRAIN_API_KEY via the catalog env_keys — so the
+        # guard must ask what resolves, not read the ref column.
+        monkeypatch.setenv("AI_BRAIN_API_KEY", "k" * 32)
+        resp = client.post(
+            "/api/v1/admin/ai-providers/pcore-brain/activate", headers=_headers(admin_key)
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["is_active"] is True
+
+    def test_activate_skips_the_key_check_for_local_endpoints(
+        self, client, provider_db, admin_key
+    ) -> None:
+        # ollama declares requires_key=False: a local endpoint with nothing to
+        # resolve must still be activatable.
+        resp = client.post(
+            "/api/v1/admin/ai-providers/ollama/activate", headers=_headers(admin_key)
+        )
+        assert resp.status_code == 200, resp.text
+
     def test_activate_unknown_is_404(self, client, admin_key) -> None:
         response = client.post(
             "/api/v1/admin/ai-providers/ghost/activate", headers=_headers(admin_key)

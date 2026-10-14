@@ -231,7 +231,48 @@ def update_ai_provider(catalog_id: str, body: ProviderUpdateIn) -> ProviderOut:
 
 @router.post("/api/v1/admin/ai-providers/{catalog_id}/activate", response_model=ActivateOut, dependencies=[WRITE_DEP])
 def activate_ai_provider(catalog_id: str) -> ActivateOut:
-    """Set the single global active row (every other row is cleared)."""
+    """Set the single global active row (every other row is cleared).
+
+    Refuses a row that cannot authenticate. Activating one silently guarantees
+    that every assistant and `/rag` request falls back to `retrieval_only`, with
+    no error anywhere — which is how this deployment served evidence-only
+    answers for days while the catalog showed an "active" row.
+
+    The check happens **before** any write, so a refused activation leaves the
+    currently active provider untouched. It asks whether a key actually resolves
+    rather than trusting ``secret.configured``: the Brain is seeded with a blank
+    ``api_key_ref`` and still works, because its key comes from ``AI_BRAIN_API_KEY``
+    via the catalog's ``env_keys``. Rows that declare ``requires_key: false``
+    (local endpoints such as Ollama) are exempt.
+    """
+    row = settings.get_provider_row(catalog_id)
+    if row is None:
+        raise HTTPException(
+            status_code=404, detail={"error": "provider_not_found", "catalog_id": catalog_id}
+        )
+
+    if bool(row.get("requires_key", 1)):
+        from ..llm import adapter as adapter_mod
+
+        try:
+            resolvable = bool(adapter_mod.resolve_api_key(row))
+        except Exception:  # pragma: no cover - defensive: never block activation
+            resolvable = True
+        if not resolvable:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "provider_not_configured",
+                    "catalog_id": catalog_id,
+                    "hint": (
+                        "No API key resolves for this row, so activating it would make every "
+                        "assistant and /rag request fall back to retrieval-only with no error. "
+                        "Store a secret with PUT /admin/ai-providers/{id}, or set the env var "
+                        "its api_key_ref points at, then activate."
+                    ),
+                },
+            )
+
     try:
         settings.activate_provider(catalog_id)
     except LookupError:
