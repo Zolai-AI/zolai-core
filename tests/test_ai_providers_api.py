@@ -133,8 +133,11 @@ class TestCatalogSeed:
         models = list(entry.models)
         assert models, "the Brain seed must offer at least one model"
         assert len(models) == len(set(models)), "duplicate model id in the Brain seed"
+        # `auto` is offered but must NOT be first: `resolve_model` falls back to
+        # `models[0]`, and the Brain's router measures ~35s per completion
+        # against ~2s for a named model.
         assert "auto" in models
-        assert models[0] == "auto"
+        assert models[0] != "auto"
         # Every seeded id is namespaced to the Brain's `opencode/` provider (or
         # is the router itself); a bare vendor id here would be unresolvable.
         assert all(m == "auto" or m.startswith("opencode/") for m in models)
