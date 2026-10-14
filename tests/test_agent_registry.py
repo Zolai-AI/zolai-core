@@ -292,3 +292,121 @@ def _reset_singleton():
     reset_agent_registry()
     yield
     reset_agent_registry()
+
+
+# ── Translation path (regression guards for three latent crashes) ──────────
+
+
+class TestTranslationPath:
+    """The dictionary-translation path had three stacked defects that only
+    surfaced when the path was actually executed:
+
+    1. ``FeedbackType`` was referenced but never imported -> NameError.
+    2. ``get_repositories(self.engine)`` passed the Engine *positionally* into
+       the ``db_path`` parameter, so SQLite tried to open a file named after
+       the Engine repr -> "unable to open database file".
+    3. It called ``lookup_word`` / ``lookup_english``, neither of which exists
+       on DictionaryRepository. The real API is ``lookup_exact`` /
+       ``search_english``.
+
+    Each defect masked the next, so no existing test ever reached them.
+    """
+
+    @staticmethod
+    def _agent():
+        """A TranslationAgent wired up without touching the real database."""
+        from sqlalchemy import create_engine
+
+        from zolai.learning.agents.translation_agent import TranslationAgent
+
+        agent = TranslationAgent.__new__(TranslationAgent)
+        agent.engine = create_engine("sqlite:///:memory:")
+        return agent
+
+    @staticmethod
+    def _with_dictionary(monkeypatch, dictionary):
+        import zolai.data.repositories as repos_mod
+
+        monkeypatch.setattr(
+            repos_mod, "get_repositories", lambda **kw: {"dictionary": dictionary}
+        )
+
+    def test_engine_is_passed_as_keyword_not_positionally(self) -> None:
+        """get_repositories()'s FIRST positional parameter is db_path."""
+        import inspect
+
+        from zolai.data.repositories import get_repositories
+
+        params = list(inspect.signature(get_repositories).parameters)
+        assert params[0] == "db_path"
+        assert params[1] == "engine"
+
+    def test_zolai_to_english_uses_lookup_exact(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asyncio
+
+        calls: list[str] = []
+
+        class FakeDictionary:
+            def lookup_exact(self, zolai: str):
+                calls.append("lookup_exact")
+                return [{"zolai": zolai, "english_clean": "God", "english": "God"}]
+
+            def search_english(self, query: str, limit: int = 20):
+                calls.append("search_english")
+                return []
+
+        self._with_dictionary(monkeypatch, FakeDictionary())
+        agent = self._agent()
+
+        result = asyncio.run(agent._dictionary_translate("pasian", "zo", "en"))
+        assert result == "God"
+        assert calls == ["lookup_exact"]
+
+    def test_english_to_zolai_uses_search_english(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asyncio
+
+        calls: list[str] = []
+
+        class FakeDictionary:
+            def lookup_exact(self, zolai: str):
+                calls.append("lookup_exact")
+                return []
+
+            def search_english(self, query: str, limit: int = 20):
+                calls.append("search_english")
+                return [{"zolai": "pasian"}]
+
+        self._with_dictionary(monkeypatch, FakeDictionary())
+        agent = self._agent()
+
+        result = asyncio.run(agent._dictionary_translate("God", "en", "zo"))
+        assert result == "pasian"
+        assert calls == ["search_english"]
+
+    def test_unknown_words_are_marked_not_dropped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import asyncio
+
+        class EmptyDictionary:
+            def lookup_exact(self, zolai: str):
+                return []
+
+            def search_english(self, query: str, limit: int = 20):
+                return []
+
+        self._with_dictionary(monkeypatch, EmptyDictionary())
+        agent = self._agent()
+
+        out = asyncio.run(agent._dictionary_translate("zzz kei", "zo", "en"))
+        assert out == "[zzz] [kei]"
+
+    def test_translation_agent_module_imports_feedback_type(self) -> None:
+        """The original NameError: used but never imported."""
+        from zolai.learning.agents import translation_agent
+
+        assert hasattr(translation_agent, "FeedbackType")
