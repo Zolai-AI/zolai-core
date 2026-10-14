@@ -617,3 +617,84 @@ class TestSynthesisAfterToolBudget:
         assert result["ok"] is False
         assert result["error"] == loop_mod.MAX_TURNS_EXCEEDED
         assert TOOL_MARKER not in result["reply"]
+
+class TestRunBudget:
+    """The route documents a ≤60s budget; it has to be real.
+
+    `max_turns` bounds work, not time. A run against a live provider was
+    measured at 219s, and Cloudflare answers 524 at ~100s, so an unbounded run
+    never reaches the caller at all.
+    """
+
+    def test_loop_stops_at_its_wall_clock_budget(self, monkeypatch) -> None:
+        import time as _time
+
+        from zolai.agent.loop import run_agent_loop
+
+        calls = {"n": 0}
+
+        def _slow_chat(messages, native_defs=None):  # noqa: ANN001, ANN202
+            calls["n"] += 1
+            _time.sleep(0.05)
+            # A tool call every turn, or the loop would exit at turn 1 with
+            # "no calls" and never reach the budget check.
+            return {
+                "text": "",
+                "tool_calls": [
+                    {"name": "rag_search", "input": {"query": f"q{calls['n']}"}}
+                ],
+            }
+
+        out = run_agent_loop(
+            system_prompt="s",
+            user_message="u",
+            allow=frozenset({"rag_search"}),
+            chat=_slow_chat,
+            max_turns=50,
+            timeout_s=0.12,
+        )
+        assert out["timed_out"] is True
+        assert out["ok"] is False
+        assert "budget" in out["error"]
+        assert calls["n"] < 51, "the budget must actually cut the loop short"
+
+    def test_budget_is_inert_when_there_is_time(self) -> None:
+        from zolai.agent.loop import run_agent_loop
+
+        def _chat(messages, native_defs=None):  # noqa: ANN001, ANN202
+            return {"text": "done", "tool_calls": []}
+
+        out = run_agent_loop(
+            system_prompt="s",
+            user_message="u",
+            allow=frozenset({"rag_search"}),
+            chat=_chat,
+            max_turns=1,
+            timeout_s=30,
+        )
+        assert out.get("timed_out") is not True
+        assert out["ok"] is True
+
+    def test_none_timeout_keeps_the_previous_unbounded_behaviour(self) -> None:
+        from zolai.agent.loop import run_agent_loop
+
+        seen = {"n": 0}
+
+        def _chat(messages, native_defs=None):  # noqa: ANN001, ANN202
+            seen["n"] += 1
+            return {"text": "", "tool_calls": [
+                {"name": "rag_search", "input": {"query": f"q{seen['n']}"}}
+            ]}
+
+        run_agent_loop(
+            system_prompt="s",
+            user_message="u",
+            allow=frozenset({"rag_search"}),
+            chat=_chat,
+            max_turns=3,
+            timeout_s=None,
+        )
+        # 3 tool turns plus the single synthesis turn the loop spends on the
+        # evidence it gathered once the turns are exhausted — the documented
+        # "N tool calls + at most one synthesis turn" contract.
+        assert seen["n"] == 4

@@ -185,6 +185,7 @@ def run_agent_goal(
     provider: str | None = None,
     model: str | None = None,
     user_api_key: str | None = None,
+    timeout_s: float | None = None,
 ) -> dict[str, Any]:
     """Execute one agent run end-to-end and persist the ``agent_runs`` row.
 
@@ -272,6 +273,7 @@ def run_agent_goal(
                     chat=chat,
                     max_turns=max_turns,
                     native=bool(meta.get("native")),
+                    timeout_s=timeout_s,
                 )
                 if loop_result.get("ok") and str(loop_result.get("reply") or "").strip():
                     answer = str(loop_result["reply"])
