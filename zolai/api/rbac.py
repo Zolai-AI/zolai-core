@@ -106,6 +106,11 @@ PUBLIC_ROUTES: tuple[tuple[str | None, str], ...] = (
     # declared in ADMIN_METHOD_ROUTES.
     ("GET", "/api/v1/learning/overview"),
     ("POST", "/api/v1/learning/run"),
+    # Learning *tools* reads (zolai/api/learning_tools_router.py). Same shape as
+    # /learning/overview: a read, nothing written. The multi-verb prefixes live
+    # in PUBLIC_PREFIXES just below; the mutating halves of those same prefixes
+    # are method-scoped admins in ADMIN_METHOD_ROUTES.
+    ("POST", "/api/v1/learning/corpus/check"),  # per-verse quality probe
 )
 
 #: Prefix entries: ``(method, prefix)`` — ``/api/v1/word`` covers every
@@ -121,6 +126,25 @@ PUBLIC_PREFIXES: tuple[tuple[str | None, str], ...] = (
     ("GET", "/api/v1/learning/skills"),
     ("GET", "/api/v1/learning/assistants"),
     ("GET", "/api/v1/learning/bindings"),
+    # Learning tools (zolai/api/learning_tools_router.py) — a read or a pure
+    # computation over caller-supplied input, never a write:
+    #
+    #   /consensus/*  GET + POST — weighted tally, discussion analysis and
+    #                   agent re-scoring are all in-memory arithmetic.
+    #   /metrics/*    GET — the dashboard window, the metric catalog, raw
+    #                   samples and the renderers (json / prometheus / csv /
+    #                   influx-line / grafana), which return the string in the
+    #                   response body and write nothing. POST /metrics/collect
+    #                   (samples rows) and the InfluxDB push (a destination)
+    #                   are admin.
+    #   /corpus/*     GET — health, coverage stats and stored quality reports.
+    #                   POST /corpus/expand (thousands of rows) and
+    #                   POST /corpus/validate (kicks off a run and persists its
+    #                   report) are admin.
+    ("GET", "/api/v1/learning/consensus"),
+    ("POST", "/api/v1/learning/consensus"),
+    ("GET", "/api/v1/learning/metrics"),
+    ("GET", "/api/v1/learning/corpus"),
 )
 
 #: Declared authed — everything below needs a key (member class unless admin).
@@ -137,12 +161,18 @@ MEMBER_PREFIXES: tuple[str, ...] = (
 )
 
 #: Strict admin surface (401 anon in warn *and* enforce + scope-gated).
-ADMIN_PREFIXES: tuple[str, ...] = ("/api/v1/admin",)
+#:
+#: ``/api/v1/learning/ws`` is here even though it carries no HTTP methods:
+#: ``ApiKeyMiddleware`` returns early for every non-HTTP scope, so the socket
+#: handshake never reaches this module — the router resolves the key itself and
+#: requires the admin role (its handlers write to SQLite). Declaring the path
+#: keeps ``classify_route`` honest for anything that ever adds an HTTP sibling.
+ADMIN_PREFIXES: tuple[str, ...] = ("/api/v1/admin", "/api/v1/learning/ws")
 
 #: Method-scoped strict-admin entries, matched before ADMIN_PREFIXES.
 #: Needed where one prefix carries both public reads and admin mutations —
 #: ``/api/v1/learning`` serves the learning surface publicly while letting only
-#: an admin retune the agents behind it.
+#: an admin retune the agents behind it or write to the learning tools' tables.
 ADMIN_METHOD_ROUTES: tuple[tuple[str | None, str], ...] = (
     ("POST", "/api/v1/learning/agents"),    # create + enable + disable
     ("PATCH", "/api/v1/learning/agents"),
@@ -150,6 +180,19 @@ ADMIN_METHOD_ROUTES: tuple[tuple[str | None, str], ...] = (
     ("POST", "/api/v1/learning/skills"),    # create skill
     ("POST", "/api/v1/learning/bindings"), # bind an agent to an assistant
     ("DELETE", "/api/v1/learning/bindings"),  # unbind
+    # Learning tools — the write halves of the publicly-readable prefixes.
+    ("POST", "/api/v1/learning/metrics/collect"),   # samples rows
+    ("POST", "/api/v1/learning/metrics/export"),    # push to a destination
+    ("POST", "/api/v1/learning/corpus/expand"),     # thousands of rows
+    ("POST", "/api/v1/learning/corpus/validate"),   # runs + persists a report
+    # Fine-tuning spends real compute, the registry decides what serves
+    # traffic, and the stored datasets are raw feedback — admin for every verb,
+    # reads included.
+    ("GET", "/api/v1/learning/finetuning"),
+    ("POST", "/api/v1/learning/finetuning"),
+    ("PUT", "/api/v1/learning/finetuning"),
+    ("PATCH", "/api/v1/learning/finetuning"),
+    ("DELETE", "/api/v1/learning/finetuning"),
 )
 
 #: Paths under the public assistant that get the stricter anonymous chat bucket.
