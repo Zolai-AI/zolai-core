@@ -30,7 +30,6 @@ from .agents import (
     BaseAgent,
     AgentSkill,
     AgentRole,
-    AgentTeam,
     AgentMessage,
     DiscussionContext,
     AgentConfig,
