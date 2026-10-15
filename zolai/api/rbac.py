@@ -100,6 +100,12 @@ PUBLIC_ROUTES: tuple[tuple[str | None, str], ...] = (
     ("GET", "/api/v1/providers"),
     # Public contributions — anyone may submit dictionary improvements.
     ("POST", "/api/v1/contributions"),
+    # Multi-agent learning, read side + the orchestrator itself. Learning is
+    # a read/ask surface like /rag and /search, so it stays open; the *tuning*
+    # side (create/update/delete/enable/disable/skill assignment) is admin and
+    # declared in ADMIN_METHOD_ROUTES.
+    ("GET", "/api/v1/learning/overview"),
+    ("POST", "/api/v1/learning/run"),
 )
 
 #: Prefix entries: ``(method, prefix)`` — ``/api/v1/word`` covers every
@@ -108,6 +114,11 @@ PUBLIC_PREFIXES: tuple[tuple[str | None, str], ...] = (
     ("GET", "/api/v1/word"),
     ("GET", "/api/v1/lexicon"),
     ("POST", "/api/v1/analyze"),
+    # Read-only views of the agent registry: /agents, /agents/{id},
+    # /skills, /skills/{id}/agents. Only GET — the mutating verbs on these
+    # same prefixes are admin (see ADMIN_METHOD_ROUTES).
+    ("GET", "/api/v1/learning/agents"),
+    ("GET", "/api/v1/learning/skills"),
 )
 
 #: Declared authed — everything below needs a key (member class unless admin).
@@ -124,16 +135,26 @@ MEMBER_PREFIXES: tuple[str, ...] = (
 )
 
 #: Strict admin surface (401 anon in warn *and* enforce + scope-gated).
-ADMIN_PREFIXES: tuple[str, ...] = (
-    "/api/v1/admin",
-    # Multi-agent learning: registry management retunes live agents and the
-    # orchestrator endpoint runs them, so both are admin-only. (Distinct from
-    # the pre-existing /learning/* learner surface, which is its own thing.)
-    "/api/v1/learning",
+ADMIN_PREFIXES: tuple[str, ...] = ("/api/v1/admin",)
+
+#: Method-scoped strict-admin entries, matched before ADMIN_PREFIXES.
+#: Needed where one prefix carries both public reads and admin mutations —
+#: ``/api/v1/learning`` serves the learning surface publicly while letting only
+#: an admin retune the agents behind it.
+ADMIN_METHOD_ROUTES: tuple[tuple[str | None, str], ...] = (
+    ("POST", "/api/v1/learning/agents"),    # create + enable + disable
+    ("PATCH", "/api/v1/learning/agents"),
+    ("DELETE", "/api/v1/learning/agents"),
+    ("POST", "/api/v1/learning/skills"),    # create skill
 )
 
 #: Paths under the public assistant that get the stricter anonymous chat bucket.
-PUBLIC_CHAT_PATHS: tuple[str, ...] = ("/api/v1/assistant/chat",)
+PUBLIC_CHAT_PATHS: tuple[str, ...] = (
+    "/api/v1/assistant/chat",
+    # Learning runs are CPU/SQLite-heavy (pattern extraction, vocabulary
+    # builds), so anonymous callers get the strict 10/min bucket, not 120/min.
+    "/api/v1/learning/run",
+)
 
 
 def _prefix_match(path: str, prefix: str) -> bool:
@@ -170,14 +191,23 @@ def is_public_chat_path(method: str | None, path: str) -> bool:
     return False
 
 
-def is_admin_path(path: str) -> bool:
-    """True for the strict admin surface (``/api/v1/admin/...``)."""
+def is_admin_path(path: str, method: str | None = None) -> bool:
+    """True for the strict admin surface.
+
+    ``method``-scoped entries in ADMIN_METHOD_ROUTES are checked first, so a
+    prefix can be public for reads and admin for writes.
+    """
+    norm = _norm(method)
+    for entry_method, entry in ADMIN_METHOD_ROUTES:
+        if entry_method is None or entry_method == norm:
+            if _prefix_match(path, entry):
+                return True
     return any(path == p or path.startswith(p + "/") for p in ADMIN_PREFIXES)
 
 
 def classify_route(method: str | None, path: str) -> str:
     """Route class: ``admin`` | ``public`` | ``member`` | ``unclassified``."""
-    if is_admin_path(path):
+    if is_admin_path(path, method):
         return "admin"
     if is_public_path(method, path):
         return "public"

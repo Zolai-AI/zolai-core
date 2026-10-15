@@ -17,10 +17,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from .rbac import require_role
+from .rbac import ROLE_ANONYMOUS, require_role, role_for
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ class RunIn(BaseModel):
 
 
 @admin_router.get("/overview")
-def overview(_auth: dict[str, Any] = AdminAuth) -> dict[str, Any]:
+def overview() -> dict[str, Any]:
     """Summary of the registry: what agents/skills exist and what is enabled."""
     from ..learning.agents import agent_management
 
@@ -111,14 +111,14 @@ def overview(_auth: dict[str, Any] = AdminAuth) -> dict[str, Any]:
 
 
 @admin_router.get("/agents")
-def list_agents(_auth: dict[str, Any] = AdminAuth) -> dict[str, Any]:
+def list_agents() -> dict[str, Any]:
     from ..learning.agents import agent_management
 
     return {"agents": _run(agent_management.list_agents)}
 
 
 @admin_router.get("/agents/{agent_id}")
-def get_agent(agent_id: str, _auth: dict[str, Any] = AdminAuth) -> dict[str, Any]:
+def get_agent(agent_id: str) -> dict[str, Any]:
     from ..learning.agents import agent_management
 
     record = _run(agent_management.get_agent, agent_id)
@@ -199,7 +199,7 @@ def delete_agent(agent_id: str, _auth: dict[str, Any] = AdminAuth) -> None:
 
 
 @admin_router.get("/skills")
-def list_skills(_auth: dict[str, Any] = AdminAuth) -> dict[str, Any]:
+def list_skills() -> dict[str, Any]:
     from ..learning.agents import agent_management
 
     return {"skills": _run(agent_management.list_skills)}
@@ -219,7 +219,7 @@ def create_skill(payload: SkillCreateIn, _auth: dict[str, Any] = AdminAuth) -> d
 
 
 @admin_router.get("/skills/{skill_id}/agents")
-def agents_with_skill(skill_id: str, _auth: dict[str, Any] = AdminAuth) -> dict[str, Any]:
+def agents_with_skill(skill_id: str) -> dict[str, Any]:
     from ..learning.agents import agent_management
 
     return {"agents": _run(agent_management.list_agents_by_skill, skill_id)}
@@ -228,10 +228,33 @@ def agents_with_skill(skill_id: str, _auth: dict[str, Any] = AdminAuth) -> dict[
 # ── Orchestrator ───────────────────────────────────────────────────────────
 
 
+#: Anonymous callers get a much smaller work budget than authenticated ones.
+PUBLIC_MAX_LIMIT = 50
+AUTHED_MAX_LIMIT = 5000
+
+
+def _effective_limit(request: Request, requested: int) -> int:
+    """Clamp ``requested`` by caller role.
+
+    ``build_vocabulary`` and ``learn_bible_patterns`` scale with the limit and
+    are SQLite/CPU-bound, so an anonymous caller must not be able to ask for
+    the same work an admin can.
+    """
+    record = getattr(request.state, "api_key", None)
+    role = role_for(record)
+    ceiling = AUTHED_MAX_LIMIT if role != ROLE_ANONYMOUS else PUBLIC_MAX_LIMIT
+    return min(requested, ceiling)
+
+
 @admin_router.post("/run")
-async def run_task(payload: RunIn, _auth: dict[str, Any] = AdminAuth) -> dict[str, Any]:
-    """Run one orchestrator task and return its result."""
+async def run_task(payload: RunIn, request: Request) -> dict[str, Any]:
+    """Run one orchestrator task and return its result.
+
+    Public: learning is an ask surface like /rag. Anonymous callers are rate
+    limited by the chat bucket and have their ``limit`` clamped.
+    """
     task = payload.task
+    limit = _effective_limit(request, payload.limit)
     orch = _orchestrator()
 
     if task not in _BLOCKING:
@@ -249,11 +272,11 @@ async def run_task(payload: RunIn, _auth: dict[str, Any] = AdminAuth) -> dict[st
         elif task == "correct_grammar":
             result = await orch.correct_grammar(payload.source_text)
         elif task == "learn_bible_patterns":
-            result = await orch.learn_bible_patterns(payload.pattern_type, payload.limit)
+            result = await orch.learn_bible_patterns(payload.pattern_type, limit)
         elif task == "build_vocabulary":
-            result = await orch.build_vocabulary(payload.limit, payload.min_frequency)
+            result = await orch.build_vocabulary(limit, payload.min_frequency)
         else:
-            result = await orch.extract_collocations(payload.limit)
+            result = await orch.extract_collocations(limit)
     except TimeoutError as exc:
         raise HTTPException(status_code=504,
                             detail={"error": "task_timeout", "task": task}) from exc
@@ -264,4 +287,9 @@ async def run_task(payload: RunIn, _auth: dict[str, Any] = AdminAuth) -> dict[st
             "message": f"{type(exc).__name__}: {exc}",
         }) from exc
 
-    return {"task": task, "result": result}
+    return {
+        "task": task,
+        "result": result,
+        "limit_applied": limit,
+        "limit_clamped": limit != payload.limit,
+    }

@@ -100,33 +100,114 @@ class TestOrchestratorRoute:
         assert "is_valid" in r.json()["result"]
 
 
-class TestAdminOnly:
-    def test_prefix_is_classified_admin(self) -> None:
-        assert rbac.classify_route("GET", f"{PREFIX}/overview") == "admin"
-        assert rbac.classify_route("POST", f"{PREFIX}/run") == "admin"
-        assert rbac.classify_route(
-            "PATCH", f"{PREFIX}/agents/translator_001"
-        ) == "admin"
+class TestPublicReadSurface:
+    """Learning reads and the orchestrator are public; tuning is not."""
 
-    def test_routes_are_not_public(self) -> None:
-        assert not rbac.is_public_path("GET", f"{PREFIX}/overview")
-        assert not rbac.is_public_path("GET", f"{PREFIX}/agents")
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/overview",
+            "/agents",
+            "/agents/translator_001",
+            "/skills",
+            "/skills/continuous_learning/agents",
+        ],
+    )
+    def test_reads_are_public(self, path: str) -> None:
+        assert rbac.is_public_path("GET", f"{PREFIX}{path}")
+        assert rbac.classify_route("GET", f"{PREFIX}{path}") == "public"
 
+    def test_run_is_public(self) -> None:
+        assert rbac.is_public_path("POST", f"{PREFIX}/run")
+        assert rbac.classify_route("POST", f"{PREFIX}/run") == "public"
+
+    def test_run_uses_the_strict_anonymous_bucket(self) -> None:
+        """/run is CPU/SQLite-heavy, so it must not get the 120/min bucket."""
+        assert f"{PREFIX}/run" in rbac.PUBLIC_CHAT_PATHS
+
+    @pytest.mark.parametrize(
+        "method,path",
+        [
+            ("POST", "/agents"),
+            ("PATCH", "/agents/translator_001"),
+            ("DELETE", "/agents/translator_001"),
+            ("POST", "/agents/translator_001/enable"),
+            ("POST", "/agents/translator_001/disable"),
+            ("POST", "/skills"),
+        ],
+    )
+    def test_mutations_stay_admin(self, method: str, path: str) -> None:
+        assert rbac.is_admin_path(f"{PREFIX}{path}", method)
+        assert rbac.classify_route(method, f"{PREFIX}{path}") == "admin"
+        assert not rbac.is_public_path(method, f"{PREFIX}{path}")
+
+    def test_get_on_agents_prefix_stays_public_despite_admin_prefixes(self) -> None:
+        """The read verb must not be captured by the admin write entries."""
+        assert rbac.classify_route("GET", f"{PREFIX}/agents") == "public"
+        assert rbac.classify_route("POST", f"{PREFIX}/agents") == "admin"
+
+
+class TestAnonymousBehaviour:
     @pytest.mark.parametrize(
         "method,path",
         [
             ("GET", "/overview"),
             ("GET", "/agents"),
-            ("POST", "/agents/grammar_expert_001/disable"),
+            ("GET", "/skills"),
             ("POST", "/run"),
         ],
     )
-    def test_anonymous_is_401_under_enforce(
+    def test_public_routes_answer_anonymous_under_enforce(
         self, monkeypatch: pytest.MonkeyPatch, method: str, path: str
     ) -> None:
         monkeypatch.setenv("ZOLAI_API_AUTH", "enforce")
         c = TestClient(app)
-        r = c.request(method, f"{PREFIX}{path}",
-                      json={"task": "translate"} if method == "POST" and path == "/run" else None)
+        r = c.request(
+            method,
+            f"{PREFIX}{path}",
+            json={"task": "validate_grammar", "source_text": "keitu paasian lo"}
+            if method == "POST"
+            else None,
+        )
+        assert r.status_code == 200, r.text
+
+    @pytest.mark.parametrize(
+        "method,path",
+        [
+            ("POST", "/agents"),
+            ("PATCH", "/agents/grammar_expert_001"),
+            ("DELETE", "/agents/grammar_expert_001"),
+            ("POST", "/agents/grammar_expert_001/disable"),
+            ("POST", "/agents/grammar_expert_001/enable"),
+            ("POST", "/skills"),
+        ],
+    )
+    def test_anonymous_cannot_tune_under_enforce(
+        self, monkeypatch: pytest.MonkeyPatch, method: str, path: str
+    ) -> None:
+        monkeypatch.setenv("ZOLAI_API_AUTH", "enforce")
+        c = TestClient(app)
+        r = c.request(
+            method,
+            f"{PREFIX}{path}",
+            json={"agent_id": "x", "name": "x", "role": "translator"},
+        )
         assert r.status_code == 401, r.text
-        assert r.json()["detail"]["error"] == "unauthorized"
+
+    def test_anonymous_limit_is_clamped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ZOLAI_API_AUTH", "enforce")
+        c = TestClient(app)
+        r = c.post(f"{PREFIX}/run", json={"task": "build_vocabulary", "limit": 5000})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["limit_applied"] <= 50
+        assert body["limit_clamped"] is True
+
+    def test_small_limit_is_not_clamped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ZOLAI_API_AUTH", "enforce")
+        c = TestClient(app)
+        r = c.post(f"{PREFIX}/run", json={"task": "build_vocabulary", "limit": 5})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["limit_applied"] == 5
+        assert body["limit_clamped"] is False
