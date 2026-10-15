@@ -13,12 +13,11 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Optional
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
