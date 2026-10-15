@@ -40,6 +40,7 @@ from ..api.security import SecurityHeadersMiddleware, cors_kwargs, get_cors_orig
 from ..api.word_engine_router import router as word_engine_router
 from ..api.contributions_router import router as contributions_router
 from ..api.learning_agents_router import admin_router as learning_agents_router
+from ..api.learning_tools_router import router as learning_tools_router
 from ..cleaner.pipeline import CleanPipeline
 from ..config import config
 from ..crawler.engine import CrawlEngine
@@ -441,6 +442,11 @@ def create_app() -> FastAPI:
     app.include_router(word_engine_router)
     app.include_router(contributions_router)
     app.include_router(learning_agents_router)
+    # Learning tools — consensus / metrics / corpus / finetuning plus the
+    # admin-gated /ws socket, on sub-paths that do not collide with the agent
+    # surface. Public reads, admin writes (zolai/api/rbac.py). Same rule: must
+    # be registered before the catch-all below.
+    app.include_router(learning_tools_router)
     app.include_router(rag_router, prefix="")
     # P1 admin AI-provider catalog — strict settings:* scope, registered before
     # the catch-all (ce04c72 contract).
