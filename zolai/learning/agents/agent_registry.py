@@ -104,6 +104,17 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS assistant_agent_bindings (
+        assistant_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'primary',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (assistant_id, agent_id),
+        FOREIGN KEY (agent_id) REFERENCES agents(agent_id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS discussion_messages (
         message_id TEXT PRIMARY KEY,
         discussion_id TEXT NOT NULL,
@@ -700,6 +711,86 @@ class AgentRegistry:
         logger.info("agent registry: deleted agent %s", agent_id)
 
     # ── skills ──────────────────────────────────────────────────────────
+
+    # ── assistant <-> agent bindings ──────────────────────────────────────
+
+    def bind_assistant_agent(
+        self, assistant_id: str, agent_id: str, role: str = "primary"
+    ) -> dict[str, Any]:
+        """Attach an agent to a named assistant surface.
+
+        Binding is how an assistant declares which specialists back it; the
+        assistant itself is just a string id here (e.g. ``"default"``), so the
+        Studio can invent surfaces without a schema change.
+        """
+        if not assistant_id:
+            raise ValueError("assistant_id is required")
+        if self.get(agent_id) is None:
+            raise KeyError(f"unknown agent: {agent_id!r}")
+        now = _now()
+        self._execute(
+            """
+            INSERT INTO assistant_agent_bindings
+                (assistant_id, agent_id, role, enabled, created_at)
+            VALUES (:assistant_id, :agent_id, :role, 1, :created_at)
+            ON CONFLICT(assistant_id, agent_id)
+            DO UPDATE SET role = excluded.role, enabled = 1
+            """,
+            {
+                "assistant_id": assistant_id,
+                "agent_id": agent_id,
+                "role": role,
+                "created_at": now,
+            },
+        )
+        logger.info("agent registry: bound %s -> %s (%s)", assistant_id, agent_id, role)
+        return {
+            "assistant_id": assistant_id,
+            "agent_id": agent_id,
+            "role": role,
+            "enabled": True,
+        }
+
+    def unbind_assistant_agent(self, assistant_id: str, agent_id: str) -> None:
+        """Detach an agent. Unknown pairs are a no-op, not an error."""
+        self._execute(
+            "DELETE FROM assistant_agent_bindings WHERE assistant_id = :a AND agent_id = :g",
+            {"a": assistant_id, "agent_id": agent_id},
+        )
+
+    def list_bindings(self, assistant_id: str | None = None) -> list[dict[str, Any]]:
+        """Every binding, optionally for one assistant, with agent detail."""
+        sql = """
+            SELECT b.assistant_id, b.agent_id, b.role, b.enabled, b.created_at,
+                   a.name, a.role AS agent_role, a.enabled AS agent_enabled,
+                   a.config, a.skills
+            FROM assistant_agent_bindings b
+            LEFT JOIN agents a ON a.agent_id = b.agent_id
+        """
+        params: dict[str, Any] = {}
+        if assistant_id is not None:
+            sql += " WHERE b.assistant_id = :assistant_id"
+            params["assistant_id"] = assistant_id
+        sql += " ORDER BY b.assistant_id, b.role, b.agent_id"
+        rows = self._query(sql, params)
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            out.append(
+                {
+                    "assistant_id": row["assistant_id"],
+                    "agent_id": row["agent_id"],
+                    "role": row["role"],
+                    "enabled": bool(row["enabled"]),
+                    "agent_name": row.get("name"),
+                    "agent_role": row.get("agent_role"),
+                    "agent_enabled": bool(row.get("agent_enabled")),
+                    "confidence_threshold": _decode_tuning(
+                        row.get("config")
+                    ).get("confidence_threshold"),
+                    "skills": _decode_json(row.get("skills"), []) or [],
+                }
+            )
+        return out
 
     def get_skill(self, skill_id: AgentSkill | str) -> Optional[SkillRecord]:
         key = skill_id.value if isinstance(skill_id, AgentSkill) else str(skill_id)

@@ -215,6 +215,38 @@ def instantiate_agent(
 # ── overview ────────────────────────────────────────────────────────────
 
 
+def list_bindings(assistant_id: str = "", engine: Optional[Engine] = None):
+    """Agent<->assistant bindings (optionally filtered to one assistant)."""
+    return _registry(engine).list_bindings(assistant_id or None)
+
+
+def bind_agent(assistant_id: str, agent_id: str, role: str = "primary",
+               engine: Optional[Engine] = None) -> dict[str, Any]:
+    """Attach an agent to a named assistant surface."""
+    return _registry(engine).bind_assistant_agent(assistant_id, agent_id, role)
+
+
+def unbind_agent(assistant_id: str, agent_id: str, engine: Optional[Engine] = None) -> None:
+    """Detach an agent from an assistant."""
+    _registry(engine).unbind_assistant_agent(assistant_id, agent_id)
+
+
+def list_assistants(engine: Optional[Engine] = None):
+    """Distinct assistant ids with at least one bound agent."""
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in _registry(engine).list_bindings():
+        entry = grouped.setdefault(
+            row["assistant_id"],
+            {"assistant_id": row["assistant_id"], "agents": [], "enabled_agents": 0},
+        )
+        entry["agents"].append(
+            {"agent_id": row["agent_id"], "role": row["role"], "enabled": row["enabled"]}
+        )
+        if row["enabled"] and row.get("agent_enabled"):
+            entry["enabled_agents"] += 1
+    return sorted(grouped.values(), key=lambda e: e["assistant_id"])
+
+
 def overview(engine: Optional[Engine] = None) -> dict[str, Any]:
     """Summary of the whole registry — the "what is configured right now" view."""
     registry = _registry(engine)
