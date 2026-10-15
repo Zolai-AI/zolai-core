@@ -119,6 +119,8 @@ PUBLIC_PREFIXES: tuple[tuple[str | None, str], ...] = (
     # same prefixes are admin (see ADMIN_METHOD_ROUTES).
     ("GET", "/api/v1/learning/agents"),
     ("GET", "/api/v1/learning/skills"),
+    ("GET", "/api/v1/learning/assistants"),
+    ("GET", "/api/v1/learning/bindings"),
 )
 
 #: Declared authed — everything below needs a key (member class unless admin).
@@ -146,6 +148,8 @@ ADMIN_METHOD_ROUTES: tuple[tuple[str | None, str], ...] = (
     ("PATCH", "/api/v1/learning/agents"),
     ("DELETE", "/api/v1/learning/agents"),
     ("POST", "/api/v1/learning/skills"),    # create skill
+    ("POST", "/api/v1/learning/bindings"), # bind an agent to an assistant
+    ("DELETE", "/api/v1/learning/bindings"),  # unbind
 )
 
 #: Paths under the public assistant that get the stricter anonymous chat bucket.

@@ -89,6 +89,12 @@ class SkillCreateIn(BaseModel):
     category: str = Field(default="general", max_length=64)
 
 
+class BindingIn(BaseModel):
+    assistant_id: str = Field(..., min_length=1, max_length=64)
+    agent_id: str = Field(..., min_length=1, max_length=64)
+    role: str = Field(default="primary", max_length=32)
+
+
 class RunIn(BaseModel):
     task: str = Field(..., description="One of the orchestrator task names")
     source_text: str = Field(default="", max_length=8000)
@@ -216,6 +222,47 @@ def create_skill(payload: SkillCreateIn, _auth: dict[str, Any] = AdminAuth) -> d
         description=payload.description,
         category=payload.category,
     )
+
+
+@admin_router.get("/assistants")
+def list_assistants() -> dict[str, Any]:
+    """Assistant surfaces that currently have agents bound to them."""
+    from ..learning.agents import agent_management
+
+    return {"assistants": _run(agent_management.list_assistants)}
+
+
+@admin_router.get("/bindings")
+def list_bindings(assistant: str = "") -> dict[str, Any]:
+    """Agent<->assistant bindings; pass ?assistant=<id> to filter."""
+    from ..learning.agents import agent_management
+
+    return {"bindings": _run(agent_management.list_bindings, assistant)}
+
+
+@admin_router.post("/bindings", status_code=201)
+def create_binding(payload: BindingIn, _auth: dict[str, Any] = AdminAuth) -> dict[str, Any]:
+    from ..learning.agents import agent_management
+
+    try:
+        return _run(
+            agent_management.bind_agent,
+            payload.assistant_id,
+            payload.agent_id,
+            payload.role,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404,
+                            detail={"error": "unknown_agent",
+                                    "agent_id": payload.agent_id}) from exc
+
+
+@admin_router.delete("/bindings/{assistant_id}/{agent_id}", status_code=204)
+def delete_binding(assistant_id: str, agent_id: str,
+                   _auth: dict[str, Any] = AdminAuth) -> None:
+    from ..learning.agents import agent_management
+
+    _run(agent_management.unbind_agent, assistant_id, agent_id)
 
 
 @admin_router.get("/skills/{skill_id}/agents")
