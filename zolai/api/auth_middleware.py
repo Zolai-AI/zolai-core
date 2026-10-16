@@ -90,13 +90,12 @@ def public_chat_rate_limit_rpm() -> int:
 
 
 def client_ip(scope: Any) -> str:
-    """Best-effort client IP for the anonymous bucket (``X-Forwarded-For`` first)."""
-    headers = scope.get("headers") or []
-    for name, value in headers:
-        if name == b"x-forwarded-for":
-            first = value.decode("latin-1").split(",")[0].strip()
-            if first:
-                return first
+    """Return the peer address after trusted proxy headers have been resolved.
+
+    Uvicorn's proxy-header middleware updates ``scope["client"]`` only for
+    configured trusted peers. Reading ``X-Forwarded-For`` here directly would
+    let callers choose their own anonymous rate-limit bucket.
+    """
     client = scope.get("client")
     return client[0] if client and client[0] else "unknown"
 
