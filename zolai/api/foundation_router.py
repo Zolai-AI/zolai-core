@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -108,6 +109,253 @@ class CostSummaryResponse(BaseModel):
     by_model: dict = {}
     daily: list[dict] = []
     budget_check: dict = {}
+
+
+# ---------------------------------------------------------------------------
+# Linguistic-analysis request models (W1 contract hardening)
+#
+# These 11 endpoints used to take an untyped dict body and read their keys by
+# hand, so OpenAPI published an opaque ``{"type": "object"}`` for each of them
+# and a wrong or missing key silently fell back to a default. A real model per
+# endpoint fixes all three at once: FastAPI publishes the JSON Schema, a bad key
+# is a 422 instead of a surprise, and the MCP layer can generate a tool's input
+# schema from this definition instead of hand-writing one.
+#
+# Semantics are preserved exactly (additive only):
+#   * a key the handler read with a falsy default and then rejected with a 400
+#     is declared **required** here — a *missing* key is now a 422 — and the
+#     original 400 guard is kept so an explicitly empty string still 400s;
+#   * every key the handler read is still read, with the same default and type;
+#   * extra keys are still ignored (Pydantic's default), so nothing that used
+#     to be accepted has been removed.
+#
+# Every field carries a real ``description``: these strings are what an LLM
+# reads when the same models back an MCP tool.
+# ---------------------------------------------------------------------------
+
+
+class CorpusAnalysisRequest(BaseModel):
+    """Body of ``POST /api/v1/foundation/analyze/corpus``."""
+
+    text: str = Field(
+        ...,
+        description=(
+            "Text to analyse at corpus level, in Zolai or English. The analyzer extracts "
+            "n-grams, PMI-ranked collocations, a Zipf frequency distribution and a register "
+            "guess (formal / common / literary) from it."
+        ),
+    )
+    ngram_size: int = Field(
+        2,
+        description=(
+            "Order of the n-grams to extract (2 = bigrams, 3 = trigrams). Accepted for "
+            "forward compatibility — the analyzer currently returns its own default n-gram set "
+            "and ignores this value."
+        ),
+    )
+    top_k: int = Field(
+        100,
+        description=(
+            "Maximum number of n-grams and collocations to return. Accepted for forward "
+            "compatibility — the analyzer currently applies its own default cut-off and ignores "
+            "this value."
+        ),
+    )
+
+
+class PhonologyAnalysisRequest(BaseModel):
+    """Body of ``POST /api/v1/foundation/analyze/phonology``."""
+
+    word: str = Field(
+        ...,
+        description=(
+            "A single Zolai word to analyse phonologically. Returns the syllable split "
+            "(onset / nucleus / coda) with a tone per syllable, the tone pattern, any sandhi "
+            "resyllabifications, phonotactic validity, the stress pattern and any violations."
+        ),
+    )
+    apply_sandhi: bool = Field(
+        True,
+        description=(
+            "Whether tone-sandhi resyllabification is applied before the phonological checks. "
+            "Accepted for forward compatibility — the analyzer always applies the 19 documented "
+            "sandhi rules today."
+        ),
+    )
+
+
+class MorphologyAnalysisRequest(BaseModel):
+    """Body of ``POST /api/v1/foundation/analyze/morphology``."""
+
+    word: str = Field(
+        ...,
+        description=(
+            "A single Zolai word to decompose. Returns the morpheme segments, directional "
+            "prefix, stem, aspect suffix, particle, affix prefix/suffix, compound parts, and a "
+            "ZVS 2018 validity flag with any violations."
+        ),
+    )
+
+
+class EnhancedTranslationRequest(BaseModel):
+    """Body of ``POST /api/v1/foundation/translate/enhanced``."""
+
+    text: str = Field(
+        ...,
+        description=(
+            "The word or sentence to translate. Confidence is scored over three tiers "
+            "(dictionary, Bible parallel, corpus) and the response carries the evidence chain "
+            "plus a morphology-aware breakdown."
+        ),
+    )
+    direction: str = Field(
+        "auto",
+        description=(
+            "Translation direction. 'auto' detects it from the text; 'zo-en' translates Zolai to "
+            "English and 'en-zo' translates English to Zolai."
+        ),
+    )
+    context: Optional[str] = Field(
+        None,
+        description=(
+            "Optional context that narrows polysemous words — a register or corpus label such as "
+            "'bible', 'daily' or 'poetry', or the sentence the word was seen in. Leave unset to "
+            "rank senses by frequency alone."
+        ),
+    )
+
+
+class AdaptiveDifficultyRequest(BaseModel):
+    """Body of ``POST /api/v1/foundation/progress/adaptive-difficulty``."""
+
+    user_id: Optional[str] = Field(
+        "default",
+        description=(
+            "Learner whose difficulty is computed from their history: word frequency, morphology "
+            "complexity, tone sensitivity and historical error rate. Defaults to 'default'; send "
+            "null to use the tracker's own default profile."
+        ),
+    )
+
+
+class RankedSearchRequest(BaseModel):
+    """Body of ``POST /api/v1/foundation/search/ranked``."""
+
+    query: str = Field(
+        ...,
+        description=(
+            "The word or phrase to search for across the dictionary, the Bible corpus and the "
+            "grammar-pattern sources; results come back with a relevance score."
+        ),
+    )
+    category: Optional[str] = Field(
+        None,
+        description=(
+            "Restrict the search to one source family: 'vocabulary' (dictionary), 'grammar' "
+            "(grammar patterns) or 'bible'. Leave unset to search all of them."
+        ),
+    )
+    limit: int = Field(
+        10,
+        description="Maximum number of ranked results to return.",
+    )
+
+
+class CrossLingualSearchRequest(BaseModel):
+    """Body of ``POST /api/v1/foundation/search/cross-lingual``."""
+
+    query: str = Field(
+        ...,
+        description="The headword to look up, written in the source language.",
+    )
+    source_lang: str = Field(
+        "en",
+        description=(
+            "Language of 'query', and so the dictionary table searched: 'en' queries the "
+            "English-to-Zolai table, 'zo' the Zolai-to-English table."
+        ),
+    )
+    target_lang: str = Field(
+        "zo",
+        description=(
+            "Language the results are translated into ('en' or 'zo'). Echoed back on every hit "
+            "and part of the cache key."
+        ),
+    )
+    limit: int = Field(
+        10,
+        description="Maximum number of cross-lingual matches to return.",
+    )
+
+
+class TopicalSearchRequest(BaseModel):
+    """Body of ``POST /api/v1/foundation/search/topical``."""
+
+    theme: str = Field(
+        ...,
+        description=(
+            "Theme keywords matched against Bible verse text in both English and Zolai, e.g. "
+            "'love', 'creation' or 'prayer'."
+        ),
+    )
+    limit: int = Field(
+        10,
+        description="Maximum number of thematically matching verses to return.",
+    )
+
+
+class StructureValidationRequest(BaseModel):
+    """Body of ``POST /api/v1/foundation/grammar/validate-structure``."""
+
+    sentence: str = Field(
+        ...,
+        description=(
+            "The Zolai sentence to check. Validated for SOV verb position, ergative 'in' "
+            "placement, negation ('kei') and question ('hiam') patterns, and ZVS 2018 compliance."
+        ),
+    )
+
+
+class DisambiguationRequest(BaseModel):
+    """Body of ``POST /api/v1/foundation/translation/disambiguate``."""
+
+    word: str = Field(
+        ...,
+        description=(
+            "A polysemous Zolai word to disambiguate. Every dictionary sense is collected and "
+            "ranked, optionally weighted by per-book frequency from the word_usage table."
+        ),
+    )
+    context: Optional[str] = Field(
+        None,
+        description=(
+            "Optional context that biases the ranking — a corpus or register label ('bible'), a "
+            "book name, or the sentence the word appears in. Leave unset to rank by frequency "
+            "alone."
+        ),
+    )
+    direction: str = Field(
+        "zo-en",
+        description=(
+            "Translation direction for the candidates: 'zo-en' (default) or 'en-zo'."
+        ),
+    )
+
+
+class ErrorCategorizationRequest(BaseModel):
+    """Body of ``POST /api/v1/foundation/progress/error-categorize``."""
+
+    original: str = Field(
+        ...,
+        description="The uncorrected Zolai text the learner submitted.",
+    )
+    corrected: str = Field(
+        ...,
+        description=(
+            "The corrected Zolai text. The pair is classified as an orthographic (ZVS forbidden "
+            "form), word-order (SOV), negation, question-form, tone-sandhi or compound-word error."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +822,7 @@ async def get_cost_summary(
 # ---------------------------------------------------------------------------
 
 @router.post("/analyze/corpus")
-async def analyze_corpus(request: dict):
+async def analyze_corpus(request: CorpusAnalysisRequest):
     """Run corpus-level analysis on input text.
 
     Returns n-grams, collocations, frequency distribution, and register detection.
@@ -583,9 +831,9 @@ async def analyze_corpus(request: dict):
         from ..foundation.corpus import get_corpus_analyzer
         analyzer = get_corpus_analyzer()
 
-        text = request.get("text", "")
-        _ngram_size = request.get("ngram_size", 2)
-        _top_k = request.get("top_k", 100)
+        text = request.text
+        _ngram_size = request.ngram_size
+        _top_k = request.top_k
 
         if not text:
             raise HTTPException(status_code=400, detail="Text is required")
@@ -610,7 +858,7 @@ async def analyze_corpus(request: dict):
 
 
 @router.post("/analyze/phonology")
-async def analyze_phonology(request: dict):
+async def analyze_phonology(request: PhonologyAnalysisRequest):
     """Run phonological analysis on a Zolai word.
 
     Returns syllable structures, tone patterns, sandhi results, phonotactic validity, stress pattern.
@@ -619,8 +867,8 @@ async def analyze_phonology(request: dict):
         from ..foundation.phonology import get_phonological_analyzer
         analyzer = get_phonological_analyzer()
 
-        word = request.get("word", "")
-        _apply_sandhi = request.get("apply_sandhi", True)
+        word = request.word
+        _apply_sandhi = request.apply_sandhi
 
         if not word:
             raise HTTPException(status_code=400, detail="Word is required")
@@ -653,7 +901,7 @@ async def analyze_phonology(request: dict):
 
 
 @router.post("/analyze/morphology")
-async def analyze_morphology(request: dict):
+async def analyze_morphology(request: MorphologyAnalysisRequest):
     """Run enhanced morphological analysis on a Zolai word.
 
     Returns morpheme decomposition with directional, aspect, particle detection and ZVS validation.
@@ -662,7 +910,7 @@ async def analyze_morphology(request: dict):
         from ..foundation.morphology import get_enhanced_morphology
         analyzer = get_enhanced_morphology()
 
-        word = request.get("word", "")
+        word = request.word
         if not word:
             raise HTTPException(status_code=400, detail="Word is required")
 
@@ -688,7 +936,7 @@ async def analyze_morphology(request: dict):
 
 
 @router.post("/translate/enhanced")
-async def translate_enhanced(request: dict):
+async def translate_enhanced(request: EnhancedTranslationRequest):
     """Translate with 3-tier confidence scoring and evidence chain.
 
     Returns translation with confidence tier, evidence sources, and morphology breakdown.
@@ -697,9 +945,9 @@ async def translate_enhanced(request: dict):
         from ..learning.translation import TranslationEngine
         engine = TranslationEngine()
 
-        text = request.get("text", "")
-        direction = request.get("direction", "auto")
-        context = request.get("context")
+        text = request.text
+        direction = request.direction
+        context = request.context
 
         if not text:
             raise HTTPException(status_code=400, detail="Text is required")
@@ -726,7 +974,7 @@ async def translate_enhanced(request: dict):
 
 
 @router.post("/progress/adaptive-difficulty")
-async def get_adaptive_difficulty(request: dict):
+async def get_adaptive_difficulty(request: AdaptiveDifficultyRequest):
     """Compute adaptive quiz difficulty based on user's learning profile.
 
     Returns difficulty settings considering word frequency, morphology complexity,
@@ -735,7 +983,7 @@ async def get_adaptive_difficulty(request: dict):
     try:
         from ..learning.progress import ProgressTracker
 
-        user_id = request.get("user_id", "default")
+        user_id = request.user_id
         tracker = ProgressTracker(user_id=user_id)
 
         result = tracker.get_adaptive_difficulty(user_id=user_id)
@@ -751,7 +999,7 @@ async def get_adaptive_difficulty(request: dict):
 # ---------------------------------------------------------------------------
 
 @router.post("/search/ranked")
-async def search_ranked(request: dict):
+async def search_ranked(request: RankedSearchRequest):
     """Search with TF-IDF-inspired relevance ranking.
 
     Returns results ranked by relevance score from dictionary, Bible,
@@ -761,9 +1009,9 @@ async def search_ranked(request: dict):
         from ..learning.online_search import get_online_search
         search = get_online_search()
 
-        query = request.get("query", "")
-        category = request.get("category")
-        limit = request.get("limit", 10)
+        query = request.query
+        category = request.category
+        limit = request.limit
 
         if not query:
             raise HTTPException(status_code=400, detail="Query is required")
@@ -783,7 +1031,7 @@ async def search_ranked(request: dict):
 
 
 @router.post("/search/cross-lingual")
-async def search_cross_lingual(request: dict):
+async def search_cross_lingual(request: CrossLingualSearchRequest):
     """Cross-lingual dictionary search between English and Zolai.
 
     When source_lang="en", queries dictionary_en_zo table.
@@ -793,10 +1041,10 @@ async def search_cross_lingual(request: dict):
         from ..learning.online_search import get_online_search
         search = get_online_search()
 
-        query = request.get("query", "")
-        source_lang = request.get("source_lang", "en")
-        target_lang = request.get("target_lang", "zo")
-        limit = request.get("limit", 10)
+        query = request.query
+        source_lang = request.source_lang
+        target_lang = request.target_lang
+        limit = request.limit
 
         if not query:
             raise HTTPException(status_code=400, detail="Query is required")
@@ -823,7 +1071,7 @@ async def search_cross_lingual(request: dict):
 
 
 @router.post("/search/topical")
-async def search_topical(request: dict):
+async def search_topical(request: TopicalSearchRequest):
     """Search Bible verses by topic/theme keywords across books.
 
     Matches theme keywords against English and Zolai text to find
@@ -833,8 +1081,8 @@ async def search_topical(request: dict):
         from ..learning.online_search import get_online_search
         search = get_online_search()
 
-        theme = request.get("theme", "")
-        limit = request.get("limit", 10)
+        theme = request.theme
+        limit = request.limit
 
         if not theme:
             raise HTTPException(status_code=400, detail="Theme is required")
@@ -879,7 +1127,7 @@ async def get_search_analytics():
 # ---------------------------------------------------------------------------
 
 @router.post("/grammar/validate-structure")
-async def validate_structure(request: dict):
+async def validate_structure(request: StructureValidationRequest):
     """Validate SOV sentence structure and grammar markers.
 
     Checks verb position, ergative 'in' placement, negation patterns,
@@ -889,7 +1137,7 @@ async def validate_structure(request: dict):
         from ..learning.grammar_editor import GrammarEditor
         editor = GrammarEditor()
 
-        sentence = request.get("sentence", "")
+        sentence = request.sentence
         if not sentence:
             raise HTTPException(status_code=400, detail="Sentence is required")
 
@@ -908,7 +1156,7 @@ async def validate_structure(request: dict):
 # ---------------------------------------------------------------------------
 
 @router.post("/translation/disambiguate")
-async def disambiguate_translation(request: dict):
+async def disambiguate_translation(request: DisambiguationRequest):
     """Disambiguate polysemous words using dictionary + word_usage context.
 
     Returns ranked candidates with confidence scores and evidence sources.
@@ -917,9 +1165,9 @@ async def disambiguate_translation(request: dict):
         from ..learning.translation import TranslationEngine
         engine = TranslationEngine()
 
-        word = request.get("word", "")
-        context = request.get("context")
-        direction = request.get("direction", "zo-en")
+        word = request.word
+        context = request.context
+        direction = request.direction
 
         if not word:
             raise HTTPException(status_code=400, detail="Word is required")
@@ -957,7 +1205,7 @@ async def get_user_streak(user_id: str, streak_type: str = "daily"):
 
 
 @router.post("/progress/error-categorize")
-async def categorize_error(request: dict):
+async def categorize_error(request: ErrorCategorizationRequest):
     """Categorize the type of error in a correction.
 
     Checks for ZVS forbidden forms, SOV/negation/question patterns,
@@ -966,8 +1214,8 @@ async def categorize_error(request: dict):
     try:
         from ..learning.progress import ProgressTracker
 
-        original = request.get("original", "")
-        corrected = request.get("corrected", "")
+        original = request.original
+        corrected = request.corrected
 
         if not original or not corrected:
             raise HTTPException(status_code=400, detail="Both original and corrected are required")
@@ -998,3 +1246,164 @@ async def get_error_breakdown(user_id: str):
     except Exception as e:
         logger.error("Get error breakdown failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Machine-readable tool contracts (W1)
+#
+# One declarative record per typed endpoint above, so the permission an MCP tool
+# must carry is *declared* here rather than hand-written as a string in the
+# transport layer — and so the declaration can be diffed against the real
+# routes (tests/test_foundation_contract.py does exactly that).
+#
+# This registry is **metadata only**: it documents the scope a caller is
+# expected to hold. It grants nothing and enforces nothing on its own. HTTP
+# authorisation stays where it already lives — ``rbac.classify_route``, which
+# every ``/api/v1/foundation/*`` route satisfies as ``member`` (401 anonymous
+# under ``ZOLAI_API_AUTH=enforce``) except the public ``GET /stats`` — and the
+# scope strings below are drawn from the frozen 33-action vocabulary in
+# :data:`zolai.api.auth.VALID_ACTIONS`.
+#
+# Consumers (a later wave): the MCP server derives each tool's input schema from
+# the route's request model and its declared permissions from ``required_scope``;
+# ``GET /api/v1/mcp-manifest`` serves the same data. ``path`` is the
+# router-relative path exactly as written in the ``@router.post(...)`` decorator
+# (``server.py`` mounts this router with ``prefix="/api/v1"``).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FoundationToolContract:
+    """Declarative contract for one foundation endpoint exposed as a tool."""
+
+    #: HTTP method of the route.
+    method: str
+    #: Router-relative path, matching the ``@router.post(...)`` decorator verbatim.
+    path: str
+    #: Stable tool name (also the handler name); safe to expose to a model.
+    operation_id: str
+    #: Frozen-vocabulary scope a caller must hold; ``""`` marks the route public.
+    required_scope: str
+    #: One line an LLM reads to decide whether to call this tool.
+    description: str
+
+
+#: Read-only analysis and search over the canonical linguistic data. No write
+#: scope appears here because none of these 11 routes writes.
+_FOUNDATION_READ_SCOPE = "dataset:read"
+
+#: Public marker for :attr:`FoundationToolContract.required_scope`.
+PUBLIC_SCOPE = ""
+
+
+FOUNDATION_TOOL_CONTRACTS: tuple[FoundationToolContract, ...] = (
+    FoundationToolContract(
+        method="POST",
+        path="/analyze/corpus",
+        operation_id="analyze_corpus",
+        required_scope=_FOUNDATION_READ_SCOPE,
+        description=(
+            "Corpus-level text analysis: n-grams, PMI collocations, Zipf frequency distribution "
+            "and a formal/common/literary register guess."
+        ),
+    ),
+    FoundationToolContract(
+        method="POST",
+        path="/analyze/phonology",
+        operation_id="analyze_phonology",
+        required_scope=_FOUNDATION_READ_SCOPE,
+        description=(
+            "Phonological analysis of one Zolai word: syllable structure with tones, tone "
+            "sandhi, phonotactic validity and stress pattern."
+        ),
+    ),
+    FoundationToolContract(
+        method="POST",
+        path="/analyze/morphology",
+        operation_id="analyze_morphology",
+        required_scope=_FOUNDATION_READ_SCOPE,
+        description=(
+            "Morphological decomposition of one Zolai word into directional prefix, stem, aspect "
+            "suffix and particle, with ZVS 2018 validation."
+        ),
+    ),
+    FoundationToolContract(
+        method="POST",
+        path="/translate/enhanced",
+        operation_id="translate_enhanced",
+        required_scope=_FOUNDATION_READ_SCOPE,
+        description=(
+            "Translate Zolai/English with three-tier confidence (dictionary, Bible parallel, "
+            "corpus), an evidence chain and a morphology-aware breakdown."
+        ),
+    ),
+    FoundationToolContract(
+        method="POST",
+        path="/progress/adaptive-difficulty",
+        operation_id="get_adaptive_difficulty",
+        required_scope=_FOUNDATION_READ_SCOPE,
+        description=(
+            "Compute a learner's next quiz difficulty from word frequency, morphology complexity, "
+            "tone sensitivity and error rate."
+        ),
+    ),
+    FoundationToolContract(
+        method="POST",
+        path="/search/ranked",
+        operation_id="search_ranked",
+        required_scope=_FOUNDATION_READ_SCOPE,
+        description=(
+            "Relevance-ranked bilingual search across the dictionary, Bible and grammar-pattern "
+            "sources."
+        ),
+    ),
+    FoundationToolContract(
+        method="POST",
+        path="/search/cross-lingual",
+        operation_id="search_cross_lingual",
+        required_scope=_FOUNDATION_READ_SCOPE,
+        description=(
+            "Dictionary lookup between English and Zolai; pick the source language to choose "
+            "which dictionary direction is searched."
+        ),
+    ),
+    FoundationToolContract(
+        method="POST",
+        path="/search/topical",
+        operation_id="search_topical",
+        required_scope=_FOUNDATION_READ_SCOPE,
+        description=(
+            "Find Bible verses by theme keyword, matching both English and Zolai text."
+        ),
+    ),
+    FoundationToolContract(
+        method="POST",
+        path="/grammar/validate-structure",
+        operation_id="validate_structure",
+        required_scope=_FOUNDATION_READ_SCOPE,
+        description=(
+            "Check a Zolai sentence for SOV verb position, ergative 'in', negation and question "
+            "markers, and ZVS 2018 compliance."
+        ),
+    ),
+    FoundationToolContract(
+        method="POST",
+        path="/translation/disambiguate",
+        operation_id="disambiguate_translation",
+        required_scope=_FOUNDATION_READ_SCOPE,
+        description=(
+            "Disambiguate a polysemous Zolai word by ranking its dictionary senses, optionally "
+            "weighted by per-book usage."
+        ),
+    ),
+    FoundationToolContract(
+        method="POST",
+        path="/progress/error-categorize",
+        operation_id="categorize_error",
+        required_scope=_FOUNDATION_READ_SCOPE,
+        description=(
+            "Classify a learner's correction as orthographic, word-order, negation, "
+            "question-form, tone-sandhi or compound-word error."
+        ),
+    ),
+)
