@@ -88,6 +88,15 @@ PUBLIC_ROUTES: tuple[tuple[str | None, str], ...] = (
     ("POST", "/api/v1/assistant/chat"),
     # Public assistant feedback (P4) — anonymous feedback stays open under enforce.
     ("POST", "/api/v1/assistant/feedback"),
+    # MCP tool surface (stateless JSON-RPC). Public like the assistant: an
+    # anonymous client may list and call the retrieval-only tool set, and a
+    # presented key *widens* that set via the caller's role — the tool scope is
+    # derived server-side from the resolved key, never from a message field.
+    # The stricter anonymous bucket is declared in PUBLIC_CHAT_PATHS below.
+    # Both the versioned path and the bare alias the public MCP host
+    # (mcp.zolai.space -> :8001/mcp) proxies are the same handler.
+    ("POST", "/api/v1/mcp"),
+    ("POST", "/mcp"),
     # Anonymous Studio reads (plan §B table).
     ("GET", "/api/v1/search"),
     ("POST", "/api/v1/search"),
@@ -158,6 +167,19 @@ MEMBER_PREFIXES: tuple[str, ...] = (
     "/api/v1/predictions",
     "/api/v1/foundation",
     "/api/v1/auth",
+    # ``/desktop`` is a declared authed surface outside ``/api/v1``: 44 routes in
+    # zolai/api/desktop_router.py + 7 in zolai/api/jsonl_router.py (51
+    # ``(method, path)`` pairs). Every one of them is scope-gated at the route,
+    # so ``member`` is the honest class — a key is required, and the finer
+    # per-action split (dataset:read for reads, the stricter write action for the
+    # full-corpus import/export) is enforced by ``require_scope`` on the handler
+    # itself, not by this declaration table.
+    #
+    # This closes a real hole: the completeness guard in
+    # tests/test_rbac_public_matrix.py only walks OpenAPI paths starting with
+    # ``/api/v1``, so the entire ``/desktop`` prefix had never been declared and
+    # classify_route() returned "unclassified" for all 51 of them.
+    "/desktop",
 )
 
 #: Strict admin surface (401 anon in warn *and* enforce + scope-gated).
@@ -198,6 +220,10 @@ ADMIN_METHOD_ROUTES: tuple[tuple[str | None, str], ...] = (
 #: Paths under the public assistant that get the stricter anonymous chat bucket.
 PUBLIC_CHAT_PATHS: tuple[str, ...] = (
     "/api/v1/assistant/chat",
+    # MCP ``tools/call`` runs a real DB query per message, so anonymous callers
+    # get the strict 10/min bucket, not 120/min — on both MCP paths.
+    "/api/v1/mcp",
+    "/mcp",
     # Learning runs are CPU/SQLite-heavy (pattern extraction, vocabulary
     # builds), so anonymous callers get the strict 10/min bucket, not 120/min.
     "/api/v1/learning/run",
