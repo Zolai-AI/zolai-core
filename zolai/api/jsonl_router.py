@@ -1,6 +1,37 @@
 """
 JSONL Import/Export API Router for Zolai Desktop.
 Provides endpoints for importing/exporting JSONL data with version tracking.
+
+Authentication (2026-10-18 security fix)
+---------------------------------------
+This router used to declare **no** ``require_scope`` dependency at all, while
+sitting on the same ``/desktop`` prefix as
+:mod:`zolai.api.desktop_router` (which requires ``dataset:read``).  Because
+``auth_middleware.is_protected_path`` only gates ``/api/v1``, protection for
+``/desktop/*`` rests entirely on each router's own dependencies — so under
+``ZOLAI_API_AUTH=enforce`` every route below, including the full-corpus write
+(``POST /import/all``) and the full-corpus read (``POST /export/all``), served
+**unauthenticated** callers.  Each route now declares a scope explicitly.
+
+Reads and writes deliberately do **not** share one scope, and both scopes come
+from the frozen 33-action vocabulary in :data:`zolai.api.auth.VALID_ACTIONS`
+(no new scope was invented, and ``VALID_ACTIONS`` is unchanged):
+
+``READ_SCOPE = "dataset:read"``
+    the same action every other ``/desktop`` read already needs (table list,
+    import log/status) — unchanged posture for a legitimate reader.
+
+``WRITE_SCOPE = "pipeline:run"``
+    the four mutating verbs: ``/import/all`` (whole-corpus load),
+    ``/import/file`` (row load), ``/export/table`` and ``/export/all`` (the
+    latter two dump corpus content to a **caller-chosen path** on the server).
+    ``pipeline:run`` is the frozen action for *running* the ingestion/export
+    pipeline, so a read-only key can no longer run one — a strictly stronger
+    grant than the read scope it sits behind.
+
+Both use the non-strict ``require_scope``: ``ZOLAI_API_AUTH=warn`` still
+dual-accepts (logged + rate-limited, unchanged) and ``enforce`` 401s an
+anonymous caller, exactly like ``desktop_router``.
 """
 
 from __future__ import annotations
@@ -9,10 +40,15 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from ..core.jsonl_pipeline_v3 import JSONLPipeline
+from .auth import require_scope
+
+#: Frozen vocabulary actions required per verb (see module docstring).
+READ_SCOPE = "dataset:read"
+WRITE_SCOPE = "pipeline:run"
 
 router = APIRouter(prefix="/desktop/jsonl", tags=["jsonl"])
 
@@ -47,7 +83,7 @@ class ExportAllRequest(BaseModel):
     clean: bool = False
 
 
-@router.post("/import/all")
+@router.post("/import/all", dependencies=[Depends(require_scope(WRITE_SCOPE))])
 async def import_all(request: ImportAllRequest, background_tasks: BackgroundTasks):
     """Import all canonical JSONL files into the database."""
     batch_id = request.batch_id or str(uuid.uuid4())
@@ -64,7 +100,7 @@ async def import_all(request: ImportAllRequest, background_tasks: BackgroundTask
     return {"batch_id": batch_id, "status": "started", "message": "Import started in background"}
 
 
-@router.post("/import/file")
+@router.post("/import/file", dependencies=[Depends(require_scope(WRITE_SCOPE))])
 async def import_file(request: ImportFileRequest):
     """Import a single JSONL file."""
     file_path = Path(request.file_path)
@@ -78,7 +114,7 @@ async def import_file(request: ImportFileRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/import/status/{batch_id}")
+@router.get("/import/status/{batch_id}", dependencies=[Depends(require_scope(READ_SCOPE))])
 async def import_status(batch_id: str):
     """Check import status by batch ID."""
     logs = _pipeline.get_import_log(100)
@@ -99,13 +135,13 @@ async def import_status(batch_id: str):
     }
 
 
-@router.get("/import/log")
+@router.get("/import/log", dependencies=[Depends(require_scope(READ_SCOPE))])
 async def import_log(limit: int = Query(50, ge=1, le=500)):
     """Get recent import log entries."""
     return _pipeline.get_import_log(limit)
 
 
-@router.post("/export/table")
+@router.post("/export/table", dependencies=[Depends(require_scope(WRITE_SCOPE))])
 async def export_table(request: ExportTableRequest):
     """Export a table to JSONL format."""
     try:
@@ -122,7 +158,7 @@ async def export_table(request: ExportTableRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/export/all")
+@router.post("/export/all", dependencies=[Depends(require_scope(WRITE_SCOPE))])
 async def export_all(request: ExportAllRequest):
     """Export all tables to JSONL format."""
     try:
@@ -137,7 +173,7 @@ async def export_all(request: ExportAllRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/tables")
+@router.get("/tables", dependencies=[Depends(require_scope(READ_SCOPE))])
 async def list_tables():
     """List all tables that have import logs."""
     from sqlalchemy import create_engine, text
