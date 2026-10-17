@@ -9,7 +9,14 @@ Python port of ``pcore-assistant/server/src/services/ai.ts``:
   ``AI_API_KEY``), and its request body **structurally omits the ``tools``
   key** — the brain path has no native function-calling support.
 - Native ``tools`` passthrough only for adapters in
-  :data:`NATIVE_TOOL_ADAPTERS` (``openai`` / ``openrouter``).
+  :data:`NATIVE_TOOL_ADAPTERS` (``openai`` / ``openrouter``).  The
+  ``anthropic`` and ``google-gemini`` catalog rows are ``adapter="openai"`` on
+  those vendors' OpenAI-compatibility endpoints, so they receive ``tools``
+  through this same branch — there is deliberately **no** Gemini/Anthropic wire
+  adapter, and the brain branch structurally omits ``tools``.
+  See ``docs/specs/tool-wire-formats.md`` for the proven compat path and its
+  caveats (notably: the compatibility layer documents ``max_tokens`` as
+  required, so a caller targeting the ``anthropic`` row must pass it).
 - :func:`pick_provider` reads the DB **every call** (no boot cache, no
   first-row reroute) and fails with the stable machine-readable codes
   :data:`NO_ACTIVE_PROVIDER` / :data:`MODEL_NOT_CONFIGURED` — callers never
@@ -209,13 +216,18 @@ def chat(
     messages: list[dict[str, Any]],
     *,
     tools: list[dict[str, Any]] | None = None,
+    max_tokens: int | None = None,
     timeout_s: float | None = None,
     user_api_key: str | None = None,
 ) -> dict[str, Any]:
     """One synchronous chat-completions call against ``row``'s endpoint.
 
     Returns:
-        ``{"status", "text", "tool_calls", "latency_ms", "provider", "model"}``.
+        ``{"status", "text", "tool_calls", "latency_ms", "provider", "model"}``
+        where each ``tool_calls`` entry is
+        ``{"id", "name", "input", "arguments"}`` — ``id``/``arguments`` are the
+        raw wire values, so a native multi-turn replay can echo the assistant
+        tool-call turn verbatim instead of re-serialising a parsed dict.
 
     Raises:
         ProviderError: ``PROVIDER_KEY_MISSING`` / ``PROVIDER_REQUEST_FAILED``.
@@ -223,6 +235,11 @@ def chat(
     ``user_api_key`` is an optional per-request key override (user-provided,
     not stored server-side). If provided, it takes precedence over the
     row's stored key or env fallback.
+
+    ``max_tokens`` is forwarded to the wire **only when set** (nothing is sent
+    that the caller did not ask for).  Some OpenAI-compatible endpoints require
+    it — Anthropic's compatibility layer documents ``max_tokens`` as a required
+    field — so a caller targeting such a row must supply it here.
     """
     url = resolve_completions_url(row)
     # User-provided key takes precedence over stored key
@@ -239,7 +256,7 @@ def chat(
     if key:
         headers["Authorization"] = f"Bearer {key}"
 
-    body = build_chat_body(row, model, messages, tools=tools)
+    body = build_chat_body(row, model, messages, tools=tools, max_tokens=max_tokens)
     timeout = float(timeout_s or row.get("timeout_s") or 60)
 
     catalog_id = str(row.get("catalog_id") or "unknown")
@@ -283,8 +300,10 @@ def chat(
     native_calls = message.get("tool_calls") or []
     tool_calls = [
         {
+            "id": str(c.get("id") or ""),
             "name": ((c.get("function") or {}).get("name") or c.get("name") or ""),
             "input": _tool_call_input(c),
+            "arguments": _tool_call_arguments(c),
         }
         for c in native_calls
         if isinstance(c, dict)
@@ -297,6 +316,24 @@ def chat(
         "provider": catalog_id,
         "model": model,
     }
+
+
+def _tool_call_arguments(call: dict[str, Any]) -> str:
+    """The raw ``function.arguments`` JSON string of a native tool call.
+
+    Kept verbatim (never re-serialised from :func:`_tool_call_input`) so a
+    native multi-turn replay hands the provider back exactly what it emitted.
+    """
+    fn = call.get("function") or {}
+    raw = fn.get("arguments") if isinstance(fn, dict) else None
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, dict):
+        return json.dumps(raw, ensure_ascii=False)
+    fallback = call.get("input") or call.get("arguments")
+    if isinstance(fallback, dict):
+        return json.dumps(fallback, ensure_ascii=False)
+    return ""
 
 
 def _tool_call_input(call: dict[str, Any]) -> dict[str, Any]:
