@@ -1,6 +1,6 @@
 # Code Standards — Zolai Core
 
-- **Languages:** Python (ruff), Docker, YAML.
+- **Languages:** Python (ruff), Bash (deploy scripts), YAML.
 - Ruff enabled (`ruff check zolai/`); keep Modern/Pythonic style, type hints on public API.
 - Commit style: Conventional Commits.
 - Keep secrets in `.env` only — never commit keys/tokens.

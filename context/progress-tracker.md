@@ -86,10 +86,14 @@
 - `foundation_cost` table for historical analysis
 - Dashboard endpoints for cost analytics
 
-### Production Docker
-- `docker-compose.prod.yml` — Production deployment config
-- Multi-stage Dockerfile for minimal image size
-- Health checks, restart policies, volume mounts
+### Production deployment (native systemd)
+- Runtime is a systemd unit (`zolai-core-dev.service`), **not** a container —
+  the Docker artifacts were retired 2026-10-18.
+- `scripts/deploy.sh` — `git fetch` + `merge origin/main` + restart + polled
+  `/health` (startup is ~13s).
+- Restart policy and the env file live in the unit
+  (`WorkingDirectory=/home/ubuntu/zolai-core`, `EnvironmentFile=.env.dev`,
+  `User=ubuntu`, `127.0.0.1:8001`).
 
 ### API Enhancements
 - `/foundation/analyze` — Full sentence/word analysis
@@ -149,7 +153,7 @@
 ## Git Status
 - zolai-core: All phases committed to `main`
 - Database: Migrated to include foundation tables
-- Docker: Production-ready configuration
+- Deploy: native systemd unit + git-based deploy (Docker artifacts retired 2026-10-18)
 ---
 
 ## 2026-09-17 (Session — Desktop Bundling + Gemini WebAPI Integration)
@@ -321,10 +325,11 @@ commits per `/tmp/opencode/plan-monitoring-acid.md`.
   store. `prometheus-client==0.26.0` pinned.
 - **API:** `/metrics` + 8 `/api/metrics/*` endpoints registered before the
   catch-all; `/health` gains `uptime_s` (additive).
-- **Stack:** `docker-compose.monitoring.yml` (Prometheus 3.15.0, Grafana
-  13.2.3), `ops/` provisioning (datasource, 3 dashboards, 3 alert rules,
-  contact point `zolai-ops`, notification policies), webhook alert target →
-  `/api/metrics/annotations`.
+- **Stack:** Prometheus 3.15.0 + Grafana 13.2.3 with `ops/` provisioning
+  (datasource, 3 dashboards, 3 alert rules, contact point `zolai-ops`,
+  notification policies), webhook alert target → `/api/metrics/annotations`.
+  This stack was containerised via `docker-compose.monitoring.yml`, which was
+  **retired 2026-10-18**; it has **no native equivalent yet — pending**.
 - **CLI:** `zolai db integrity [--full] [--json]` (exit 1 on violations).
 - **Docs:** `docs/MONITORING.md` runbook incl. metric inventory, alert parity
   procedure, and the deferred-constraint rationale + 12-step table-rebuild path.
@@ -405,3 +410,56 @@ closed out with the reviewer's FIX_REQUIRED defects.
   gate: flip `ZOLAI_API_AUTH=enforce` (reviewer: zero current `/api/v1`
   consumers, so the flip is low-risk).
 - Row-limit ("per-key/organization") counters still PENDING.
+
+---
+
+## 2026-10-18 (Session — Docker retirement: the artifacts now match the native runtime)
+
+The runtime was already native; the repository said otherwise. On pcore-server
+`docker ps -a` returns **nothing** — the API is the `zolai-core-dev.service`
+systemd unit (`ExecStart=/home/ubuntu/zolai-core/.venv-dev/bin/uvicorn
+zolai.api.server:app --host 127.0.0.1 --port 8001`,
+`WorkingDirectory=/home/ubuntu/zolai-core`, `EnvironmentFile=.env.dev`,
+`User=ubuntu`), with nginx terminating TLS for `api.zolai.space` in front of it.
+The core needs **~13s** to answer after a restart, so readiness is POLLED,
+never `sleep`ed.
+
+### Deleted (were dead and actively misleading)
+`Dockerfile`, `Dockerfile.prod`, `docker-compose.yml`,
+`docker-compose.prod.yml`, `docker-compose.monitoring.yml` — commit `7255047`.
+Nothing built or served them.
+
+### Replaced
+- `scripts/sync-and-deploy.sh` was **dangerous**: Docker-based *and* it
+  `rsync --delete`d a local tree over `/home/ubuntu/zolai-core/zolai/`, which
+  would have erased the server-only commits (the checkout is 12 ahead of
+  `origin/main`). It is now git-based: `git fetch` →
+  `git merge --no-edit origin/main` → `systemctl restart zolai-core-dev` → poll
+  `/health` (30s timeout, fails loudly). Commit `1300971`.
+- `scripts/deploy.sh` is the on-host equivalent: authoritative-checkout guard,
+  merge, restart, polled `/health`, and verification through the venv python
+  (`.venv-dev`, falling back to `.venv`) instead of `docker exec`. Also `1300971`.
+- `install.sh` drops the Docker/Compose preconditions and the `docker compose
+  build` step, and provisions the native unit + `.venv-dev` + `.env.dev`
+  (matching the live host) instead. The CPU/GPU torch detection is untouched: it
+  still delegates to `scripts/install.sh`, which gained a `VENV_DIR` override
+  (default `.venv`, so local setup is unchanged). Commit `18d787f`.
+
+### Corrected to the real topology
+`context/architecture.md`, `context/project-overview.md`,
+`context/code-standards.md`, `context/progress-tracker.md`, `docs/STRUCTURE.md`,
+`docs/MONITORING.md`, `ROADMAP.md`, `docs/foundation/00-FOUNDATION_ROADMAP.md`,
+`docs/foundation/01-PRINCIPLES.md`, `.env.production.example`, and `ops/`
+(Prometheus scrape target → `127.0.0.1:8000`, Grafana datasource →
+`127.0.0.1:9090`, `promtool check rules` instead of a compose one-shot).
+
+### Honest gap (written down, not papered over)
+The Prometheus/Grafana stack was containerised and has **no native equivalent
+yet — pending**. `docs/MONITORING.md` says that plainly; the `ops/` provisioning
+files remain the source of truth.
+
+### Not done
+- Nothing pushed, nothing deployed (founder gate).
+- `docs/planning/MCP_LAYER_PLAN.md` still references `docker-compose.prod.yml` —
+  owned by another session, deliberately untouched.
+- `docs/archive/**` keeps its dated Docker structure snapshots as history.

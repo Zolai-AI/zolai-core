@@ -6,7 +6,7 @@ canonical 2.3GB SQLite store (`data/zolai.db`).
 
 | | |
 |---|---|
-| Compose file | `docker-compose.monitoring.yml` |
+| Stack | Prometheus 3.15.0 + Grafana 13.2.3, **containerised — no native equivalent yet (pending)**; the old `docker-compose.monitoring.yml` was retired 2026-10-18 |
 | Provisioning / dashboards | `ops/` |
 | Instrumentation | `zolai/monitoring/` |
 | REST surface | `zolai/api/metrics_router.py` (mounted **before** the catch-all route) |
@@ -17,12 +17,22 @@ canonical 2.3GB SQLite store (`data/zolai.db`).
 
 ## 1. Quick start
 
+⚠️ **No native equivalent yet — pending.** The stack used to run containerised
+from `docker-compose.monitoring.yml` (retired 2026-10-18). The `ops/`
+provisioning files, dashboards and alert rules below are still valid, but
+nothing installs Prometheus or Grafana on the host today — start them from
+distribution packages (or re-introduce a container runtime) and provision them
+from `ops/`. Installing them natively is **pending**.
+
 ```bash
-# API (must listen on 0.0.0.0 so the container can reach the host)
+# API (must listen so the scraper can reach it)
 .venv/bin/uvicorn zolai.api.server:app --host 0.0.0.0 --port 8000
 
-# Stack (Prometheus 3.15.0 + Grafana 13.2.3)
-docker compose -f docker-compose.monitoring.yml up -d
+# Stack (Prometheus 3.15.0 + Grafana 13.2.3) — run OUTSIDE Docker:
+#   prometheus --config.file=ops/prometheus/prometheus.yml \
+#              --storage.tsdb.path=/var/lib/prometheus
+#   grafana-server --config /etc/grafana/grafana.ini
+# (not installed by this repo yet — pending)
 ```
 
 | Service | URL | Credentials |
@@ -31,18 +41,14 @@ docker compose -f docker-compose.monitoring.yml up -d
 | Prometheus | http://localhost:9090 | — |
 | Grafana | http://localhost:3000 | `${GRAFANA_ADMIN_USER:-admin}` / `${GRAFANA_ADMIN_PASSWORD:-admin}` |
 
-Stop: `docker compose -f docker-compose.monitoring.yml down`
-(data survives in the `prometheus-data` / `grafana-data` volumes; add `-v` to
-discard).
-
 **Env-only secrets** (never committed): `GRAFANA_URL`, `GRAFANA_API_KEY`
 (annotation push), `GRAFANA_ALERT_WEBHOOK_URL`, `GRAFANA_ADMIN_USER`,
-`GRAFANA_ADMIN_PASSWORD`. The compose file only references `${…}` forms with
-defaults, so `.env.example` placeholders are the documented values.
+`GRAFANA_ADMIN_PASSWORD`.
 
-Linux note: Prometheus reaches the host through
-`extra_hosts: host.docker.internal:host-gateway`; without it the target shows
-`connection refused`.
+Scrape target: `ops/prometheus/prometheus.yml` points at `127.0.0.1:8000`. When
+the stack was containerised the target had to be `host.docker.internal:8000`
+(via `extra_hosts: host-gateway`) because a container cannot reach the host's
+loopback; a native Prometheus talks to `127.0.0.1` directly.
 
 ---
 
@@ -155,7 +161,7 @@ Template variables: `$instance` on all three; `$route` on `api-overview`;
 `api-overview` and `database-storage` include tag-based Grafana annotation
 queries (`deploy`, `eval`, `manual`).
 
-Validate after `up -d`:
+Validate after starting the stack:
 
 ```bash
 curl -s -u admin:admin "http://localhost:3000/api/search?type=dash-db"
@@ -186,14 +192,13 @@ they match.**
 
 Notification routing: Grafana contact point `zolai-ops`
 (`webhook` → `GRAFANA_ALERT_WEBHOOK_URL`, default
-`http://host.docker.internal:8000/api/metrics/annotations`) with a notification
+`http://127.0.0.1:8000/api/metrics/annotations`) with a notification
 policy routing `severity=critical` (4h repeat) and `severity=warning` (24h
 repeat) to that same point.
 
 ```bash
 # rule file validity (Grafana/Prometheus rulers agree)
-docker compose -f docker-compose.monitoring.yml run --rm --no-deps \
-  --entrypoint promtool prometheus check rules /etc/prometheus/rules.yml
+promtool check rules ops/prometheus/rules.yml
 ```
 
 ---
@@ -336,8 +341,8 @@ validation.
 # smoke
 curl -s localhost:8000/metrics | head -40
 curl -s localhost:8000/api/metrics/summary
-docker compose -f docker-compose.monitoring.yml config --quiet
-docker compose -f docker-compose.monitoring.yml up -d
+# stack smoke — start Prometheus/Grafana natively first (see §1 — pending)
+promtool check rules ops/prometheus/rules.yml
 curl -s localhost:9090/-/ready
 curl -s localhost:3000/api/health
 ```
@@ -355,13 +360,13 @@ curl -s localhost:3000/api/health
 
 | Symptom | Cause / fix |
 |---|---|
-| Prometheus target `down`, `connection refused 172.17.0.1:8000` | API bound to `127.0.0.1`, or missing `extra_hosts: host-gateway` — start uvicorn on `0.0.0.0` |
+| Prometheus target `down`, `connection refused` | API not listening where the scraper looks — bind uvicorn to `0.0.0.0` (or drop the stale `host.docker.internal` target now that Prometheus is native) |
 | `/api/metrics/health` returns 503 | degraded = DB not writable, last integrity check failed, or disk not writable/free space unreadable — inspect the `db` / `disk` sections |
 | `zolai_db_integrity_status` is 0 | startup guard found FK violations; run `zolai db integrity` for details, repair, restart |
 | A metric family is missing from `/metrics` | counters/histograms emit no samples until first use — hit the endpoint that exercises it, or call `/api/metrics/summary` (runs `sample_now`) |
 | Grafana rule file rejected | keep the `expr` single-line and ending in `> <threshold>`; the parity test parses that shape |
 | Parity test fails after a threshold change | update `zolai/monitoring/alerts.py` **and** both `ops/**/rules.yml` copies |
-| Grafana data gone after `down -v` | expected — `-v` removes the `grafana-data` volume |
+| Grafana dashboards/alerts missing | the stack is not (yet) provisioned natively — see §1; the `ops/` files are the source of truth |
 
 ### Known limitations
 
