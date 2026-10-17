@@ -12,7 +12,8 @@ the web and desktop apps.
 5. Build the Foundation Intelligence Engine for canonical knowledge management.
 
 ## Boundaries
-- Owns: `zolai/`, pyproject, tests, config, Docker, agents, skills.
+- Owns: `zolai/`, pyproject, tests, config, deploy scripts (`install.sh`,
+  `scripts/deploy.sh`), agents, skills.
 - Consumes: wiki (RAG feed), datasets (HF/Kaggle).
 
 ## Current Capabilities
@@ -166,14 +167,18 @@ ruff check .
 ruff format .
 ```
 
-### Docker
+### Running the API (native — no Docker)
 ```bash
-# Development
-docker-compose up -d
+# Local development
+.venv/bin/uvicorn zolai.api.server:app --reload --port 8000
 
-# Production
-docker-compose -f docker-compose.prod.yml up -d
+# Production (pcore-server): native systemd unit, 127.0.0.1:8001 behind nginx
+sudo systemctl restart zolai-core-dev
+journalctl -u zolai-core-dev -f
 ```
+The runtime is a systemd unit, not a container. Docker artifacts were retired
+2026-10-18; deploy with `scripts/deploy.sh` (git fetch + merge origin/main +
+restart + polled `/health`).
 
 ## Documentation
 

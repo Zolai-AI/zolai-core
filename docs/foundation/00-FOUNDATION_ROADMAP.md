@@ -61,7 +61,7 @@ This roadmap maps the 54-section reference ontology onto the existing `zolai/` s
 **Definition of Done:**
 - [x] Human Review UI with approve/reject workflow
 - [x] Cost tracking per model and operation
-- [x] Production Docker configuration
+- [x] Production deployment configuration (native systemd unit — Docker retired 2026-10-18)
 - [x] API endpoints for foundation operations
 
 ---

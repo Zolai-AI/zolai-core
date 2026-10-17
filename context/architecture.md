@@ -234,10 +234,25 @@ pip install -e ".[dev]"
 zolai api serve --reload
 ```
 
-### Production (Docker)
+### Production (native systemd — no Docker)
+The runtime is **not** containerised. On pcore-server the API is a systemd unit:
+
 ```bash
-docker-compose -f docker-compose.prod.yml up -d
+systemctl status zolai-core-dev
+# ExecStart:      /home/ubuntu/zolai-core/.venv-dev/bin/uvicorn zolai.api.server:app \
+#                   --host 127.0.0.1 --port 8001
+# WorkingDirectory: /home/ubuntu/zolai-core
+# EnvironmentFile:  /home/ubuntu/zolai-core/.env.dev
+# User:             ubuntu
+# listens on 127.0.0.1:8001 — nginx terminates TLS for api.zolai.space
+
+# deploy (git-based: merges origin/main, restarts, then polls /health)
+./scripts/deploy.sh
 ```
+
+Startup takes **~13s** to become ready, so readiness is polled against
+`http://127.0.0.1:8001/health` — never assumed with a fixed sleep. The Docker
+artifacts (`Dockerfile*`, `docker-compose*`) were retired 2026-10-18.
 
 ### Environment Variables
 ```bash

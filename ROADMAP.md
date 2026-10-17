@@ -43,7 +43,7 @@
   - `peterpausianlian/zolai-qwen-0.5b` — active LoRA FP16 training
 - [x] CI/CD pipeline (GitHub Actions: lint, test, build)
 - [x] Contributor guide and `CONTRIBUTING.md`
-- [ ] Docker setup for local development
+- [x] Local development setup — native `.venv` via `scripts/install.sh` (CPU/GPU torch auto-detect); Docker retired 2026-10-18
 
 ## Phase 3 — Model & API
 
@@ -101,7 +101,7 @@
 ### Phase D — Human Review UI + Production (2026-09-16) ✅
 - [x] Human Review UI with approve/reject workflow
 - [x] Cost tracking per model and operation
-- [x] Production Docker configuration
+- [x] Production deployment configuration — native systemd unit (`zolai-core-dev`); Docker retired 2026-10-18
 - [x] API endpoints for foundation operations
 
 ### Phase E — Complete Integration + Documentation (2026-09-17) ✅

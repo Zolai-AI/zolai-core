@@ -1,7 +1,8 @@
 # Zolai Repo Structure
 
 > Canonical layout reference — verified against the real filesystem.
-> **Dated:** 2026-09-04 · Supersedes `docs/PROJECT_STRUCTURE.md` and `docs/ROOT_STRUCTURE.md`.
+> **Dated:** 2026-09-04 (Docker entries removed 2026-10-18) · Supersedes `docs/PROJECT_STRUCTURE.md` and `docs/ROOT_STRUCTURE.md`.
+> The runtime is a native systemd unit — `Dockerfile*` / `docker-compose*` no longer exist.
 
 ---
 
@@ -17,10 +18,7 @@ zolai/                                          # repo root
 ├── ROADMAP.md
 ├── SECURITY.md
 ├── TODO.md
-├── docker-compose.yml
-├── docker-compose.prod.yml  # untracked/local
-├── Dockerfile
-├── .dockerignore
+├── install.sh                                  # native server installer (systemd)
 ├── .env.example
 ├── .gitignore
 ├── .cursorignore  # untracked/local

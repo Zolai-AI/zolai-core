@@ -185,7 +185,8 @@ confidence < 0.70  → human review queue
 
 **Rule:** Foundation Engine must be deployable with minimal configuration.
 
-- Docker support for consistent environments
+- Reproducible environments (native `.venv` via `scripts/install.sh`, CPU/GPU-aware);
+  the runtime is a systemd unit — Docker retired 2026-10-18
 - Health checks and graceful shutdown
 - Configurable batch sizes and concurrency limits
 - Comprehensive logging and monitoring endpoints
