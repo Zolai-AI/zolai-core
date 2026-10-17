@@ -81,12 +81,6 @@ jobs:
         with:
           name: zvs-scan-summary
           path: report/zvs-scan-summary.md
-
-  docker-build:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build Docker image
-        run: docker build -t zolai-core .
+# NOTE (2026-10-18): the `docker-build` job was removed with the Dockerfile it
+# built. The runtime is a native systemd unit (uvicorn on 127.0.0.1:8001); see
+# scripts/deploy.sh and scripts/install.sh.
