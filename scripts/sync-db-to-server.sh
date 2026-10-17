@@ -7,16 +7,20 @@
 # Directions never merge automatically — always pick the side that is
 # authoritative for that update (conflict policy: one direction per update).
 #
-# Safety (the server DB is open by the running API container):
+# Safety (the server DB is held open by the running API process):
 #   (a) local  : consistent snapshot via `sqlite3 .backup` (WAL-safe)
 #   (b) rsync  : push snapshot to a server temp path
-#   (c) server : stop the API container (compose down api) — never swap a
+#   (c) server : stop the API service (systemctl) — never swap a
 #                hot file the process holds open
 #   (d) server : back up existing DB first (data/backups/zolai-<ts>.db.gz)
 #   (e) server : `PRAGMA integrity_check` on the pushed file — abort unless ok
-#   (f) server : atomic replace, drop stale -wal/-shm, start container,
+#   (f) server : atomic replace, drop stale -wal/-shm, start the service,
 #                wait for /health to answer 200
 #   (g) --dry-run prints the plan and exits without touching anything
+#
+# The runtime is NATIVE (systemd), not Docker — the container files were retired
+# 2026-10-18. Stopping/starting the API needs passwordless sudo for systemctl on
+# the server (or run this as root).
 #
 # Usage:
 #   scripts/sync-db-to-server.sh [--dry-run] [--no-restart-health] [--target PATH]
@@ -25,14 +29,14 @@
 #   ZOLAI_SYNC_HOST        SSH alias/host      (default: pcore-server)
 #   ZOLAI_SYNC_SERVER_DB   remote DB path      (default: /home/ubuntu/zolai-core/data/zolai.db)
 #   ZOLAI_SYNC_SSH_KEY     identity file       (default: ~/.ssh/LightsailDefaultKey-ap-southeast-1.pem)
-#   ZOLAI_SYNC_COMPOSE     compose file path   (default: /home/ubuntu/zolai-core/docker-compose.prod.yml)
+#   ZOLAI_SYNC_SERVICE     systemd unit        (default: zolai-core-dev)
 #   ZOLAI_DATA_ROOT        local data dir root (default: <workspace>/data)
 set -euo pipefail
 
 SERVER_HOST="${ZOLAI_SYNC_HOST:-pcore-server}"
 SERVER_DB="${ZOLAI_SYNC_SERVER_DB:-/home/ubuntu/zolai-core/data/zolai.db}"
 SSH_KEY="${ZOLAI_SYNC_SSH_KEY:-$HOME/.ssh/LightsailDefaultKey-ap-southeast-1.pem}"
-COMPOSE_FILE="${ZOLAI_SYNC_COMPOSE:-/home/ubuntu/zolai-core/docker-compose.prod.yml}"
+SERVICE="${ZOLAI_SYNC_SERVICE:-zolai-core-dev}"
 REMOTE_TMP="$(dirname "${SERVER_DB}")/.zolai-push.db"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -79,11 +83,11 @@ if [[ ${DRY_RUN} -eq 1 ]]; then
   [dry-run] would run, in order:
     1. sqlite3 ${LOCAL_DB} '.backup <tmp>'          # WAL-safe local snapshot
     2. rsync -a -e ssh <tmp> ${SERVER_HOST}:${REMOTE_TMP}
-    3. ssh ${SERVER_HOST} docker compose -f ${COMPOSE_FILE} stop api   # never swap a hot file
+    3. ssh ${SERVER_HOST} sudo systemctl stop ${SERVICE}   # never swap a hot file
     4. ssh ${SERVER_HOST} back up ${SERVER_DB} → data/backups/zolai-<ts>.db.gz
     5. ssh ${SERVER_HOST} PRAGMA integrity_check on ${REMOTE_TMP}  # must be 'ok'
     6. mv ${REMOTE_TMP} ${SERVER_DB} (+ drop stale -wal/-shm)
-    7. start api container + wait for /health 200
+    7. start the service + wait for /health 200
   Nothing was changed.
 EOF
   exit 0
@@ -110,9 +114,9 @@ echo "[2/7] rsync → ${SERVER_HOST}:${REMOTE_TMP}"
 rsync -a -e "ssh ${SSH_OPTS[*]}" "${LOCAL_SNAP}" "${SERVER_HOST}:${REMOTE_TMP}"
 echo "  pushed: $(ssh "${SSH_OPTS[@]}" "${SERVER_HOST}" "stat -c %s '${REMOTE_TMP}'") bytes"
 
-# --- (c) stop the API container (server DB is hot) ----------------------------
-echo "[3/7] stop api container"
-ssh "${SSH_OPTS[@]}" "${SERVER_HOST}" "set -e; cd \"\$(dirname '${COMPOSE_FILE}')\" && docker compose -f '${COMPOSE_FILE}' stop api"
+# --- (c) stop the API service (server DB is hot) ------------------------------
+echo "[3/7] stop api service"
+ssh "${SSH_OPTS[@]}" "${SERVER_HOST}" "set -e; sudo systemctl stop '${SERVICE}'"
 echo "  api stopped"
 
 # --- (d) back up the server DB FIRST ------------------------------------------
@@ -132,8 +136,8 @@ echo "[5/7] integrity_check pushed file on server"
 REMOTE_INTEGRITY="$(ssh "${SSH_OPTS[@]}" "${SERVER_HOST}" "sqlite3 '${REMOTE_TMP}' 'PRAGMA integrity_check;' 2>&1 || true")"
 if [[ "${REMOTE_INTEGRITY}" != "ok" ]]; then
   echo "ERROR: pushed file failed integrity_check: ${REMOTE_INTEGRITY}" >&2
-  echo "  server DB untouched (stopped); container will be restarted by cleanup." >&2
-  ssh "${SSH_OPTS[@]}" "${SERVER_HOST}" "cd \"\$(dirname '${COMPOSE_FILE}')\" && docker compose -f '${COMPOSE_FILE}' start api" || true
+  echo "  server DB untouched (stopped); the service is started again below." >&2
+  ssh "${SSH_OPTS[@]}" "${SERVER_HOST}" "sudo systemctl start '${SERVICE}'" || true
   exit 1
 fi
 echo "  integrity: ok"
@@ -143,7 +147,7 @@ echo "[6/7] replace server DB + restart api"
 ssh "${SSH_OPTS[@]}" "${SERVER_HOST}" "set -e
   mv -f '${REMOTE_TMP}' '${SERVER_DB}'
   rm -f '${SERVER_DB}-wal' '${SERVER_DB}-shm'
-  cd \"\$(dirname '${COMPOSE_FILE}')\" && docker compose -f '${COMPOSE_FILE}' start api
+  sudo systemctl start '${SERVICE}'
   ls -l '${SERVER_DB}'"
 echo "  api started"
 
