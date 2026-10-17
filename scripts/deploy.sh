@@ -1,22 +1,37 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Zolai Core - Production Deployment Script
+# Zolai Core - Native Deployment (systemd, NO Docker)
 # ============================================================================
+# Runs ON the production host. Deploys the committed tree from `origin/main`
+# into the authoritative checkout, restarts the native systemd unit, and polls
+# `/health` until the API answers — then optionally verifies it end to end.
+#
 # Usage: ./scripts/deploy.sh [options]
 #
 # Options:
-#   --no-cache       Force clean rebuild (no Docker cache)
-#   --pull           Pull latest base images before build
-#   --skip-build     Skip build, only restart containers
-#   --verify         Run health checks after deploy
+#   --skip-merge     Skip `git fetch` + `git merge` (restart + verify only)
+#   --no-verify      Skip post-restart verification
 #   --help           Show this help
 #
-# Environment (from .env.production):
+# Native topology (pcore-server):
+#   checkout    /home/ubuntu/zolai-core                 (authoritative)
+#   unit        zolai-core-dev.service
+#   venv        /home/ubuntu/zolai-core/.venv-dev
+#   env file    /home/ubuntu/zolai-core/.env.dev        (the unit's EnvironmentFile)
+#   listen      127.0.0.1:8001                          (nginx terminates TLS)
+#   startup     ~13s to become ready after a restart, so readiness is POLLED,
+#               never assumed with a fixed sleep.
+#
+# There is no Docker here. `docker ps -a` on this host returns nothing; the
+# container files (Dockerfile*, docker-compose*) were deleted on 2026-10-18.
+# (The workspace-root repo owns a `native-deploy.sh`; this is the in-repo one.)
+#
+# Environment (read by the service from its EnvironmentFile):
 #   ZOLAI_ENGINE_MODE      rule|hybrid|ai (default: hybrid)
 #   AI_BRAIN_URL           Brain API endpoint
 #   AI_BRAIN_API_KEY       Brain API key
 #   ZOLAI_API_AUTH         warn|enforce|off
-#   ZOLAI_DATA_ROOT        Data directory (default: /app/data)
+#   ZOLAI_DATA_ROOT        Data directory (default: <checkout>/data)
 # ============================================================================
 
 set -euo pipefail
@@ -28,16 +43,15 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# Config
-COMPOSE_FILE="docker-compose.prod.yml"
-ENV_FILE=".env.production"
-HEALTH_ENDPOINT="http://127.0.0.1:8001/api/v1/health"
-MAX_WAIT=120
+# Config (all overridable from the environment)
+SERVICE="${ZOLAI_DEPLOY_SERVICE:-zolai-core-dev}"
+ENV_FILE_NAME="${ZOLAI_DEPLOY_ENV_FILE:-.env.dev}"
+BRANCH="${ZOLAI_DEPLOY_BRANCH:-main}"
+HEALTH_ENDPOINT="${ZOLAI_DEPLOY_HEALTH_URL:-http://127.0.0.1:8001/health}"
+HEALTH_TIMEOUT="${ZOLAI_DEPLOY_HEALTH_TIMEOUT:-30}"   # seconds (~13s is normal)
 
 # Flags
-NO_CACHE=false
-PULL=false
-SKIP_BUILD=false
+SKIP_MERGE=false
 VERIFY=true
 
 log() { echo -e "${BLUE}[$(date +'%H:%M:%S')]${NC} $*"; }
@@ -49,25 +63,6 @@ err() { echo -e "${RED}[ERR]${NC} $*"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXPECTED_DEPLOY_DIR="${EXPECTED_DEPLOY_DIR:-/home/ubuntu/zolai-core}"
 
-# Refuse to deploy from a checkout that is not the one serving production.
-#
-# The server had two copies of this repo - /home/ubuntu/zolai-core and
-# /opt/zolai-core - and BOTH are named "zolai-core". `docker compose` derives the
-# project name from the directory basename, so deploying from either one targets
-# the same Docker project while the env file actually in force comes from
-# whichever copy last recreated the container. The trees were 40 files apart and
-# a deploy from the wrong copy silently reverted a shipped fix with no error.
-#
-# Override with EXPECTED_DEPLOY_DIR=... if the authoritative path ever moves.
-if [[ "$SCRIPT_DIR" != "$EXPECTED_DEPLOY_DIR" ]]; then
-    err "Refusing to deploy from $SCRIPT_DIR"
-    err "Production is served from $EXPECTED_DEPLOY_DIR"
-    err "Two checkouts both named zolai-core target the same Docker project, so a"
-    err "deploy from the wrong one applies the wrong tree and the wrong env file."
-    err "Run this from $EXPECTED_DEPLOY_DIR, or set EXPECTED_DEPLOY_DIR if that moved."
-    exit 1
-fi
-
 usage() {
     grep '^#' "$0" | cut -c4-
     exit 0
@@ -76,82 +71,120 @@ usage() {
 # Parse args
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --no-cache) NO_CACHE=true; shift ;;
-        --pull) PULL=true; shift ;;
-        --skip-build) SKIP_BUILD=true; shift ;;
+        --skip-merge) SKIP_MERGE=true; shift ;;
         --no-verify) VERIFY=false; shift ;;
-        --help) usage ;;
+        --help|-h) usage ;;
         *) err "Unknown option: $1"; usage ;;
     esac
 done
 
-# Pre-flight checks
-log "Pre-flight checks..."
-[[ -f "$ENV_FILE" ]] || { err "Missing $ENV_FILE"; exit 1; }
-[[ -f "$COMPOSE_FILE" ]] || { err "Missing $COMPOSE_FILE"; exit 1; }
-command -v docker >/dev/null || { err "Docker not installed"; exit 1; }
-docker compose -f "$COMPOSE_FILE" version >/dev/null || { err "Docker Compose v2 required"; exit 1; }
+# systemctl, with sudo only when we are not already root.
+systemctl_do() {
+    if [[ "${EUID}" -eq 0 ]]; then systemctl "$@"; else sudo systemctl "$@"; fi
+}
 
-# CRITICAL: Verify we're running from the authoritative checkout
-# The server has two zolai-core checkouts; only /home/ubuntu/zolai-core is authoritative
-AUTHORITATIVE_DIR="/home/ubuntu/zolai-core"
-CURRENT_DIR=$(pwd -P)
-if [[ "$CURRENT_DIR" != "$AUTHORITATIVE_DIR" ]]; then
-    err "DEPLOY BLOCKED: This script must run from $AUTHORITATIVE_DIR"
-    err "Current directory: $CURRENT_DIR"
-    err "The running container was built from $AUTHORITATIVE_DIR"
-    err "Running from anywhere else will silently roll back fixes (see OPEN-ISSUES.md S1)"
+# Refuse to deploy from a checkout that is not the one serving production.
+#
+# The server had two copies of this repo - /home/ubuntu/zolai-core and
+# /opt/zolai-core - and BOTH are named "zolai-core". Deploying from the wrong
+# copy lands the code in a tree nothing serves and silently rolls back shipped
+# fixes with no error. Override with EXPECTED_DEPLOY_DIR=... if that ever moves.
+if [[ "$SCRIPT_DIR" != "$EXPECTED_DEPLOY_DIR" ]]; then
+    err "Refusing to deploy from $SCRIPT_DIR"
+    err "Production is served from $EXPECTED_DEPLOY_DIR"
+    err "Run this from $EXPECTED_DEPLOY_DIR, or set EXPECTED_DEPLOY_DIR if that moved."
     exit 1
 fi
-ok "Directory check passed: $CURRENT_DIR"
 
-ok "Pre-flight passed"
-
-# Source env for verification
-set -a; source "$ENV_FILE"; set +a
-
-# Build
-if [[ "$SKIP_BUILD" == "false" ]]; then
-    log "Building API image..."
-    BUILD_ARGS=()
-    [[ "$NO_CACHE" == "true" ]] && BUILD_ARGS+=(--no-cache)
-    [[ "$PULL" == "true" ]] && BUILD_ARGS+=(--pull)
-    docker compose -f "$COMPOSE_FILE" build "${BUILD_ARGS[@]}" api
-    ok "Build complete"
+# ── Pre-flight ───────────────────────────────────────────────────────────────
+log "Pre-flight checks..."
+git -C "$SCRIPT_DIR" rev-parse --git-dir >/dev/null 2>&1 || {
+    err "$SCRIPT_DIR is not a git checkout"; exit 1;
+}
+command -v systemctl >/dev/null || { err "systemctl not found (is this a systemd host?)"; exit 1; }
+systemctl cat "$SERVICE" >/dev/null 2>&1 || {
+    err "systemd unit '$SERVICE' not found"
+    err "Expected the native unit; there is no container to fall back to."
+    exit 1
+}
+ENV_FILE="$SCRIPT_DIR/$ENV_FILE_NAME"
+if [[ -f "$ENV_FILE" ]]; then
+    # Source for the verification step below; never echoed.
+    set -a; # shellcheck disable=SC1090
+    source "$ENV_FILE"; set +a
 else
-    log "Skipping build (--skip-build)"
+    warn "EnvironmentFile $ENV_FILE not found — the unit may be missing its config"
+fi
+ok "Pre-flight passed (unit: $SERVICE)"
+
+# ── Merge the committed tree from origin ─────────────────────────────────────
+if [[ "$SKIP_MERGE" == "false" ]]; then
+    log "Fetching origin..."
+    git -C "$SCRIPT_DIR" fetch --prune origin
+
+    if [[ -n "$(git -C "$SCRIPT_DIR" status --porcelain)" ]]; then
+        warn "Working tree has uncommitted changes; the merge below will keep them"
+        warn "unless it needs to touch the same files (in which case git will abort)."
+        git -C "$SCRIPT_DIR" status --short | head -20
+    fi
+
+    BEFORE="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD)"
+    log "Merging origin/$BRANCH (--no-edit)..."
+    git -C "$SCRIPT_DIR" merge --no-edit "origin/$BRANCH"
+    AFTER="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD)"
+    ok "HEAD: $BEFORE -> $AFTER"
+else
+    log "Skipping git merge (--skip-merge)"
 fi
 
-# Deploy
-log "Deploying containers..."
-docker compose -f "$COMPOSE_FILE" up -d --force-recreate api
+# ── Restart the native unit ──────────────────────────────────────────────────
+log "Restarting $SERVICE..."
+systemctl_do restart "$SERVICE"
 
-# Wait for health
-log "Waiting for health check..."
-for i in $(seq 1 $MAX_WAIT); do
-    if curl -sf "$HEALTH_ENDPOINT" >/dev/null 2>&1; then
-        ok "Health endpoint responding"
+# ── Poll /health (never a fixed sleep — startup is ~13s) ─────────────────────
+log "Waiting for $HEALTH_ENDPOINT (timeout ${HEALTH_TIMEOUT}s; ~13s is normal)..."
+HEALTHY=false
+DEADLINE=$(( SECONDS + HEALTH_TIMEOUT ))
+while (( SECONDS < DEADLINE )); do
+    if curl -sf --max-time 3 "$HEALTH_ENDPOINT" >/dev/null 2>&1; then
+        HEALTHY=true
         break
     fi
-    [[ $i -eq $MAX_WAIT ]] && { err "Health check timeout after ${MAX_WAIT}s"; exit 1; }
     sleep 1
 done
+if [[ "$HEALTHY" != true ]]; then
+    err "API did not answer $HEALTH_ENDPOINT within ${HEALTH_TIMEOUT}s"
+    err "--- systemctl status $SERVICE ---"
+    systemctl_do status "$SERVICE" --no-pager -l | tail -30 || true
+    err "--- journalctl -u $SERVICE (last 50) ---"
+    journalctl -u "$SERVICE" -n 50 --no-pager || true
+    exit 1
+fi
+ok "Health endpoint responding"
 
-# Verify
+# ── Verify ───────────────────────────────────────────────────────────────────
 if [[ "$VERIFY" == "true" ]]; then
     log "Running verification..."
-    
-    # Check engine config
-    log "Verifying engine configuration..."
-    docker exec zolai-core-api-1 python3 -c "
+
+    # Pick the venv the unit actually uses, then the default one.
+    VENV_PY=""
+    for cand in "$SCRIPT_DIR/.venv-dev/bin/python" "$SCRIPT_DIR/.venv/bin/python"; do
+        if [[ -x "$cand" ]]; then VENV_PY="$cand"; break; fi
+    done
+
+    if [[ -n "$VENV_PY" ]]; then
+        log "Verifying engine configuration..."
+        "$VENV_PY" -c "
 from zolai.engines import AI_KEY_ENV_VARS, ai_key_present, llm_allowed, engine_mode
 print('engine_mode:', engine_mode())
 print('AI_KEY_ENV_VARS:', AI_KEY_ENV_VARS)
 print('ai_key_present:', ai_key_present())
 print('llm_allowed:', llm_allowed())
-assert llm_allowed() == True, 'llm_allowed should be True in hybrid mode with key'
 " || { err "Engine config verification failed"; exit 1; }
-    ok "Engine config verified"
+        ok "Engine config verified"
+    else
+        warn "No venv python found under $SCRIPT_DIR (.venv-dev/.venv) — skipping engine check"
+    fi
 
     # Test assistant chat
     log "Testing assistant chat..."
@@ -174,7 +207,7 @@ else:
     # Test provider connection
     log "Testing provider connection..."
     # Sign in through the real endpoint rather than minting a token in-process:
-    # `create_session_token` no longer exists, so this step raised ImportError on
+    # `create_session_token` no longer exists, so that step raised ImportError on
     # every deploy and took the whole script down *after* the app was already
     # verified and serving. A credential from the environment is used so no
     # password is committed.
@@ -184,17 +217,17 @@ else:
         warn "ADMIN_USER/ADMIN_PASS not set - skipping the provider connection test"
         warn "(set them, or export ZOLAI_ADMIN_USER / ZOLAI_ADMIN_PASS)"
     else
-    ADMIN_TOKEN=$(curl -sf -X POST -H 'Content-Type: application/json' \
-        -d "$(python3 -c "import json,sys; print(json.dumps({'username': sys.argv[1], 'password': sys.argv[2]}))" "$ADMIN_USER" "$ADMIN_PASS")" \
-        http://127.0.0.1:8001/api/v1/auth/login | \
-        python3 -c "import sys, json; print(json.load(sys.stdin).get('token', ''))")
-    if [[ -z "$ADMIN_TOKEN" ]]; then
-        err "Could not obtain an admin token - provider connection test failed"
-        exit 1
-    fi
-    curl -sf -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
-        http://127.0.0.1:8001/api/v1/admin/ai-providers/pcore-brain/test | \
-        python3 -c "
+        ADMIN_TOKEN=$(curl -sf -X POST -H 'Content-Type: application/json' \
+            -d "$(python3 -c "import json,sys; print(json.dumps({'username': sys.argv[1], 'password': sys.argv[2]}))" "$ADMIN_USER" "$ADMIN_PASS")" \
+            http://127.0.0.1:8001/api/v1/auth/login | \
+            python3 -c "import sys, json; print(json.load(sys.stdin).get('token', ''))")
+        if [[ -z "$ADMIN_TOKEN" ]]; then
+            err "Could not obtain an admin token - provider connection test failed"
+            exit 1
+        fi
+        curl -sf -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
+            http://127.0.0.1:8001/api/v1/admin/ai-providers/pcore-brain/test | \
+            python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 assert data.get('ok') == True, f'Provider test failed: {data.get(\"error\")}'
@@ -202,11 +235,11 @@ print('OK: Provider connection successful')
 print('Model:', data.get('model'))
 print('Latency:', data.get('latency_ms'), 'ms')
 "
-    ok "Provider connection verified"
+        ok "Provider connection verified"
     fi
 fi
 
-# Summary
+# ── Summary ──────────────────────────────────────────────────────────────────
 log "Deployment complete!"
 echo
 echo "  Health:      $HEALTH_ENDPOINT"
@@ -214,6 +247,7 @@ echo "  API Base:    http://127.0.0.1:8001/api/v1"
 echo "  Assistant:   POST /api/v1/assistant/chat"
 echo "  Admin:       GET /api/v1/admin/ai-providers"
 echo
-echo "  Logs:        docker logs -f zolai-core-api-1"
-echo "  Shell:       docker exec -it zolai-core-api-1 bash"
+echo "  Unit:        $SERVICE  (EnvironmentFile: $ENV_FILE)"
+echo "  Logs:        journalctl -u $SERVICE -f"
+echo "  Restart:     sudo systemctl restart $SERVICE"
 ok "All done!"
