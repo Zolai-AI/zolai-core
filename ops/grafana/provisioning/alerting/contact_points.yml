@@ -1,8 +1,8 @@
 # Grafana contact points (unified alerting provisioning).
 #
-# `GRAFANA_ALERT_WEBHOOK_URL` is expanded by Grafana from the container
-# environment — set in docker-compose.monitoring.yml (defaults to the local
-# annotation endpoint) or override it in `.env` to point at Slack/PagerDuty.
+# `GRAFANA_ALERT_WEBHOOK_URL` is expanded by Grafana from its own environment
+# — set it when starting Grafana natively (defaults to the local annotation
+# endpoint) or override it in `.env` to point at Slack/PagerDuty.
 # Never commit credentials here.
 
 apiVersion: 1

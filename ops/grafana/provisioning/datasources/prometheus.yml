@@ -10,7 +10,10 @@ datasources:
     uid: prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:9090
+    # Native host address — `prometheus` was the compose service name.
+    # (The containerised stack was retired 2026-10-18; the stack is not yet
+    # installed natively — see docs/MONITORING.md §1.)
+    url: http://127.0.0.1:9090
     isDefault: true
     editable: false
     jsonData:

@@ -5,7 +5,7 @@
 # Prometheus rule group always agree. `tests/test_alert_rules_parity.py`
 # fails the build when they drift.
 #
-# Checked with: docker compose -f docker-compose.monitoring.yml run --rm prometheus promtool check rules /etc/prometheus/rules.yml
+# Checked with: promtool check rules ops/prometheus/rules.yml
 
 groups:
   - name: zolai-api
