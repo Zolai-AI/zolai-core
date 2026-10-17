@@ -86,15 +86,18 @@ echo "==> Torch build: $LABEL"
 echo "==> Extras: ${EXTRAS:-none}"
 
 # --- 3. venv ---------------------------------------------------------------
-if [ ! -x .venv/bin/python ]; then
-  echo "==> Creating .venv"
+# VENV_DIR lets a caller pick the venv name (the production unit on the server
+# uses `.venv-dev`); it defaults to `.venv` so local setup is unchanged.
+VENV_DIR="${VENV_DIR:-.venv}"
+if [ ! -x "$VENV_DIR/bin/python" ]; then
+  echo "==> Creating $VENV_DIR"
   if command -v uv >/dev/null 2>&1; then
-    uv venv --python "$PY" .venv
+    uv venv --python "$PY" "$VENV_DIR"
   else
-    "$PY" -m venv .venv
+    "$PY" -m venv "$VENV_DIR"
   fi
 fi
-VPY=.venv/bin/python
+VPY="$VENV_DIR/bin/python"
 
 # --- 4. Install ------------------------------------------------------------
 if command -v uv >/dev/null 2>&1; then

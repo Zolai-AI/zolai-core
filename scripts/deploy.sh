@@ -64,7 +64,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXPECTED_DEPLOY_DIR="${EXPECTED_DEPLOY_DIR:-/home/ubuntu/zolai-core}"
 
 usage() {
-    grep '^#' "$0" | cut -c4-
+    grep '^#' "$0" | cut -c3-
     exit 0
 }
 
