@@ -1,7 +1,11 @@
 """Server-side tool registry for the agent runtime (P3 §C).
 
 The client never supplies a tool list: this registry is the only source of
-``## TOOLS`` schemas and the executor's allow-list.  Classification:
+``## TOOLS`` schemas and the executor's allow-list.  The :data:`SPECS`
+definitions are **canonical** — the OpenAI ``tools`` array
+(:func:`openai_tool_defs`), the MCP ``tools/list`` entries
+(:func:`mcp_tools`) and the prompt section (:func:`json_schemas`) are all
+rendered from them (see :mod:`zolai.agent.tools.render`).  Classification:
 
 - **public** — retrieval/analysis only (safe for the anonymous assistant):
   ``rag_search``, ``word_evidence``, ``word_related``, ``analyze_text``,
@@ -15,8 +19,10 @@ The client never supplies a tool list: this registry is the only source of
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
+from .render import render_many
 from .types import ToolSpec
 
 _OBJ = "object"
@@ -119,6 +125,7 @@ SPECS: dict[str, ToolSpec] = {
             required=["fact_type", "fact_key"],
         ),
         admin_only=True,
+        writes=True,
     ),
     "provider_status": ToolSpec(
         name="provider_status",
@@ -165,21 +172,35 @@ def names_for(scope: str) -> list[str]:
     return [name for name in SPECS if name in allowed]
 
 
-def json_schemas(names: list[str] | tuple[str, ...] | frozenset[str]) -> list[dict[str, Any]]:
-    """JSON-Schema list for the ``## TOOLS`` prompt section."""
-    out: list[dict[str, Any]] = []
+def _specs_for(names: Iterable[str]) -> list[ToolSpec]:
+    """Resolve names to specs, silently skipping unknown names."""
+    out: list[ToolSpec] = []
     for name in names:
         spec = get_tool(name)
         if spec is not None:
-            out.append(spec.json_schema())
+            out.append(spec)
     return out
+
+
+def json_schemas(names: list[str] | tuple[str, ...] | frozenset[str]) -> list[dict[str, Any]]:
+    """JSON-Schema list for the ``## TOOLS`` prompt section."""
+    return [spec.json_schema() for spec in _specs_for(names)]
+
+
+def openai_tool_defs(names: Iterable[str]) -> list[dict[str, Any]]:
+    """OpenAI ``tools`` array for ``names`` (one canonical definition each)."""
+    return render_many(_specs_for(names), "openai")
+
+
+def mcp_tools(names: Iterable[str]) -> list[dict[str, Any]]:
+    """MCP ``tools/list`` entries for ``names`` (``inputSchema`` + annotations)."""
+    return render_many(_specs_for(names), "mcp")
 
 
 def native_tool_defs(names: list[str] | tuple[str, ...] | frozenset[str]) -> list[dict[str, Any]]:
-    """OpenAI native ``tools`` array (only ever sent to openai/openrouter)."""
-    out: list[dict[str, Any]] = []
-    for name in names:
-        spec = get_tool(name)
-        if spec is not None:
-            out.append(spec.native_def())
-    return out
+    """OpenAI native ``tools`` array (only ever sent to openai/openrouter).
+
+    Thin alias of :func:`openai_tool_defs` kept for the existing call sites —
+    same list, same order, same shapes.
+    """
+    return openai_tool_defs(names)

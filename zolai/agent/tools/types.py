@@ -19,6 +19,9 @@ class ToolSpec:
     parameters: dict[str, Any]
     admin_only: bool = False
     requires_network: bool = False
+    #: Writes something (additive proposal surfaces only — nothing here deletes
+    #: or overwrites).  Drives the honest MCP read-only/idempotent hints.
+    writes: bool = False
 
     def json_schema(self) -> dict[str, Any]:
         """Shape embedded in the prompt-embedded ``## TOOLS`` section."""
@@ -29,15 +32,15 @@ class ToolSpec:
         }
 
     def native_def(self) -> dict[str, Any]:
-        """OpenAI native ``tools`` entry (only ever sent to openai/openrouter)."""
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": self.parameters,
-            },
-        }
+        """OpenAI native ``tools`` entry — rendered from this one definition.
+
+        Delegates to :func:`zolai.agent.tools.render.render_openai` so the
+        OpenAI shape and the MCP shape can never drift; the output is
+        byte-identical to the shape this method used to build by hand.
+        """
+        from .render import render_openai  # lazy: keeps ``types`` dependency-free
+
+        return render_openai(self)
 
 
 @dataclass
