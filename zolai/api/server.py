@@ -1133,7 +1133,7 @@ def create_app() -> FastAPI:
         """Zolai bilingual chat with RAG context injection."""
         from .conversation_memory import get_conversation_memory
         from .rag_context import build_zolai_context
-        from .zvs_checker import check_zvs_compliance
+        from .zvs_strict import check_zvs_compliance
 
         memory = get_conversation_memory()
 
@@ -1279,7 +1279,7 @@ def create_app() -> FastAPI:
             await validator.validate(text)
 
             # Apply ZVS corrections if needed
-            from .zvs_checker import check_zvs_compliance
+            from .zvs_strict import check_zvs_compliance
             zvs_result = check_zvs_compliance(text)
             final_response = (
                 zvs_result['corrected_text']
