@@ -15,6 +15,7 @@ Covers the done-when:
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from collections.abc import Iterator
@@ -309,7 +310,15 @@ class TestLoopBehaviour:
         assert "not allowed" in result["tool_calls"][0]["error"]
         assert result["reply"] == "I could not use that tool."
 
-    def test_native_tools_offered_turn1_only_and_never_for_brain_flag(self) -> None:
+    def test_native_defs_only_while_the_native_track_is_live(self) -> None:
+        """Turn-1 defs are withdrawn the moment the prompt protocol answers.
+
+        Both halves answer turn 1 with a ``<<<TOOL>>>`` marker, so the native
+        track is **reverted** immediately: `seen[1] is None`.  (The track is
+        *kept* — with the defs re-sent and a real assistant/tool history — only
+        when a turn answers with native ``tool_calls``; see
+        :class:`TestNativeMultiTurnTrack`.)
+        """
         seen: list = []
         responses = [
             {"text": f'{TOOL_MARKER}\n{{"name": "rag_search", "input": {{"query": "x"}}}}'},
@@ -330,7 +339,7 @@ class TestLoopBehaviour:
         assert seen[0] is not None
         assert len(seen[0]) == len(allow_list("public"))  # one function schema per tool
         assert all(t.get("type") == "function" for t in seen[0])
-        assert seen[1] is None  # follow-up rides the prompt protocol
+        assert seen[1] is None  # a marker turn reverts to the prompt protocol
 
         seen.clear()
         responses = [
@@ -358,6 +367,236 @@ class TestLoopBehaviour:
         )
         assert result["ok"] is False
         assert "provider_error" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# Native multi-turn track (openai/openrouter rows)
+# ---------------------------------------------------------------------------
+
+
+def _native_call(call_id: str, arguments: str, name: str = "grammar_check") -> dict:
+    """One OpenAI-wire ``tool_calls`` entry, as `adapter.chat` now returns it."""
+    return {
+        "id": call_id,
+        "name": name,
+        "input": json.loads(arguments),
+        "arguments": arguments,
+    }
+
+
+class TestNativeMultiTurnTrack:
+    def test_native_track_keeps_tools_and_grows_a_real_history(self) -> None:
+        """Turn 2 gets the defs back AND can see what turn 1 returned."""
+        seen_tools: list = []
+        seen_messages: list = []
+        responses = [
+            {"text": "", "tool_calls": [_native_call("call_1", '{"text": "Pasian in gam"}')]},
+            {"text": "Final answer from evidence.", "tool_calls": []},
+        ]
+
+        def chat(messages, tools=None):
+            seen_tools.append(tools)
+            seen_messages.append(list(messages))
+            return responses.pop(0)
+
+        result = run_agent_loop(
+            system_prompt="sys",
+            user_message="goal",
+            allow=allow_list("public"),
+            chat=chat,
+            native=True,
+        )
+
+        assert result["ok"] is True
+        assert result["reply"] == "Final answer from evidence."
+        assert result["turns"] == 2
+        # Native defs are no longer turn-1-only while the native track is live.
+        assert seen_tools[0] is not None
+        assert seen_tools[1] is not None
+        assert len(seen_tools[0]) == len(allow_list("public"))
+
+        history = seen_messages[1]
+        assert history[0]["role"] == "system"
+        assert history[1]["role"] == "user"
+        assistant = [m for m in history if m["role"] == "assistant"]
+        tool_turns = [m for m in history if m["role"] == "tool"]
+        assert len(assistant) == 1 and len(tool_turns) == 1
+        echo = assistant[0]["tool_calls"][0]
+        assert echo["id"] == "call_1"
+        assert echo["type"] == "function"
+        assert echo["function"]["name"] == "grammar_check"
+        # the provider's own arguments string is echoed byte-for-byte
+        assert echo["function"]["arguments"] == '{"text": "Pasian in gam"}'
+        assert tool_turns[0]["tool_call_id"] == "call_1"
+        # …and the tool message carries the REAL result, not a placeholder
+        assert "valid" in tool_turns[0]["content"]
+
+    def test_marker_turn_reverts_the_native_track(self) -> None:
+        """A `<<<TOOL>>>` turn ends the native track: the next turn gets None."""
+        seen_tools: list = []
+        seen_messages: list = []
+        responses = [
+            {"text": "", "tool_calls": [_native_call("call_1", '{"text": "a"}')]},
+            {
+                "text": f'{TOOL_MARKER}\n{{"name": "grammar_check", "input": {{"text": "b"}}}}',
+                "tool_calls": [],
+            },
+            {"text": "done", "tool_calls": []},
+        ]
+
+        def chat(messages, tools=None):
+            seen_tools.append(tools)
+            seen_messages.append(list(messages))
+            return responses.pop(0)
+
+        result = run_agent_loop(
+            system_prompt="sys",
+            user_message="goal",
+            allow=allow_list("public"),
+            chat=chat,
+            native=True,
+        )
+
+        assert seen_tools[0] is not None  # turn 1: native
+        assert seen_tools[1] is not None  # turn 2: track still live
+        assert seen_tools[2] is None  # turn 3: reverted to the prompt protocol
+        # …and the reverted history is the prompt-protocol shape again
+        assert [m["role"] for m in seen_messages[2]] == ["system", "user"]
+        assert seen_messages[2][-1]["content"].startswith("goal")
+        assert TOOL_RESULT_MARKER in seen_messages[2][-1]["content"]
+        assert result["reply"] == "done"
+        assert result["ok"] is True
+
+    def test_native_calls_without_native_defs_never_start_the_track(self) -> None:
+        """Brain rows get no tools even if the body carries native tool_calls."""
+        seen_tools: list = []
+        responses = [
+            {"text": "", "tool_calls": [_native_call("call_1", '{"text": "a"}')]},
+            {"text": "done", "tool_calls": []},
+        ]
+
+        def chat(messages, tools=None):
+            seen_tools.append(tools)
+            return responses.pop(0)
+
+        result = run_agent_loop(
+            system_prompt="sys",
+            user_message="goal",
+            allow=allow_list("public"),
+            chat=chat,
+            native=False,  # brain: never a tools key
+        )
+        assert seen_tools == [None, None]
+        assert result["ok"] is True
+
+    def test_native_turn_executes_one_call_and_echoes_only_that_one(self) -> None:
+        """No dangling ids: only the executed call may appear in the replay."""
+        seen_messages: list = []
+        responses = [
+            {
+                "text": "",
+                "tool_calls": [
+                    _native_call("call_1", '{"text": "a"}'),
+                    _native_call("call_2", '{"query": "x"}', name="rag_search"),
+                ],
+            },
+            {"text": "done", "tool_calls": []},
+        ]
+
+        def chat(messages, tools=None):
+            seen_messages.append(list(messages))
+            return responses.pop(0)
+
+        result = run_agent_loop(
+            system_prompt="sys",
+            user_message="goal",
+            allow=allow_list("public"),
+            chat=chat,
+            native=True,
+        )
+        executed = [t for t in result["tool_calls"] if t.get("status")]
+        assert len(executed) == 1
+        assert executed[0]["name"] == "grammar_check"
+        history = seen_messages[1]
+        assert [
+            c["id"] for m in history if m["role"] == "assistant" for c in m["tool_calls"]
+        ] == ["call_1"]
+        assert [m["tool_call_id"] for m in history if m["role"] == "tool"] == ["call_1"]
+
+    def test_idless_native_call_gets_a_stable_paired_id(self) -> None:
+        seen_messages: list = []
+        responses = [
+            {"text": "", "tool_calls": [{"name": "grammar_check", "input": {"text": "a"}}]},
+            {"text": "done", "tool_calls": []},
+        ]
+
+        def chat(messages, tools=None):
+            seen_messages.append(list(messages))
+            return responses.pop(0)
+
+        run_agent_loop(
+            system_prompt="sys",
+            user_message="goal",
+            allow=allow_list("public"),
+            chat=chat,
+            native=True,
+        )
+        history = seen_messages[1]
+        assistant = next(m for m in history if m["role"] == "assistant")
+        tool_turns = [m for m in history if m["role"] == "tool"]
+        assert assistant["tool_calls"][0]["id"] == tool_turns[0]["tool_call_id"]
+        # no `arguments` from the wire → the parsed input is re-serialised
+        assert json.loads(assistant["tool_calls"][0]["function"]["arguments"]) == {"text": "a"}
+
+    def test_native_track_still_respects_turn_budget_and_synthesis(self) -> None:
+        """The budgets and the terminal synthesis turn are unchanged."""
+        calls = {"n": 0}
+
+        def chat(messages, tools=None):
+            calls["n"] += 1
+            if calls["n"] <= 3:
+                return {
+                    "text": "",
+                    "tool_calls": [_native_call(f"call_{calls['n']}", '{"text": "a"}')],
+                }
+            return {"text": "synthesised answer", "tool_calls": []}
+
+        result = run_agent_loop(
+            system_prompt="sys",
+            user_message="goal",
+            allow=allow_list("public"),
+            chat=chat,
+            native=True,
+            max_turns=3,
+        )
+        assert calls["n"] == 4  # 3 tool turns + exactly one synthesis turn
+        assert result["turns"] == 4
+        assert result["reply"] == "synthesised answer"
+        assert len(result["tool_calls"]) == 3
+
+    def test_tool_failure_rides_back_as_an_error_payload(self) -> None:
+        seen_messages: list = []
+        responses = [
+            {"text": "", "tool_calls": [_native_call("call_1", '{"text": "a"}', name="web_search")]},
+            {"text": "done", "tool_calls": []},
+        ]
+
+        def chat(messages, tools=None):
+            seen_messages.append(list(messages))
+            return responses.pop(0)
+
+        result = run_agent_loop(
+            system_prompt="sys",
+            user_message="goal",
+            allow=allow_list("public"),
+            chat=chat,
+            native=True,
+        )
+        executed = [t for t in result["tool_calls"] if t.get("status")]
+        assert executed[0]["status"] == "failed"  # web_search is not in the public set
+        tool_turns = [m for m in seen_messages[1] if m["role"] == "tool"]
+        assert "error" in json.loads(tool_turns[0]["content"])
+
 
 
 # ---------------------------------------------------------------------------

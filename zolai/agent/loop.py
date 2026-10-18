@@ -15,10 +15,15 @@ Rules enforced here: **≤1 tool per turn**, default ``AGENT_MAX_TURNS=3``
 tool calls followed by at most **one** final synthesis turn when evidence
 was gathered (so a model that spends every turn researching still answers
 instead of being told to rephrase),
-native ``tools`` offered on turn 1 **only** for ``openai``/``openrouter``
-rows, and :class:`TokenGate` (``HOLD_CHARS=16``) so a marker never leaks to
-the UI.  The loop always terminates — on exhaustion it returns a real
-fallback reply, never a truncated marker.
+native ``tools`` offered on turn 1 for ``openai``/``openrouter`` rows and kept
+for as long as the **native track** is live (a turn that answers with native
+``tool_calls`` keeps the defs and appends the assistant tool-call turn + the
+``role:"tool"`` result turn, so turn 2 can use what turn 1 returned; a turn
+that answers with ``<<<TOOL>>>`` markers instead reverts the track to the
+prompt protocol with ``tools=None``), and :class:`TokenGate`
+(``HOLD_CHARS=16``) so a marker never leaks to the UI.  The loop always
+terminates — on exhaustion it returns a real fallback reply, never a truncated
+marker.
 """
 
 from __future__ import annotations
@@ -206,6 +211,49 @@ def build_followup_prompt(user_message: str, results: list[ToolResult]) -> str:
     return f"{user_message}\n\n{joined}"
 
 
+def native_tool_call_id(call: ToolCall) -> str:
+    """Stable id for a native tool call (the wire id when the provider sent one)."""
+    return call.call_id or f"call_{call.turn}"
+
+
+def build_native_assistant_message(call: ToolCall, reply: str = "") -> dict[str, Any]:
+    """The assistant turn that requested ``call`` on the native wire.
+
+    Exactly **one** tool call is echoed — the one this turn executes.  Echoing
+    ids that never receive a ``role:"tool"`` reply is what makes strict OpenAI
+    validation (``tool_call_ids did not have response messages``) fail.
+
+    ``arguments`` is the provider's own raw string when it sent one, so the
+    provider is handed back byte-identical arguments rather than a re-serialised
+    dict.
+    """
+    return {
+        "role": "assistant",
+        "content": reply or "",
+        "tool_calls": [
+            {
+                "id": native_tool_call_id(call),
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": call.arguments
+                    or json.dumps(call.input or {}, ensure_ascii=False),
+                },
+            }
+        ],
+    }
+
+
+def build_native_tool_message(result: ToolResult, call: ToolCall) -> dict[str, Any]:
+    """The ``role:"tool"`` turn that carries ``result`` back on the native wire."""
+    payload = result.data if result.ok else {"error": result.error or "tool failed"}
+    return {
+        "role": "tool",
+        "tool_call_id": native_tool_call_id(call),
+        "content": json.dumps(payload, ensure_ascii=False, default=str),
+    }
+
+
 def _marker_prefix_suffix(text: str) -> str:
     """Longest non-empty suffix of ``text`` that is a (proper) prefix of the marker."""
     for k in range(len(TOOL_MARKER) - 1, 0, -1):
@@ -292,9 +340,14 @@ def run_agent_loop(
         allow: Tool allow-list — the executor refuses anything outside it.
         chat: Provider-bound chat closure (see :mod:`zolai.agent.synthesis`).
         max_turns: Defaults to :data:`AGENT_MAX_TURNS`.
-        native: Offer the native OpenAI ``tools`` array on **turn 1 only**
-            (caller decides from ``supports_native_tools``; the brain path is
-            always ``False``).
+        native: Offer the native OpenAI ``tools`` array on turn 1 (caller
+            decides from ``supports_native_tools``; the brain path is always
+            ``False``).  Once a turn answers with native ``tool_calls`` the
+            defs stay on the wire for the rest of the run and the history grows
+            a real assistant tool-call turn + ``role:"tool"`` result turn, so a
+            later turn can use what an earlier one returned.  A turn that
+            answers with ``<<<TOOL>>>`` markers instead reverts the track to the
+            prompt protocol with ``tools=None``.
 
     Returns:
         ``{reply, tool_calls, turns, ok, error?}`` — always terminates.
@@ -304,11 +357,17 @@ def run_agent_loop(
     limit = max_turns if max_turns is not None else AGENT_MAX_TURNS
     tools_section = build_tools_section(allow)
     system = f"{system_prompt}\n\n{tools_section}" if tools_section else system_prompt
-    message = user_message
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_message},
+    ]
     results: list[ToolResult] = []
     trace: list[dict[str, Any]] = []
     gate = TokenGate(on_token)
     turns_used = 0
+    #: True while the run rides the *native* protocol (native defs on the wire).
+    #: Never set without ``native=True``; cleared by a marker-protocol turn.
+    native_track = False
 
     # Wall-clock budget, checked at the turn boundary.
     #
@@ -332,15 +391,12 @@ def run_agent_loop(
                 "timed_out": True,
             }
         turns_used += 1
-        native_defs = native_tool_defs(list(allow)) if (native and turns_used == 1) else None
+        # Native defs go out on turn 1 and stay out while the native track is
+        # live; a brain caller (`native=False`) never gets them at all.
+        offering_native = bool(native) and (turns_used == 1 or native_track)
+        native_defs = native_tool_defs(list(allow)) if offering_native else None
         try:
-            turn = chat(
-                [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": message},
-                ],
-                native_defs,
-            )
+            turn = chat([dict(m) for m in messages], native_defs)
         except Exception as exc:  # provider failure — never a 500, never a hang
             gate.end_turn()
             return {
@@ -355,10 +411,15 @@ def run_agent_loop(
         reply = str(turn.get("text") or "")
         native_calls = turn.get("tool_calls") or []
         if native_calls:
+            # Only a turn that was *offered* the native defs can start (or
+            # continue) the native track.
+            native_track = offering_native
             calls = [
                 ToolCall(
                     name=str(c.get("name") or ""),
                     input=c.get("input") if isinstance(c.get("input"), dict) else {},
+                    call_id=str(c.get("id") or ""),
+                    arguments=str(c.get("arguments") or ""),
                     turn=turns_used,
                     source="native",
                 )
@@ -371,6 +432,10 @@ def run_agent_loop(
             calls = parsed.calls
             for c in calls:
                 c.turn = turns_used
+            if calls:
+                # The prompt marker protocol answered, so the native track (if
+                # any) ends here: the next turn is sent with ``tools=None``.
+                native_track = False
 
         if not calls:
             return {
@@ -399,12 +464,22 @@ def run_agent_loop(
                     "turn": turns_used,
                 }
             )
-        message = build_followup_prompt(user_message, [result])
+        if native_track:
+            # Native replay: the model needs the turn it asked in and the turn
+            # that answers it, in the OpenAI wire shape.
+            messages.append(build_native_assistant_message(call, reply))
+            messages.append(build_native_tool_message(result, call))
+        else:
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": build_followup_prompt(user_message, [result])},
+            ]
 
     # Turns exhausted but evidence WAS gathered. Hand it back for one final
     # synthesis rather than telling the user to rephrase -- shipping
     # "please ask again" alongside eight citations is strictly worse than
-    # answering from them.
+    # answering from them.  The synthesis turn is terminal, so it always rides
+    # the prompt protocol with no tools offered.
     if results:
         # Counted: it is a real model turn, so the reported budget stays
         # honest rather than silently running one call past max_turns.

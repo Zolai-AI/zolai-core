@@ -23,6 +23,7 @@ Path                               Method  Purpose
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Annotated, Any
 
@@ -41,6 +42,7 @@ from ..monitoring.metrics import (
     parse_window,
     window_stats,
 )
+from .errors import internal_http_error
 from .metrics_schemas import (
     AlertRuleState,
     AlertsResponse,
@@ -56,6 +58,8 @@ from .metrics_schemas import (
     RoutePerformance,
     SummaryResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["metrics"])
 
@@ -222,7 +226,16 @@ async def create_annotation(body: AnnotationIn) -> AnnotationCreated:
     try:
         payload = store.annotation_payload(data)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=422,
+            operation="metrics.annotations.create",
+            code="invalid_annotation_kind",
+            message=(
+                "The annotation kind is not accepted. Set kind to one of: deploy, eval, manual."
+            ),
+        ) from exc
 
     result = store.create_annotation(data)
 

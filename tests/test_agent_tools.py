@@ -118,6 +118,9 @@ class TestRegistry:
             "word_evidence",
             "verse_lookup",
             "grammar_check",
+            "search_myanmar_dictionary",
+            "translate_zo_to_myanmar",
+            "translate_myanmar_to_zo",
         }
         assert public <= allow_list("member") <= allow_list("admin")
         assert "provider_status" in allow_list("admin")

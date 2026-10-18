@@ -10,7 +10,8 @@ that one definition here, so the two published surfaces can never drift:
   catalog rows are served by those vendors' OpenAI-compatibility layers, so the
   wire is OpenAI's and no vendor-specific renderer exists (or should).
 - ``mcp`` — an MCP ``tools/list`` entry: ``inputSchema`` plus honest
-  ``annotations`` hints.
+  ``annotations`` hints (``destructiveHint`` included — see
+  :func:`render_mcp`).
 
 Purity: this module reads a :class:`ToolSpec` and returns plain dicts.  It
 touches no database, no network and no registry state, so both renderers are
@@ -69,8 +70,13 @@ def _object_schema(spec: ToolSpec) -> dict[str, Any]:
 
 
 def title_for(spec: ToolSpec) -> str:
-    """Human-readable title for ``spec`` (MCP ``title``)."""
-    return _TITLES.get(spec.name) or spec.name.replace("_", " ").strip()
+    """Human-readable title for ``spec`` (MCP ``title``).
+
+    Precedence: the spec's own :attr:`ToolSpec.title` (a generated family
+    carries its own), then the shared map, then the name with underscores
+    spaced — so a tool can never render without a title.
+    """
+    return spec.title or _TITLES.get(spec.name) or spec.name.replace("_", " ").strip()
 
 
 def render_openai(spec: ToolSpec) -> dict[str, Any]:
@@ -89,10 +95,15 @@ def render_mcp(spec: ToolSpec) -> dict[str, Any]:
     """The MCP ``tools/list`` entry for ``spec``.
 
     ``annotations`` carries only hints the registry can actually justify:
-    ``readOnlyHint``/``idempotentHint`` follow ``spec.writes`` (every registry
-    tool is either a pure read or an additive proposal write — nothing here
-    deletes, overwrites or is otherwise destructive, so ``destructiveHint`` is
-    honestly ``False``) and ``openWorldHint`` follows ``spec.requires_network``.
+
+    - ``readOnlyHint`` / ``idempotentHint`` follow ``spec.writes``;
+    - ``destructiveHint`` follows ``spec.is_destructive`` — the spec's own
+      declaration of whether the tool destroys or mutates durable state, and
+      ``True`` when the spec never declared one (the MCP schema's own default,
+      which fails closed).  It is **not** derived from ``writes``: an additive
+      proposal write and a record correction are both "not read-only", and only
+      the registry knows which one rewrites or deletes state;
+    - ``openWorldHint`` follows ``spec.requires_network``.
     """
     read_only = not spec.writes
     return {
@@ -102,7 +113,7 @@ def render_mcp(spec: ToolSpec) -> dict[str, Any]:
         "inputSchema": _object_schema(spec),
         "annotations": {
             "readOnlyHint": read_only,
-            "destructiveHint": False,
+            "destructiveHint": spec.is_destructive,
             "idempotentHint": read_only,
             "openWorldHint": bool(spec.requires_network),
         },

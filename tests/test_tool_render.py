@@ -145,9 +145,19 @@ class TestMcpShape:
         assert read["idempotentHint"] is True
         assert write["readOnlyHint"] is False
         assert write["idempotentHint"] is False
-        # Nothing in the registry deletes or overwrites.
-        for name in SPECS:
-            assert render_mcp(SPECS[name])["annotations"]["destructiveHint"] is False
+        assert write["destructiveHint"] is True
+        # No spec may rely on a default: every published tool states
+        # ``destructive`` explicitly, and the hint is exactly that declaration.
+        # The registry's rule — enforced at import, not just here, by
+        # ``assert_specs_are_publishable`` — is that **a tool that writes is
+        # advertised destructive**, so a client asks the user before an agent
+        # changes anything, however additive the change happens to be.
+        for name, spec in SPECS.items():
+            assert spec.destructive is not None, f"{name} leaves destructive undeclared"
+            hints = render_mcp(spec)["annotations"]
+            assert hints["readOnlyHint"] is (not spec.writes)
+            assert hints["destructiveHint"] is spec.is_destructive
+            assert spec.is_destructive is spec.writes, f"{name}: destructive must track writes"
 
     def test_open_world_hint_follows_requires_network(self) -> None:
         assert render_mcp(SPECS["web_search"])["annotations"]["openWorldHint"] is True
@@ -158,10 +168,10 @@ class TestMcpShape:
         assert writers == {"review_queue_submit"}
 
     def test_scope_tool_counts(self) -> None:
-        # anon 5 / member 7 / admin 12 — the counts the MCP surface publishes.
-        assert len(mcp_tools(allow_list("public"))) == 5
-        assert len(mcp_tools(allow_list("member"))) == 7
-        assert len(mcp_tools(allow_list("admin"))) == 12
+        # anon 8 / member 21 / admin 26 — the counts the MCP surface publishes.
+        assert len(mcp_tools(allow_list("public"))) == 8
+        assert len(mcp_tools(allow_list("member"))) == 21
+        assert len(mcp_tools(allow_list("admin"))) == 26
 
     def test_rendered_strings_are_plain(self) -> None:
         payload = json.dumps(registry_mod.mcp_tools(names_for("admin")), ensure_ascii=False)

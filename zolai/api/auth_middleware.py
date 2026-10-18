@@ -3,9 +3,10 @@
 Pure-ASGI (same shape as :mod:`zolai.monitoring.middleware`) so nothing is
 buffered.  Behaviour:
 
-- Gate: ``path == "/api/v1"`` or ``startswith("/api/v1/")`` — legacy unversioned
-  routes, ``/health``, ``/metrics`` and ``/api/metrics/*`` are byte-identical
-  to before this middleware exists.
+- Gate: ``path == "/api/v1"`` or ``startswith("/api/v1/")``, plus the bare
+  ``/mcp`` alias (:data:`EXTRA_PROTECTED_PATHS`) — legacy unversioned routes,
+  ``/health``, ``/metrics`` and ``/api/metrics/*`` are byte-identical to before
+  this middleware exists.
 - Mode ``warn`` (default) dual-accepts: a missing/invalid key is logged
   (rate limited) and the request continues unauthenticated.  Mode ``enforce``
   answers **401**.  Mode ``off`` bypasses entirely (rollback).
@@ -41,6 +42,13 @@ from .rbac import is_public_chat_path, is_public_path
 #: Only this prefix is gated (boundary-aware: ``/api/v1x`` is not gated).
 API_PREFIX = "/api/v1"
 
+#: Non-prefixed paths that share the gate. ``/mcp`` is the bare MCP alias the
+#: public host ``mcp.zolai.space`` proxies (``zolai/api/mcp_router.root_router``);
+#: gating it here is what lets a presented key resolve to member/admin — and
+#: brings it onto the anonymous rate-limit buckets — instead of silently
+#: degrading every caller to the public tool set. No pre-existing route changed.
+EXTRA_PROTECTED_PATHS: frozenset[str] = frozenset({"/mcp"})
+
 #: Paths never gated — documented exemptions (ADR-002 / ADR-014).
 EXEMPT_PATHS: frozenset[str] = frozenset(
     {
@@ -57,9 +65,11 @@ HeaderList = list[tuple[bytes, bytes]]
 
 
 def is_protected_path(path: str) -> bool:
-    """True when ``path`` sits on the gated ``/api/v1`` surface."""
+    """True when ``path`` sits on the gated surface (``/api/v1`` + the aliases)."""
     if path in EXEMPT_PATHS:
         return False
+    if path in EXTRA_PROTECTED_PATHS:
+        return True
     return path == API_PREFIX or path.startswith(API_PREFIX + "/")
 
 

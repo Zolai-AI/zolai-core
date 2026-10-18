@@ -20,6 +20,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from .errors import internal_http_error
 from .rbac import ROLE_ANONYMOUS, require_role, role_for
 
 logger = logging.getLogger(__name__)
@@ -329,10 +330,18 @@ async def run_task(payload: RunIn, request: Request) -> dict[str, Any]:
                             detail={"error": "task_timeout", "task": task}) from exc
     except Exception as exc:  # agents raise domain errors; surface them cleanly
         logger.exception("learning task %s failed", task)
-        raise HTTPException(status_code=500, detail={
-            "error": "task_failed", "task": task,
-            "message": f"{type(exc).__name__}: {exc}",
-        }) from exc
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="learning_agents.task",
+            code="task_failed",
+            message=(
+                "The learning task could not be completed. Retry; if it keeps failing, check that the corpus tables "
+                "are loaded."
+            ),
+            log_context={"task": task},
+        ) from exc
 
     return {
         "task": task,

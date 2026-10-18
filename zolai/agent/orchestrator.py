@@ -24,6 +24,7 @@ from ..notifications import get_notification_service
 from . import store
 from .loop import run_agent_loop
 from .synthesis import make_chat_fn, rule_draft
+from .tools.errors import classify_failure
 from .tools.executor import execute_tool
 from .tools.registry import allow_list
 from .tools.types import ToolCall
@@ -179,6 +180,7 @@ def run_agent_goal(
     *,
     created_by: str = "system",
     scope: str = DEFAULT_RUN_SCOPE,
+    granted: Iterable[str] | None = None,
     extra_allow: Iterable[str] | None = None,
     assistant: str = "admin",
     max_turns: int | None = None,
@@ -198,6 +200,12 @@ def run_agent_goal(
         user_api_key: Optional per-request API key override (user-provided,
             not stored server-side). If provided, it takes precedence over
             the row's stored key or env fallback.
+        granted: The caller's own scope set, forwarded to
+            :func:`zolai.agent.tools.registry.allow_list`.  It can only
+            **narrow** the tier, so a tool whose ``scope`` this caller lacks
+            is dropped from the run's tool set rather than offered and then
+            refused.  ``None`` (the default) leaves the tier exactly as it
+            was.
 
     Returns:
         The full run (phases, tool trace, evidence, answer, provider,
@@ -209,7 +217,7 @@ def run_agent_goal(
 
     started = time.monotonic()
     mode = engine_mode()
-    allow = set(allow_list(scope))
+    allow = set(allow_list(scope, granted=granted))
     if extra_allow:
         allow |= {str(a) for a in extra_allow}
 
@@ -365,7 +373,7 @@ def run_agent_goal(
             phases=phases,
             tool_calls=trace,
             answer=answer,
-            error=f"{type(exc).__name__}: {exc}",
+            error=classify_failure(exc).message,
             latency_ms=round((time.monotonic() - started) * 1000, 2),
             finished_at=_utc_now(),
         )

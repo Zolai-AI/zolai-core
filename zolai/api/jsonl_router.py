@@ -36,6 +36,7 @@ anonymous caller, exactly like ``desktop_router``.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -45,6 +46,9 @@ from pydantic import BaseModel
 
 from ..core.jsonl_pipeline_v3 import JSONLPipeline
 from .auth import require_scope
+from .errors import internal_error_envelope, internal_http_error
+
+logger = logging.getLogger(__name__)
 
 #: Frozen vocabulary actions required per verb (see module docstring).
 READ_SCOPE = "dataset:read"
@@ -92,8 +96,21 @@ async def import_all(request: ImportAllRequest, background_tasks: BackgroundTask
         try:
             results = _pipeline.import_all(batch_id)
             return {"batch_id": batch_id, "results": results}
-        except Exception as e:
-            return {"batch_id": batch_id, "error": str(e)}
+        except Exception as exc:
+            return {
+                "batch_id": batch_id,
+                **internal_error_envelope(
+                    exc,
+                    logger=logger,
+                    operation="desktop.jsonl.import_all",
+                    code="import_failed",
+                    message=(
+                        "The corpus import failed. Check the batch is still on disk, then re-run the import; the "
+                        "import log records which table stopped."
+                    ),
+                    batch_id=batch_id,
+                ),
+            }
 
     # Run in background for large imports
     background_tasks.add_task(run_import)
@@ -110,9 +127,19 @@ async def import_file(request: ImportFileRequest):
     try:
         result = _pipeline.import_file(file_path, request.table_name, request.batch_id, request.version)
         return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="desktop.jsonl.import_file",
+            code="import_failed",
+            message=(
+                "That JSONL file could not be imported. Check the file is still readable and that table_name names an "
+                "import table, then retry."
+            ),
+            log_context={"table_name": request.table_name, "batch_id": request.batch_id},
+        ) from exc
 
 @router.get("/import/status/{batch_id}", dependencies=[Depends(require_scope(READ_SCOPE))])
 async def import_status(batch_id: str):
@@ -154,9 +181,19 @@ async def export_table(request: ExportTableRequest):
             request.limit
         )
         return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="desktop.jsonl.export_table",
+            code="export_failed",
+            message=(
+                "That table could not be exported. Check that output_path is a writable location on the server, then "
+                "retry."
+            ),
+            log_context={"table_name": request.table_name},
+        ) from exc
 
 @router.post("/export/all", dependencies=[Depends(require_scope(WRITE_SCOPE))])
 async def export_all(request: ExportAllRequest):
@@ -169,8 +206,18 @@ async def export_all(request: ExportAllRequest):
             request.clean
         )
         return {"exports": results}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="desktop.jsonl.export_all",
+            code="export_failed",
+            message=(
+                "The corpus could not be exported. Check that output_dir is a writable location on the server, then "
+                "retry."
+            ),
+        ) from exc
 
 
 @router.get("/tables", dependencies=[Depends(require_scope(READ_SCOPE))])
