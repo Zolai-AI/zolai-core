@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -294,6 +294,19 @@ class ModelsResponse(BaseModel):
 
 
 # --- WebSocket Manager ---
+#
+# ``/ws`` — a bare, unauthenticated echo socket at the app root — was deleted
+# here.  It sat outside ``/api/v1``, so neither ``is_protected_path`` nor
+# ``rbac.classify_route`` ever covered it, and its ``broadcast`` fanned every
+# message out to one process-wide connection list, so any anonymous caller
+# could read another caller's payload.  No consumer existed (zolai-tauri,
+# zolai-web, zolai-mcp-server and zolai-explorer all grep clean).
+#
+# ``ConnectionManager`` and ``manager`` STAY: the crawl/clean/splits
+# completion broadcasts below are their only remaining use in this module, and
+# the authenticated, admin-gated learning socket
+# (``/api/v1/learning/ws`` -> ``learning_tools_router`` -> ``_ws_authorize``)
+# keeps its own connection manager in ``zolai/learning/websocket/``.
 
 
 class ConnectionManager:
@@ -1216,18 +1229,6 @@ def create_app() -> FastAPI:
                 context_source="error",
                 vocabulary=[],
             )
-
-    # --- WebSocket ---
-
-    @app.websocket("/ws")
-    async def websocket_endpoint(ws: WebSocket):
-        await manager.connect(ws)
-        try:
-            while True:
-                data = await ws.receive_json()
-                await manager.broadcast({"echo": data})
-        except WebSocketDisconnect:
-            manager.disconnect(ws)
 
     # === Ollama Chat Endpoints ===
 
