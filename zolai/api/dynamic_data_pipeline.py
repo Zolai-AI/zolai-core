@@ -15,6 +15,8 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from .errors import internal_error_envelope
+
 logger = logging.getLogger(__name__)
 
 
@@ -61,8 +63,17 @@ class DynamicDataPipeline:
             conn.commit()
 
         except Exception as e:
-            results['error'] = str(e)
-            logger.error("Pipeline sync failed: %s", e)
+            # `results` is returned to the caller (CLI today, any future
+            # route tomorrow): keep the `error` key, swap only its message;
+            # raw exception + traceback go to the log (zolai/api/errors.py).
+            detail = internal_error_envelope(
+                e,
+                logger=logger,
+                operation="pipeline.full_sync",
+                code="sync_failed",
+                message="The data sync could not be completed. Check the server log for details.",
+            )
+            results['error'] = detail["message"]
         finally:
             conn.close()
 

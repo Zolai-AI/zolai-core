@@ -12,7 +12,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from .errors import internal_http_error
+from .errors import internal_error_envelope, internal_http_error
 
 logger = logging.getLogger(__name__)
 
@@ -59,12 +59,27 @@ def _run_script(job_id: str, stage: str, cmd: list[str]) -> None:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
         if result.returncode != 0:
             _jobs[job_id]["status"] = "error"
-            _jobs[job_id]["error"] = result.stderr[:500]
+            # Script stderr can BE a traceback — log it whole, never return it.
+            logger.error(
+                "pipeline.%s (%s) exited with status %s:\n%s",
+                stage, job_id, result.returncode, result.stderr,
+            )
+            _jobs[job_id]["error"] = f"The {stage} script failed. Check the server log for details."
         else:
             _jobs[job_id]["status"] = "done"
     except Exception as e:
         _jobs[job_id]["status"] = "error"
-        _jobs[job_id]["error"] = str(e)
+        # JobStatus.error is a plain string field on a 200 response — keep the
+        # shape, swap only the message value; raw text + traceback go to logs.
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="pipeline.run_script",
+            code="script_failed",
+            message=f"The {stage} script could not be run. Check the server log for details.",
+            job_id=job_id,
+        )
+        _jobs[job_id]["error"] = detail["message"]
 
 
 # ── Pipeline endpoints ──────────────────────────────────────────────────────

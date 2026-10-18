@@ -17,6 +17,8 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+from .errors import internal_error_envelope
+
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -74,8 +76,22 @@ class SelfLearningEngine:
             conn.commit()
 
         except Exception as e:
-            result.errors.append(str(e))
-            logger.error("Learning cycle failed: %s", e)
+            # `result.errors` is printed by the CLI entry point: keep the
+            # list, swap only the message value; raw exception + traceback
+            # go to the log via internal_error_envelope (zolai/api/errors.py)
+            # — same logger as the old "Learning cycle failed" line, now with
+            # the traceback attached.
+            detail = internal_error_envelope(
+                e,
+                logger=logger,
+                operation="self_learning.cycle",
+                code="learning_cycle_failed",
+                message=(
+                    "The learning cycle did not finish; results may be partial. "
+                    "Check the server log for details."
+                ),
+            )
+            result.errors.append(detail["message"])
         finally:
             conn.close()
 

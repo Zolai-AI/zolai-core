@@ -1,6 +1,7 @@
 """Desktop Router — handles all 14 tool categories for the Zolai Desktop UI.
 Routes desktop UI calls to the appropriate zolai-core functions and scripts."""
 import json
+import logging
 import subprocess
 import sys
 
@@ -8,12 +9,15 @@ from fastapi import APIRouter, Depends, Query
 
 from ..config import config
 from .auth import require_scope
+from .errors import internal_error_envelope
 
 # /desktop/* exposes corpus internals (table names, row counts, DB size) and can
 # shell out to scripts, so it is a guarded surface. In the default `warn` auth
 # mode this still dual-accepts unauthenticated calls (logged, rate-limited); if
 # ZOLAI_API_AUTH is flipped to `enforce` it starts requiring a `dataset:read`
 # key automatically, with no code change here.
+logger = logging.getLogger(__name__)
+
 router = APIRouter(
     prefix="/desktop",
     tags=["desktop"],
@@ -50,7 +54,11 @@ def run_script(name: str, *args: str, timeout: int = 120):
             cwd=ZOLAI_CORE
         )
         if r.returncode != 0:
-            return {"error": f"Script failed: {r.stderr[:500]}"}
+            logger.error(
+                "desktop.run_script: %s exited with status %s:\n%s",
+                name, r.returncode, r.stderr,
+            )
+            return {"error": f"The {name} script failed. Check the server log for details."}
         try:
             return json.loads(r.stdout) if r.stdout.strip() else {"success": True}
         except json.JSONDecodeError:
@@ -58,7 +66,18 @@ def run_script(name: str, *args: str, timeout: int = 120):
     except subprocess.TimeoutExpired:
         return {"error": "Script timed out"}
     except Exception as e:
-        return {"error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.run_script",
+            code="script_failed",
+            message=f"The {name} script could not be run. Check the server log for details.",
+            script=name,
+        )
+        return {"error": detail["message"]}
 
 def get_db():
     """Get SQLite connection to the canonical DB."""
@@ -97,7 +116,17 @@ async def db_tables():
         conn.close()
         return {"tables": result, "total": len(result)}
     except Exception as e:
-        return {"error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.db_tables",
+            code="table_list_unavailable",
+            message='The table list could not be read. Retry in a few seconds.',
+        )
+        return {"error": detail["message"]}
 
 @router.get("/query")
 async def db_query(sql: str = Query(...)):
@@ -114,7 +143,17 @@ async def db_query(sql: str = Query(...)):
         conn.close()
         return {"columns": cols, "rows": [serialize_row(r) for r in rows], "count": len(rows)}
     except Exception as e:
-        return {"error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.db_query",
+            code="query_failed",
+            message='The query could not be run. Check the query and try again; details are in the server log.',
+        )
+        return {"error": detail["message"]}
 
 @router.get("/stats")
 async def db_stats():
@@ -176,7 +215,17 @@ async def db_stats():
             "table_details": result,
         }
     except Exception as e:
-        return {"error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.db_stats",
+            code="stats_unavailable",
+            message='Database statistics could not be read. Retry in a few seconds.',
+        )
+        return {"error": detail["message"]}
 
 
 @router.get("/table-data")
@@ -232,7 +281,17 @@ async def table_data(
             "total_pages": total_pages,
         }
     except Exception as e:
-        return {"error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.table_data",
+            code="table_rows_unavailable",
+            message='The table rows could not be read. Retry in a few seconds.',
+        )
+        return {"error": detail["message"]}
 
 
 @router.get("/table-schema")
@@ -270,7 +329,17 @@ async def table_schema(table: str = Query(...)):
 
         return {"table": table, "columns": columns}
     except Exception as e:
-        return {"error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.table_schema",
+            code="table_schema_unavailable",
+            message='The table schema could not be read. Retry in a few seconds.',
+        )
+        return {"error": detail["message"]}
 
 
 # ═══════════════════════════════════════════
@@ -342,7 +411,17 @@ async def dict_browse(limit: int = 50, offset: int = 0, q: str = None, clean: bo
             "offset": offset,
         }
     except Exception as e:
-        return {"error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.dict_browse",
+            code="dictionary_unavailable",
+            message='Dictionary entries could not be loaded. Retry in a few seconds.',
+        )
+        return {"error": detail["message"]}
 
 @ router.get("/dict/stats")
 async def dict_stats():
@@ -362,7 +441,17 @@ async def dict_stats():
         conn.close()
         return {"total": total, "with_myanmar": my_count, "with_english": en_clean, "pos_breakdown": pos_counts}
     except Exception as e:
-        return {"error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.dict_stats",
+            code="dictionary_stats_unavailable",
+            message='Dictionary statistics could not be read. Retry in a few seconds.',
+        )
+        return {"error": detail["message"]}
 
 @ router.get("/dict/non-zolai")
 async def dict_non_zolai():
@@ -448,7 +537,17 @@ async def bible_books():
         books.sort(key=lambda b: _BIBLE_ORDER_MAP.get(b["abbr"], 999))
         return {"books": books, "total": len(books)}
     except Exception as e:
-        return {"error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.bible_books",
+            code="book_list_unavailable",
+            message='The Bible book list could not be read. Retry in a few seconds.',
+        )
+        return {"error": detail["message"]}
 
 @router.get("/bible/chapters")
 async def bible_chapters(book: str = Query(...)):
@@ -469,7 +568,17 @@ async def bible_chapters(book: str = Query(...)):
         chapters = [{"chapter": r[0], "verses": r[1]} for r in rows]
         return {"book": book, "chapters": chapters, "total": len(chapters)}
     except Exception as e:
-        return {"error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.bible_chapters",
+            code="chapter_list_unavailable",
+            message='The chapter list could not be read. Retry in a few seconds.',
+        )
+        return {"error": detail["message"]}
 
 @router.get("/bible/verses")
 async def bible_verses(
@@ -531,7 +640,17 @@ async def bible_verses(
             "total": len(verses),
         }
     except Exception as e:
-        return {"error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.bible_verses",
+            code="verses_unavailable",
+            message='The verses could not be read. Retry in a few seconds.',
+        )
+        return {"error": detail["message"]}
 
 
 # ═══════════════════════════════════════════
@@ -570,7 +689,17 @@ async def gemini_coverage():
             "myanmar_pct": round(with_myanmar / total * 100, 1) if total else 0,
         }
     except Exception as e:
-        return {"error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.gemini_coverage",
+            code="coverage_unavailable",
+            message='Translation coverage could not be read. Retry in a few seconds.',
+        )
+        return {"error": detail["message"]}
 
 @ router.get("/gemini/fill")
 async def gemini_fill(text: str = Query(...), lang: str = Query("my")):
@@ -712,7 +841,17 @@ async def pattern_stats():
         output = json.dumps({"total": total, "by_function": by_function}, indent=2)
         return {"output": output}
     except Exception as e:
-        return {"error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.pattern_stats",
+            code="pattern_stats_unavailable",
+            message='Grammar pattern statistics could not be read. Retry in a few seconds.',
+        )
+        return {"error": detail["message"]}
 
 
 @ router.get("/pattern/learn")
@@ -733,7 +872,17 @@ async def pattern_learn(limit: int = Query(20)):
         output = json.dumps([dict(zip(cols, r)) for r in rows], indent=2, ensure_ascii=False)
         return {"output": output}
     except Exception as e:
-        return {"error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.pattern_learn",
+            code="patterns_unavailable",
+            message='Sample grammar patterns could not be read. Retry in a few seconds.',
+        )
+        return {"error": detail["message"]}
 
 
 # ═══════════════════════════════════════════
@@ -775,7 +924,17 @@ async def export_data(data_type: str, limit: int = Query(20)):
         output = json.dumps({"table": table, "total": total, "sample": sample}, indent=2, ensure_ascii=False)
         return {"output": output}
     except Exception as e:
-        return {"error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.export_data",
+            code="export_failed",
+            message='The export could not be prepared. Retry in a few seconds.',
+        )
+        return {"error": detail["message"]}
 
 
 # ═══════════════════════════════════════════
@@ -803,7 +962,17 @@ async def audit_recent(limit: int = Query(50)):
         conn.close()
         return {"results": [dict(zip(cols, r)) for r in rows]}
     except Exception as e:
-        return {"error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.audit_recent",
+            code="audit_unavailable",
+            message='Recent audit entries could not be read. Retry in a few seconds.',
+        )
+        return {"error": detail["message"]}
 
 # ═══════════════════════════════════════════
 # AI MODELS ENDPOINT
@@ -863,7 +1032,17 @@ async def get_ai_models():
 
         return {"models": models, "default": "zolai-local"}
     except Exception as e:
-        return {"models": [{"name": "zolai-local", "provider": "zolai", "type": "local", "endpoint": "/chat/zolai"}], "default": "zolai-local", "error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.get_ai_models",
+            code="model_list_unavailable",
+            message='The model list could not be built. The default local model is still available.',
+        )
+        return {"models": [{"name": "zolai-local", "provider": "zolai", "type": "local", "endpoint": "/chat/zolai"}], "default": "zolai-local", "error": detail["message"]}
 
 
 # ═══════════════════════════════════════════
@@ -896,4 +1075,14 @@ async def get_ollama_models():
             else:
                 return {"models": [], "default": "zolai-local", "error": f"Ollama returned {response.status_code}"}
     except Exception as e:
-        return {"models": [], "default": "zolai-local", "error": str(e)}
+        # The desktop UI reads {"error": <text>}; keep that exact shape and
+        # swap only the message value. The raw exception + traceback go to the
+        # log via internal_error_envelope (zolai/api/errors.py).
+        detail = internal_error_envelope(
+            e,
+            logger=logger,
+            operation="desktop.get_ollama_models",
+            code="ollama_unavailable",
+            message='Local models could not be listed. Make sure the Ollama server is running and try again.',
+        )
+        return {"models": [], "default": "zolai-local", "error": detail["message"]}

@@ -342,9 +342,15 @@ def run_assistant(
     try:
         chat, meta = make_chat_fn(assistant=assistant, provider=provider, model=model, user_api_key=api_key, user_provider=user_provider)
     except Exception as exc:  # ProviderError (stable codes) → honest fallback
+        # Stable code only: ProviderError's str() embeds its message, which
+        # can carry upstream request/response text (adapter.py wraps httpx
+        # errors and response bodies in it) — that must never reach a caller.
+        # Non-provider failures get a fixed code; the raw exception already
+        # reaches the log below.
+        provider_error = getattr(exc, "code", None) or "PROVIDER_UNAVAILABLE"
         logger.info("assistant %s degraded to retrieval-only: %s", assistant, exc)
         out = _retrieval_only(message, allow)
-        out["provider_error"] = str(exc)
+        out["provider_error"] = provider_error
         return _finish(
             out, message, admin=admin, persist=persist, started=started,
             requested_provider=provider, requested_model=model,
