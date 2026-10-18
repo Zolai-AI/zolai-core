@@ -21,10 +21,10 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..config import config
 from ..data.repositories import get_repositories
@@ -53,6 +53,8 @@ class ReviewQueueItem(BaseModel):
 
 class ReviewDetailResponse(BaseModel):
     """Detailed review item response with candidate, evidence, and consensus."""
+
+    model_config = ConfigDict(extra="allow")
     id: int
     fact_type: str
     fact_key: str
@@ -93,6 +95,8 @@ class BulkActionRequest(BaseModel):
 
 class PipelineStatsResponse(BaseModel):
     """Pipeline statistics response."""
+
+    model_config = ConfigDict(extra="allow")
     raw_count: int = 0
     staging_count: int = 0
     canonical_count: int = 0
@@ -105,11 +109,268 @@ class PipelineStatsResponse(BaseModel):
 
 class CostSummaryResponse(BaseModel):
     """Cost dashboard data response."""
+
+    model_config = ConfigDict(extra="allow")
     total_cost: float = 0.0
     by_task: dict = {}
     by_model: dict = {}
     daily: list[dict] = []
     budget_check: dict = {}
+
+
+# ---------------------------------------------------------------------------
+# Response models (R-batch)
+#
+# Every endpoint below used to be annotated with nothing, so FastAPI published
+# **no** schema for it: OpenAPI carried an empty response contract, a client
+# generator had nothing to emit, and a renamed key broke callers silently.
+#
+# Two rules keep adding them byte-compatible:
+#   1. a value the handler writes as a *literal* (``total``, ``page_size``,
+#      ``item_id``) gets a precise type;
+#   2. a value that comes straight out of a repository row or an analyzer
+#      result object stays ``Any`` — those producers are not under this
+#      router's control, and typing them tighter could coerce or reject a
+#      value the endpoint already returns, which would turn a 200 into a 500.
+#
+# :class:`FoundationResponse` carries the third rule, the one that actually
+# keeps the bytes identical: ``extra="allow"`` passes a producer's optional key
+# through untouched, and only the keys a producer *always* emits are declared —
+# a declared field would be materialised from its default on every response,
+# so declaring one a producer sometimes omits would *add* a key that was never
+# there. ``tests/test_foundation_response_models.py`` pins all of this.
+# ---------------------------------------------------------------------------
+
+
+class FoundationResponse(BaseModel):
+    """Base for the response models below — see the block comment above."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ReviewQueueListResponse(FoundationResponse):
+    """``GET /foundation/review/queue`` — one page of queue items."""
+
+    items: list[dict[str, Any]] = []
+    total: int = 0
+    page: int = 1
+    page_size: int = 20
+    total_pages: int = 1
+
+
+class ReviewApproveResponse(FoundationResponse):
+    """``POST /foundation/review/{item_id}/approve`` — promotion result."""
+
+    success: bool = False
+    item_id: int = 0
+    status: str = "approved"
+    promoted_by: str = ""
+    records_promoted: int = 0
+
+
+class ReviewRejectResponse(FoundationResponse):
+    """``POST /foundation/review/{item_id}/reject`` — the recorded reason."""
+
+    success: bool = False
+    item_id: int = 0
+    status: str = "rejected"
+    reason: str = ""
+    rejected_by: str = ""
+
+
+class ReviewAssignResponse(FoundationResponse):
+    """``POST /foundation/review/{item_id}/assign`` — the new assignee."""
+
+    success: bool = False
+    item_id: int = 0
+    assignee: str = ""
+
+
+class BulkReviewResponse(FoundationResponse):
+    """``POST /foundation/review/bulk`` — per-item outcome for a batch."""
+
+    success: bool = False
+    processed: int = 0
+    errors: int = 0
+    results: list[dict[str, Any]] = []
+    error_details: list[dict[str, Any]] = []
+
+
+class CollocationOut(BaseModel):
+    """One PMI-ranked collocation inside a corpus analysis."""
+
+    word1: Any = None
+    word2: Any = None
+    pmi: Any = None
+    freq: Any = 0
+
+
+class CorpusAnalysisResponse(FoundationResponse):
+    """``POST /foundation/analyze/corpus`` — n-grams through register guess."""
+
+    ngrams: dict[str, Any] = {}
+    collocations: list[CollocationOut] = []
+    freq_distribution: dict[str, Any] = {}
+    # `register` is a deprecated attribute on pydantic's BaseModel, so the field
+    # is aliased; FastAPI serialises responses with by_alias=True, so the wire
+    # name is still exactly "register".
+    register_: Any = Field(default="", alias="register")
+    total_words_analyzed: int = 0
+
+
+class SyllableStructureOut(BaseModel):
+    """One syllable of a phonological analysis."""
+
+    syllable: Any = ""
+    onset: Any = ""
+    nucleus: Any = ""
+    coda: Any = ""
+    tone: Any = ""
+    valid: Any = False
+
+
+class PhonologyAnalysisResponse(FoundationResponse):
+    """``POST /foundation/analyze/phonology`` — syllables, tones, sandhi."""
+
+    syllable_structures: list[SyllableStructureOut] = []
+    tone_patterns: list[Any] = []
+    sandhi_applied: list[Any] = []
+    phonotactic_valid: Any = False
+    stress_pattern: list[Any] = []
+    violations: list[Any] = []
+
+
+class MorphologyAnalysisResponse(FoundationResponse):
+    """``POST /foundation/analyze/morphology`` — agglutinative decomposition."""
+
+    segments: list[Any] = []
+    directional: Any = ""
+    stem: Any = ""
+    aspect: Any = ""
+    particle: Any = ""
+    is_valid: Any = False
+    violations: list[Any] = []
+    compound_parts: list[Any] = []
+    prefix: Any = ""
+    suffix: Any = ""
+
+
+class EnhancedTranslationResponse(FoundationResponse):
+    """``POST /foundation/translate/enhanced`` — translation plus evidence."""
+
+    translation: Any = ""
+    confidence: Any = 0
+    tier: Any = "none"
+    sources: Any = []
+    evidence_chain: Any = []
+    zolai: Any = None
+    english: Any = None
+    pos: Any = None
+    note: Any = None
+    morphology_breakdown: Any = None
+
+
+class AdaptiveDifficultyResponse(FoundationResponse):
+    """``POST /foundation/progress/adaptive-difficulty`` — the tracker's plan.
+
+    ``error_rate`` / ``avg_ease`` / ``avg_complexity`` are only present once the
+    learner has review history, so they default to ``None`` and stay absent in
+    the "no history" response exactly as the tracker omits them.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    model_config = ConfigDict(extra="allow")
+
+    model_config = ConfigDict(extra="allow")
+
+    difficulty: Any = ""
+    frequency_tier: Any = ""
+    morphology_threshold: Any = 0.0
+    include_tone_questions: Any = False
+    recommended_count: Any = 0
+    reason: Any = ""
+
+
+class RankedSearchResponse(FoundationResponse):
+    """``POST /foundation/search/ranked`` — relevance-scored hits."""
+
+    query: str = ""
+    results: list[Any] = []
+    total: int = 0
+
+
+class CrossLingualSearchResponse(FoundationResponse):
+    """``POST /foundation/search/cross-lingual`` — hits plus the direction used."""
+
+    query: str = ""
+    source_lang: str = "en"
+    target_lang: str = "zo"
+    results: list[Any] = []
+    total: int = 0
+
+
+class TopicalSearchResponse(FoundationResponse):
+    """``POST /foundation/search/topical`` — thematically matching verses."""
+
+    theme: str = ""
+    results: list[Any] = []
+    total: int = 0
+
+
+class SearchAnalyticsResponse(FoundationResponse):
+    """``GET /foundation/search/analytics`` — query frequency rollup."""
+
+    analytics: list[Any] = []
+    total_queries: int = 0
+
+
+class StructureValidationResponse(FoundationResponse):
+    """``POST /foundation/grammar/validate-structure`` — SOV/ZVS verdict.
+
+    ``tokens`` / ``verb_position`` / ``zvs_compliant`` are only present once the
+    editor tokenized the sentence, hence their defaults.
+    """
+
+    valid: bool = False
+    errors: list[Any] = []
+    warnings: list[Any] = []
+
+
+class DisambiguationResponse(FoundationResponse):
+    """``POST /foundation/translation/disambiguate`` — ranked senses."""
+
+    candidates: list[Any] = []
+    word: str = ""
+    direction: str = "zo-en"
+
+
+class StreakResponse(FoundationResponse):
+    """``GET /foundation/progress/streak/{user_id}`` — current and longest."""
+
+    user_id: Any = ""
+    streak_type: Any = ""
+    current_streak: Any = 0
+    longest_streak: Any = 0
+    last_activity_date: Any = None
+    is_active: Any = False
+
+
+class ErrorCategorizationResponse(FoundationResponse):
+    """``POST /foundation/progress/error-categorize`` — the classified error."""
+
+    category: Any = ""
+    subcategory: Any = ""
+    rule: Any = ""
+
+
+class ErrorBreakdownResponse(FoundationResponse):
+    """``GET /foundation/progress/error-breakdown/{user_id}`` — counts by class."""
+
+    user_id: Any = ""
+    total_errors: Any = 0
+    categories: dict[str, Any] = {}
+    most_common: Any = None
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +677,7 @@ def _calculate_confidence(evidence: list[dict], consensus: Optional[dict]) -> fl
 # API Endpoints
 # ---------------------------------------------------------------------------
 
-@router.get("/review/queue")
+@router.get("/review/queue", response_model=ReviewQueueListResponse)
 async def list_review_queue(
     status: Optional[str] = Query(None, description="Filter by status: pending, approved, rejected"),
     priority: Optional[int] = Query(None, description="Filter by priority level"),
@@ -481,7 +742,7 @@ async def list_review_queue(
         ) from exc
 
 
-@router.get("/review/{item_id}")
+@router.get("/review/{item_id}", response_model=ReviewDetailResponse)
 async def get_review_detail(item_id: int):
     """Get detailed review item with candidate value, evidence, and consensus.
 
@@ -555,7 +816,7 @@ async def get_review_detail(item_id: int):
         ) from exc
 
 
-@router.post("/review/{item_id}/approve")
+@router.post("/review/{item_id}/approve", response_model=ReviewApproveResponse)
 async def approve_review_item(item_id: int, request: ApproveRequest = ApproveRequest()):
     """Approve a review item and promote to canonical.
 
@@ -611,7 +872,7 @@ async def approve_review_item(item_id: int, request: ApproveRequest = ApproveReq
         ) from exc
 
 
-@router.post("/review/{item_id}/reject")
+@router.post("/review/{item_id}/reject", response_model=ReviewRejectResponse)
 async def reject_review_item(item_id: int, request: RejectRequest):
     """Reject a review item with reason.
 
@@ -662,7 +923,7 @@ async def reject_review_item(item_id: int, request: RejectRequest):
         ) from exc
 
 
-@router.post("/review/{item_id}/assign")
+@router.post("/review/{item_id}/assign", response_model=ReviewAssignResponse)
 async def assign_review_item(item_id: int, request: AssignRequest):
     """Assign a review item to a reviewer.
 
@@ -705,7 +966,7 @@ async def assign_review_item(item_id: int, request: AssignRequest):
         ) from exc
 
 
-@router.post("/review/bulk")
+@router.post("/review/bulk", response_model=BulkReviewResponse)
 async def bulk_review_action(request: BulkActionRequest):
     """Bulk approve or reject multiple review items.
 
@@ -777,7 +1038,7 @@ async def bulk_review_action(request: BulkActionRequest):
     }
 
 
-@router.get("/stats")
+@router.get("/stats", response_model=PipelineStatsResponse)
 async def get_pipeline_stats():
     """Get pipeline statistics including counts and health.
 
@@ -852,7 +1113,7 @@ async def get_pipeline_stats():
         ) from exc
 
 
-@router.get("/costs/summary")
+@router.get("/costs/summary", response_model=CostSummaryResponse)
 async def get_cost_summary(
     start_date: Optional[str] = Query(None, description="Start date (ISO format)"),
     end_date: Optional[str] = Query(None, description="End date (ISO format)"),
@@ -906,7 +1167,7 @@ async def get_cost_summary(
 # Linguistic Analysis Endpoints
 # ---------------------------------------------------------------------------
 
-@router.post("/analyze/corpus")
+@router.post("/analyze/corpus", response_model=CorpusAnalysisResponse)
 async def analyze_corpus(request: CorpusAnalysisRequest):
     """Run corpus-level analysis on input text.
 
@@ -951,7 +1212,7 @@ async def analyze_corpus(request: CorpusAnalysisRequest):
         ) from exc
 
 
-@router.post("/analyze/phonology")
+@router.post("/analyze/phonology", response_model=PhonologyAnalysisResponse)
 async def analyze_phonology(request: PhonologyAnalysisRequest):
     """Run phonological analysis on a Zolai word.
 
@@ -1002,7 +1263,7 @@ async def analyze_phonology(request: PhonologyAnalysisRequest):
         ) from exc
 
 
-@router.post("/analyze/morphology")
+@router.post("/analyze/morphology", response_model=MorphologyAnalysisResponse)
 async def analyze_morphology(request: MorphologyAnalysisRequest):
     """Run enhanced morphological analysis on a Zolai word.
 
@@ -1045,7 +1306,7 @@ async def analyze_morphology(request: MorphologyAnalysisRequest):
         ) from exc
 
 
-@router.post("/translate/enhanced")
+@router.post("/translate/enhanced", response_model=EnhancedTranslationResponse)
 async def translate_enhanced(request: EnhancedTranslationRequest):
     """Translate with 3-tier confidence scoring and evidence chain.
 
@@ -1092,7 +1353,7 @@ async def translate_enhanced(request: EnhancedTranslationRequest):
         ) from exc
 
 
-@router.post("/progress/adaptive-difficulty")
+@router.post("/progress/adaptive-difficulty", response_model=AdaptiveDifficultyResponse)
 async def get_adaptive_difficulty(request: AdaptiveDifficultyRequest):
     """Compute adaptive quiz difficulty based on user's learning profile.
 
@@ -1126,7 +1387,7 @@ async def get_adaptive_difficulty(request: AdaptiveDifficultyRequest):
 # Search Endpoints
 # ---------------------------------------------------------------------------
 
-@router.post("/search/ranked")
+@router.post("/search/ranked", response_model=RankedSearchResponse)
 async def search_ranked(request: RankedSearchRequest):
     """Search with TF-IDF-inspired relevance ranking.
 
@@ -1166,7 +1427,7 @@ async def search_ranked(request: RankedSearchRequest):
         ) from exc
 
 
-@router.post("/search/cross-lingual")
+@router.post("/search/cross-lingual", response_model=CrossLingualSearchResponse)
 async def search_cross_lingual(request: CrossLingualSearchRequest):
     """Cross-lingual dictionary search between English and Zolai.
 
@@ -1214,7 +1475,7 @@ async def search_cross_lingual(request: CrossLingualSearchRequest):
         ) from exc
 
 
-@router.post("/search/topical")
+@router.post("/search/topical", response_model=TopicalSearchResponse)
 async def search_topical(request: TopicalSearchRequest):
     """Search Bible verses by topic/theme keywords across books.
 
@@ -1253,7 +1514,7 @@ async def search_topical(request: TopicalSearchRequest):
         ) from exc
 
 
-@router.get("/search/analytics")
+@router.get("/search/analytics", response_model=SearchAnalyticsResponse)
 async def get_search_analytics():
     """Get search analytics sorted by count (descending).
 
@@ -1286,7 +1547,7 @@ async def get_search_analytics():
 # Grammar Validation Endpoints
 # ---------------------------------------------------------------------------
 
-@router.post("/grammar/validate-structure")
+@router.post("/grammar/validate-structure", response_model=StructureValidationResponse)
 async def validate_structure(request: StructureValidationRequest):
     """Validate SOV sentence structure and grammar markers.
 
@@ -1324,7 +1585,7 @@ async def validate_structure(request: StructureValidationRequest):
 # Translation Disambiguation Endpoints
 # ---------------------------------------------------------------------------
 
-@router.post("/translation/disambiguate")
+@router.post("/translation/disambiguate", response_model=DisambiguationResponse)
 async def disambiguate_translation(request: DisambiguationRequest):
     """Disambiguate polysemous words using dictionary + word_usage context.
 
@@ -1364,7 +1625,7 @@ async def disambiguate_translation(request: DisambiguationRequest):
 # Progress / Streak Endpoints
 # ---------------------------------------------------------------------------
 
-@router.get("/progress/streak/{user_id}")
+@router.get("/progress/streak/{user_id}", response_model=StreakResponse)
 async def get_user_streak(user_id: str, streak_type: str = "daily"):
     """Get learning streak for a user.
 
@@ -1390,7 +1651,7 @@ async def get_user_streak(user_id: str, streak_type: str = "daily"):
         ) from exc
 
 
-@router.post("/progress/error-categorize")
+@router.post("/progress/error-categorize", response_model=ErrorCategorizationResponse)
 async def categorize_error(request: ErrorCategorizationRequest):
     """Categorize the type of error in a correction.
 
@@ -1424,7 +1685,7 @@ async def categorize_error(request: ErrorCategorizationRequest):
         ) from exc
 
 
-@router.get("/progress/error-breakdown/{user_id}")
+@router.get("/progress/error-breakdown/{user_id}", response_model=ErrorBreakdownResponse)
 async def get_error_breakdown(user_id: str):
     """Get error breakdown by category for a user.
 
