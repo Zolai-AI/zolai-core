@@ -147,7 +147,13 @@ def test_create_duplicate_name_is_409(client: TestClient, auth_db, headers) -> N
     assert client.post("/api/v1/admin/api-keys", headers=headers, json=payload).status_code == 201
     duplicate = client.post("/api/v1/admin/api-keys", headers=headers, json=payload)
     assert duplicate.status_code == 409
-    assert "already exists" in duplicate.json()["detail"]["error"]
+    # This used to assert `"already exists" in detail["error"]` — the handler
+    # passed str(exc) as the *code*, so the assertion only passed because the
+    # raw exception text was in the response. The 409 and the conflict meaning
+    # are unchanged; the body is now the house envelope, and the driver's words
+    # are gone.
+    assert duplicate.json()["detail"]["error"] == "api_key_conflict"
+    assert "already exists" not in duplicate.text
 
 
 def test_create_unknown_scope_is_422(client: TestClient, auth_db, headers) -> None:

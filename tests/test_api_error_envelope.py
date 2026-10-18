@@ -75,6 +75,17 @@ ALLOWLIST: tuple[AllowlistEntry, ...] = (
         ),
     ),
     AllowlistEntry(
+        path="admin_users_router.py",
+        code="user_not_found",
+        marker='detail=_detail("user_not_found"',
+        reason=(
+            "_http_from maps session_auth's LookupError to 404 and falls back to str(exc) only "
+            "when no username reached it; the raise site is zolai/api/session_auth.py's "
+            "\"unknown user\" lookup, a literal. Kept as-is because it is the documented ce04c72 "
+            "response contract, not an accidental leak."
+        ),
+    ),
+    AllowlistEntry(
         path="learning_agents_router.py",
         code="agent_conflict",
         marker='"error": "agent_conflict"',
@@ -168,16 +179,15 @@ def leaking_sites(path: Path) -> list[tuple[int, str, str]]:
     hits: list[tuple[int, str, str]] = []
 
     def walk_detail(node: ast.AST, lineno: int, snippet: str, prefix: str) -> None:
-        reason = _embeds_exception(node, names)
-        if reason:
-            hits.append((lineno, f"{prefix}{reason}", snippet))
-        if isinstance(node, (ast.Dict, ast.List, ast.Tuple, ast.Set)):
-            for child in ast.walk(node):
-                if child is node:
-                    continue
-                child_reason = _embeds_exception(child, names)
-                if child_reason:
-                    hits.append((lineno, f"{prefix}literal contains {child_reason}", snippet))
+        # Every descendant, not just a literal: `_detail(str(exc))` hides the
+        # raw text behind a helper call, and that was a real site.
+        for child in ast.walk(node):
+            if child is node:
+                reason = _embeds_exception(node, names)
+            else:
+                reason = _embeds_exception(child, names)
+            if reason:
+                hits.append((lineno, f"{prefix}{reason}", snippet))
 
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
