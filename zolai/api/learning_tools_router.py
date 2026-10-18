@@ -40,6 +40,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import auth
 from .auth_middleware import extract_key
+from .errors import internal_http_error
 from .rbac import ROLE_ADMIN, require_role, role_for
 
 logger = logging.getLogger(__name__)
@@ -489,10 +490,16 @@ def corpus_expand(payload: CorpusExpandIn, _auth: dict[str, Any] = AdminAuth,
             include_sentences=payload.include_sentences,
         )}
     except Exception as exc:
-        logger.exception("corpus expansion failed")
-        raise HTTPException(status_code=500, detail={
-            "error": "expansion_failed", "message": f"{type(exc).__name__}: {exc}",
-        }) from exc
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="learning_tools.corpus.expand",
+            code="expansion_failed",
+            message=(
+                "Corpus expansion could not be completed. Retry with a smaller max_books value."
+            ),
+        ) from exc
 
 
 @router.post("/corpus/validate")
@@ -505,10 +512,17 @@ def corpus_validate(payload: CorpusValidateIn, _auth: dict[str, Any] = AdminAuth
     try:
         report = validator.validate_all(zvs_limit=payload.zvs_limit)
     except Exception as exc:
-        logger.exception("corpus validation failed")
-        raise HTTPException(status_code=500, detail={
-            "error": "validation_failed", "message": f"{type(exc).__name__}: {exc}",
-        }) from exc
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="learning_tools.corpus.validate",
+            code="validation_failed",
+            message=(
+                "Corpus validation could not be completed. Retry; if it keeps failing, check that the canonical "
+                "tables are loaded."
+            ),
+        ) from exc
 
     body: dict[str, Any] = {"report": report.as_dict()}
     if payload.save:

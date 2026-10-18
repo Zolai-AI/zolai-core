@@ -96,6 +96,19 @@ def _created_by(request: Request) -> str:
     return "anonymous"
 
 
+def _granted(request: Request) -> list[str] | None:
+    """The caller's own scope set, for the registry's narrowing-only filter.
+
+    Read off the record the auth middleware already resolved — the same record
+    :func:`zolai.api.rbac.role_for` reads — so no second authorization path is
+    introduced.  ``None`` when the record carries no readable scope list, which
+    leaves the run's tool set exactly as it was before this batch.
+    """
+    record: dict[str, Any] | None = getattr(request.state, "api_key", None)
+    scopes = record.get("scopes") if isinstance(record, dict) else None
+    return [str(s) for s in scopes] if isinstance(scopes, (list, tuple, set)) else None
+
+
 @router.post("/runs", dependencies=[RUN_DEP])
 def create_run(body: RunIn, request: Request) -> dict[str, Any]:
     """Run the agent synchronously (≤60s) and return the full run + trace.
@@ -117,6 +130,7 @@ def create_run(body: RunIn, request: Request) -> dict[str, Any]:
         run = run_agent_goal(
             body.goal,
             created_by=_created_by(request),
+            granted=_granted(request),
             provider=body.provider,
             model=body.model,
             user_api_key=body.api_key,

@@ -33,12 +33,23 @@ SOURCES = [
 
 
 def _get_embedder():
-    """Lazy-load sentence transformer."""
+    """Lazy-load sentence transformer.
+
+    A missing package and an unusable model are both non-fatal: the caller
+    falls back to lexical search instead of failing the whole build.  An
+    incomplete local HF cache fails *inside* the loader (the model's pooling
+    module raises ``TypeError``), which an ``ImportError``-only guard would let
+    escape.
+    """
     try:
         from sentence_transformers import SentenceTransformer
-        return SentenceTransformer(EMBEDDING_MODEL)
     except ImportError:
         log.warning("sentence-transformers not installed; vector build disabled")
+        return None
+    try:
+        return SentenceTransformer(EMBEDDING_MODEL)
+    except Exception as exc:
+        log.warning("sentence-transformer unusable; vector build disabled: %s", exc)
         return None
 
 

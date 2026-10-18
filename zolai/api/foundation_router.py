@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 
 from ..config import config
 from ..data.repositories import get_repositories
+from .errors import internal_error_envelope, internal_http_error
 
 logger = logging.getLogger(__name__)
 
@@ -466,9 +467,18 @@ async def list_review_queue(
             "page_size": page_size,
             "total_pages": total_pages,
         }
-    except Exception as e:
-        logger.error("Failed to list review queue: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.review_queue.list",
+            code="review_queue_unavailable",
+            message=(
+                "The review queue could not be read. Retry in a few seconds; if it keeps failing, the ingestion "
+                "pipeline needs a look."
+            ),
+        ) from exc
 
 
 @router.get("/review/{item_id}")
@@ -531,9 +541,18 @@ async def get_review_detail(item_id: int):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Failed to get review detail: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.review_queue.get",
+            code="review_item_unreadable",
+            message=(
+                "That review item could not be read. Retry, then confirm the item is still in the review queue."
+            ),
+            log_context={"item_id": item_id},
+        ) from exc
 
 
 @router.post("/review/{item_id}/approve")
@@ -577,9 +596,19 @@ async def approve_review_item(item_id: int, request: ApproveRequest = ApproveReq
         }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Failed to approve review item: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.review_queue.approve",
+            code="review_approval_failed",
+            message=(
+                "That review item could not be approved: promoting it to the canonical layer failed, so nothing was "
+                "promoted. Retry, then check the ingestion logs."
+            ),
+            log_context={"item_id": item_id},
+        ) from exc
 
 
 @router.post("/review/{item_id}/reject")
@@ -618,9 +647,19 @@ async def reject_review_item(item_id: int, request: RejectRequest):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Failed to reject review item: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.review_queue.reject",
+            code="review_rejection_failed",
+            message=(
+                "That review item could not be rejected and its status was left unchanged. Retry, then check the "
+                "review queue."
+            ),
+            log_context={"item_id": item_id},
+        ) from exc
 
 
 @router.post("/review/{item_id}/assign")
@@ -651,9 +690,19 @@ async def assign_review_item(item_id: int, request: AssignRequest):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Failed to assign review item: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.review_queue.assign",
+            code="review_assignment_failed",
+            message=(
+                "That review item could not be assigned and no assignee was written. Retry, then check the review "
+                "queue."
+            ),
+            log_context={"item_id": item_id},
+        ) from exc
 
 
 @router.post("/review/bulk")
@@ -696,8 +745,28 @@ async def bulk_review_action(request: BulkActionRequest):
             elif request.action == "reject":
                 review_repo.update_status(item_id, "rejected", user=request.user)
                 results.append({"id": item_id, "action": "rejected", "reason": request.reason})
-        except Exception as e:
-            errors.append({"id": item_id, "error": str(e)})
+        except Exception as exc:
+            # The per-item failure is a 200 body, not an HTTPException, but it
+            # reaches the caller just the same - so it gets the same envelope
+            # and the same full log line (previously the raw exception text went
+            # to the response and nowhere else).
+            errors.append(
+                {
+                    "id": item_id,
+                    **internal_error_envelope(
+                        exc,
+                        logger=logger,
+                        operation="foundation.review_queue.bulk_item",
+                        code="item_failed",
+                        message=(
+                            "This item could not be processed; the other items in the batch were unaffected. Retry "
+                            "this one after checking the ingestion logs."
+                        ),
+                        item_id=item_id,
+                        action=request.action,
+                    ),
+                },
+            )
 
     return {
         "success": len(errors) == 0,
@@ -770,9 +839,17 @@ async def get_pipeline_stats():
             stats["cost_summary"] = {"total_cost": 0.0, "by_task": {}, "by_model": {}, "daily": []}
 
         return stats
-    except Exception as e:
-        logger.error("Failed to get pipeline stats: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.stats",
+            code="stats_unavailable",
+            message=(
+                "Pipeline statistics are unavailable right now. Retry in a few seconds."
+            ),
+        ) from exc
 
 
 @router.get("/costs/summary")
@@ -812,9 +889,17 @@ async def get_cost_summary(
                 "budget": monthly_budget,
             },
         }
-    except Exception as e:
-        logger.error("Failed to get cost summary: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.costs.summary",
+            code="cost_summary_unavailable",
+            message=(
+                "The cost summary is unavailable right now. Retry in a few seconds."
+            ),
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -852,9 +937,18 @@ async def analyze_corpus(request: CorpusAnalysisRequest):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Corpus analysis failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.analyze.corpus",
+            code="analysis_failed",
+            message=(
+                "Corpus analysis could not be completed. Retry with a shorter text - a very long input is the usual "
+                "cause."
+            ),
+        ) from exc
 
 
 @router.post("/analyze/phonology")
@@ -895,9 +989,17 @@ async def analyze_phonology(request: PhonologyAnalysisRequest):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Phonological analysis failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.analyze.phonology",
+            code="analysis_failed",
+            message=(
+                "Phonological analysis could not be completed. Check the word is a single Zolai word, then retry."
+            ),
+        ) from exc
 
 
 @router.post("/analyze/morphology")
@@ -930,9 +1032,17 @@ async def analyze_morphology(request: MorphologyAnalysisRequest):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Morphological analysis failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.analyze.morphology",
+            code="analysis_failed",
+            message=(
+                "Morphological analysis could not be completed. Check the word is a single Zolai word, then retry."
+            ),
+        ) from exc
 
 
 @router.post("/translate/enhanced")
@@ -968,9 +1078,18 @@ async def translate_enhanced(request: EnhancedTranslationRequest):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Enhanced translation failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.translate.enhanced",
+            code="translation_failed",
+            message=(
+                "Translation could not be completed. Check the text and that direction is 'auto', 'zo-en' or 'en-zo', "
+                "then retry."
+            ),
+        ) from exc
 
 
 @router.post("/progress/adaptive-difficulty")
@@ -989,9 +1108,18 @@ async def get_adaptive_difficulty(request: AdaptiveDifficultyRequest):
         result = tracker.get_adaptive_difficulty(user_id=user_id)
 
         return result
-    except Exception as e:
-        logger.error("Adaptive difficulty computation failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.progress.adaptive_difficulty",
+            code="difficulty_computation_failed",
+            message=(
+                "Adaptive difficulty could not be computed for this learner. Retry, or omit user_id to use the "
+                "default profile."
+            ),
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1025,9 +1153,17 @@ async def search_ranked(request: RankedSearchRequest):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Ranked search failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.search.ranked",
+            code="search_failed",
+            message=(
+                "Ranked search could not be completed. Retry, or narrow the query and lower limit."
+            ),
+        ) from exc
 
 
 @router.post("/search/cross-lingual")
@@ -1065,9 +1201,17 @@ async def search_cross_lingual(request: CrossLingualSearchRequest):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Cross-lingual search failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.search.cross_lingual",
+            code="search_failed",
+            message=(
+                "Cross-lingual search could not be completed. Retry, or lower limit."
+            ),
+        ) from exc
 
 
 @router.post("/search/topical")
@@ -1096,9 +1240,17 @@ async def search_topical(request: TopicalSearchRequest):
         }
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Topical search failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.search.topical",
+            code="search_failed",
+            message=(
+                "Topical Bible search could not be completed. Retry, or lower limit."
+            ),
+        ) from exc
 
 
 @router.get("/search/analytics")
@@ -1117,9 +1269,17 @@ async def get_search_analytics():
             "analytics": analytics,
             "total_queries": sum(a.get("count", 0) for a in analytics),
         }
-    except Exception as e:
-        logger.error("Get search analytics failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.search.analytics",
+            code="analytics_unavailable",
+            message=(
+                "Search analytics are unavailable right now. Retry in a few seconds."
+            ),
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1146,9 +1306,18 @@ async def validate_structure(request: StructureValidationRequest):
         return result
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Structure validation failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.grammar.validate_structure",
+            code="validation_failed",
+            message=(
+                "Sentence structure validation could not be completed. Retry; a very long or unusual sentence is the "
+                "usual cause."
+            ),
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1177,9 +1346,18 @@ async def disambiguate_translation(request: DisambiguationRequest):
         return result
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Disambiguation failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.translation.disambiguate",
+            code="disambiguation_failed",
+            message=(
+                "Word disambiguation could not be completed. Check the word is a single dictionary headword, then "
+                "retry."
+            ),
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1199,9 +1377,17 @@ async def get_user_streak(user_id: str, streak_type: str = "daily"):
         result = tracker.get_streak(user_id=user_id, streak_type=streak_type)
 
         return result
-    except Exception as e:
-        logger.error("Get streak failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.progress.streak",
+            code="streak_unavailable",
+            message=(
+                "The learning streak could not be read. Retry in a few seconds."
+            ),
+        ) from exc
 
 
 @router.post("/progress/error-categorize")
@@ -1225,9 +1411,17 @@ async def categorize_error(request: ErrorCategorizationRequest):
         return result
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error("Error categorization failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.progress.error_categorize",
+            code="categorization_failed",
+            message=(
+                "That correction could not be categorised. Send a shorter original/corrected pair and retry."
+            ),
+        ) from exc
 
 
 @router.get("/progress/error-breakdown/{user_id}")
@@ -1243,9 +1437,17 @@ async def get_error_breakdown(user_id: str):
         result = tracker.get_error_breakdown(user_id=user_id)
 
         return result
-    except Exception as e:
-        logger.error("Get error breakdown failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=500,
+            operation="foundation.progress.error_breakdown",
+            code="error_breakdown_failed",
+            message=(
+                "The error breakdown could not be read. Retry in a few seconds."
+            ),
+        ) from exc
 
 
 # ---------------------------------------------------------------------------

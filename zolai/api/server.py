@@ -27,10 +27,13 @@ from ..api.auth_middleware import ApiKeyMiddleware
 from ..api.auth_session_router import router as auth_session_router
 from ..api.bible_alias_router import router as bible_alias_router
 from ..api.desktop_router import router as desktop_router
+from ..api.errors import internal_http_error
 from ..api.foundation_router import router as foundation_router
 from ..api.jsonl_router import router as jsonl_router
 from ..api.lexicon_router import router as lexicon_router
 from ..api.linguistics_router import router as linguistics_router
+from ..api.mcp_router import root_router as mcp_root_router
+from ..api.mcp_router import router as mcp_router
 from ..api.metrics_router import router as metrics_router
 from ..api.providers_router import router as providers_router
 from ..api.rag_router import router as rag_router
@@ -484,6 +487,14 @@ def create_app() -> FastAPI:
     app.include_router(admin_assistant_router)
     # Notifications admin endpoints — strict settings:* scope.
     app.include_router(notifications_router)
+    # MCP tool surface — POST /api/v1/mcp (public route, strict anonymous
+    # bucket; tool scope derived server-side from the caller's key). Same rule
+    # as every other /api/v1 router: registered BEFORE the catch-all below.
+    app.include_router(mcp_router)
+    # Bare POST /mcp — the alias the public MCP host proxies
+    # (mcp.zolai.space -> core :8001/mcp). Same handler, same public route
+    # declaration, same anonymous bucket; also before the catch-all.
+    app.include_router(mcp_root_router)
 
     # --- Static File Serving for Desktop App ---
     from fastapi.responses import FileResponse
@@ -634,8 +645,17 @@ def create_app() -> FastAPI:
             results = engine.crawl_seed(req.seed)
             await manager.broadcast({"event": "crawl_complete", "pages": len(results)})
             return CrawlResponse(status="ok", pages_crawled=len(results), seed=req.seed)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as exc:
+            raise internal_http_error(
+                exc,
+                logger=logger,
+                status_code=500,
+                operation="server.crawl",
+                code="crawl_failed",
+                message=(
+                    "The crawl could not be run. Check that seed is a reachable URL, then retry."
+                ),
+            ) from exc
 
     # --- Cleaner ---
 
@@ -651,8 +671,17 @@ def create_app() -> FastAPI:
                 sentences_cleaned=result.get("sentences", 0),
                 output_path=str(config.paths.data_cleaned),
             )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as exc:
+            raise internal_http_error(
+                exc,
+                logger=logger,
+                status_code=500,
+                operation="server.clean",
+                code="clean_failed",
+                message=(
+                    "The cleaning pipeline could not be run. Retry once the corpus directory is readable."
+                ),
+            ) from exc
 
     # --- Analyzer ---
 
@@ -662,8 +691,17 @@ def create_app() -> FastAPI:
             analyzer = CorpusAnalyzer()
             stats = analyzer.full_stats()
             return AnalyzeResponse(status="ok", stats=stats)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as exc:
+            raise internal_http_error(
+                exc,
+                logger=logger,
+                status_code=500,
+                operation="server.analyze",
+                code="analysis_failed",
+                message=(
+                    "Corpus analysis could not be completed. Retry once the corpus is loaded."
+                ),
+            ) from exc
 
     @app.get("/stats")
     async def quick_stats():
@@ -671,8 +709,17 @@ def create_app() -> FastAPI:
         try:
             analyzer = CorpusAnalyzer()
             stats = analyzer.full_stats()
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
+        except Exception as exc:
+            raise internal_http_error(
+                exc,
+                logger=logger,
+                status_code=500,
+                operation="server.stats",
+                code="stats_unavailable",
+                message=(
+                    "Corpus statistics are unavailable right now. Retry in a few seconds."
+                ),
+            ) from exc
         # CorpusAnalyzer signals "no corpus loaded" with a soft-error dict; that is
         # a service-availability problem, not a successful stats response.
         if isinstance(stats, dict) and stats.get("error"):
@@ -688,8 +735,18 @@ def create_app() -> FastAPI:
             result = builder.build_splits(val_ratio=req.val_ratio, test_ratio=req.test_ratio, seed=req.seed)
             await manager.broadcast({"event": "splits_built", "result": result})
             return TrainResponse(status="ok", splits=result)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        except Exception as exc:
+            raise internal_http_error(
+                exc,
+                logger=logger,
+                status_code=500,
+                operation="server.train.splits",
+                code="split_build_failed",
+                message=(
+                    "The dataset splits could not be built. Check that val_ratio and test_ratio leave room for a "
+                    "training split, then retry."
+                ),
+            ) from exc
 
     # --- Dictionary ---
 
@@ -756,8 +813,18 @@ def create_app() -> FastAPI:
                         "example": entry.get("example", ""),
                     })
                 return DictSearchResponse(status="ok", results=results)
-            except Exception as e2:
-                raise HTTPException(status_code=500, detail=str(e2))
+            except Exception as exc:
+                raise internal_http_error(
+                    exc,
+                    logger=logger,
+                    status_code=500,
+                    operation="server.dictionary.search",
+                    code="dictionary_search_failed",
+                    message=(
+                        "The dictionary lookup could not be completed. Retry with a shorter query."
+                    ),
+                    log_context={"query": req.query},
+                ) from exc
 
     # --- Bible ---
 

@@ -97,6 +97,14 @@ PUBLIC_ROUTES: tuple[tuple[str | None, str], ...] = (
     # (mcp.zolai.space -> :8001/mcp) proxies are the same handler.
     ("POST", "/api/v1/mcp"),
     ("POST", "/mcp"),
+    # The transport's method probes are public too: a client asks ``GET`` to
+    # learn whether this is a streamable-HTTP server, and it must get the
+    # binding's ``405`` rather than an ``enforce``-mode ``401`` that hides the
+    # answer.  Neither route reads or writes anything.
+    ("GET", "/api/v1/mcp"),
+    ("DELETE", "/api/v1/mcp"),
+    ("GET", "/mcp"),
+    ("DELETE", "/mcp"),
     # Anonymous Studio reads (plan §B table).
     ("GET", "/api/v1/search"),
     ("POST", "/api/v1/search"),

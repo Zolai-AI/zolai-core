@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import subprocess
 import uuid
 from pathlib import Path
@@ -10,6 +11,10 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+from .errors import internal_http_error
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["pipeline"])
 
@@ -275,5 +280,15 @@ async def translate(req: TranslateRequest):
             resp.raise_for_status()
             data = resp.json()
         return {"translation": (data.get("text") or "").strip(), "direction": req.direction}
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Translation service unavailable: {e}")
+    except Exception as exc:
+        raise internal_http_error(
+            exc,
+            logger=logger,
+            status_code=503,
+            operation="pipeline.translate",
+            code="translation_unavailable",
+            message=(
+                "The translation service is unavailable right now. Retry in a few seconds; if it keeps failing, check "
+                "that the translation provider is configured and reachable."
+            ),
+        ) from exc

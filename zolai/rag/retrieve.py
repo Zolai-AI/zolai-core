@@ -143,6 +143,18 @@ class UnifiedRetriever:
                     log.warning(
                         "sentence-transformers unavailable; vector search disabled: %s", exc
                     )
+            except Exception as exc:
+                # Cached but unusable -- an incomplete download, a model/config
+                # mismatch, a corrupt blob.  This raises something other than
+                # OSError (an unfinished cache produced ``TypeError: Pooling
+                # .__init__() missing ... embedding_dimension``), and it used to
+                # escape this guard and fail the whole tool call.  A download
+                # would not repair a local artifact and would break the
+                # ``network=False`` contract, so degrade to lexical search and
+                # say so instead of failing the caller.
+                log.warning(
+                    "cached sentence-transformer is unusable; vector search disabled: %s", exc
+                )
         return self._embedder
 
     # --- Word-centric retrieval (§20) ---

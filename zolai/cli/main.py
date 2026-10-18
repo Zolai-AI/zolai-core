@@ -17,6 +17,7 @@ from ..dictionary.manager import DictionaryManager
 from .discovery import discovery_app
 from .incremental import app as incremental_app
 from .knowledge import app as knowledge_app
+from .mcp import mcp_app
 from .observation import observation_app
 from .profile import app as profile_app
 from .publish import app as publish_app
@@ -36,6 +37,9 @@ app.add_typer(observation_app, name="observation")
 
 # P3 — agent runtime (run | list | show)
 app.add_typer(agent_app, name="agent")
+
+# MCP surface — generated tool landing page (landing)
+app.add_typer(mcp_app, name="mcp")
 
 # Phase 3 §36 — discovery engine (build)
 app.add_typer(discovery_app, name="discovery")

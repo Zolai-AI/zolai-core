@@ -17,14 +17,13 @@ from typing import Any
 from sqlalchemy import text as sa_text
 
 from ...rag.retrieve import UnifiedRetriever
-from .registry import get_tool
-from .types import ToolCall, ToolResult
+from .errors import classify_failure
+from .family import assert_handlers_cover_specs
+from .foundation import FOUNDATION_HANDLERS
+from .registry import SPECS, get_tool
+from .types import ToolCall, ToolError, ToolErrorCode, ToolResult
 
 logger = logging.getLogger(__name__)
-
-
-class ToolError(Exception):
-    """Handler-level failure surfaced as an error result (never raised out)."""
 
 
 def _retriever() -> UnifiedRetriever:
@@ -129,7 +128,11 @@ def _dictionary_lookup(inp: dict[str, Any]) -> Any:
                     {"w": f"{word}%"},
                 ).fetchall()
         except Exception as exc:  # missing table/DB in fresh stores
-            raise ToolError(f"dictionary lookup unavailable: {exc}") from exc
+            logger.warning("dictionary lookup failed", exc_info=exc)
+            raise ToolError(
+                "The dictionary is unavailable right now. Please try again.",
+                ToolErrorCode.UNAVAILABLE,
+            ) from exc
     return [
         {"zolai": r[0], "english": r[1], "pos": r[2]}
         for r in rows
@@ -148,10 +151,81 @@ def _verse_lookup(inp: dict[str, Any]) -> Any:
                 {"ref": ref},
             ).fetchone()
         except Exception as exc:
-            raise ToolError(f"verse lookup unavailable: {exc}") from exc
+            logger.warning("verse lookup failed", exc_info=exc)
+            raise ToolError(
+                "The verse index is unavailable right now. Please try again.",
+                ToolErrorCode.UNAVAILABLE,
+            ) from exc
     if row is None:
         return {"ref": ref, "found": False}
     return {"ref": row[0], "en": row[1], "zo": row[2], "found": True}
+
+
+# ── Myanmar / Burmese lookups (public) ───────────────────────────────────────
+#
+# The same three in-process calls the legacy ``/dictionary/search/my``,
+# ``/dictionary/translate/zo-my`` and ``/dictionary/translate/my-zo`` routes
+# make (``get_manager().lookup_myanmar`` / ``translate_zo_my`` / ``translate_my_zo``).
+# Names are frozen to the retired Cloudflare Worker's tool names.  A miss is
+# reported as ``found: False`` with a note — never an invented translation.
+
+
+def _db():
+    from ...data.database import get_manager
+
+    return get_manager()
+
+
+def _search_myanmar_dictionary(inp: dict[str, Any]) -> Any:
+    query = _require_str(inp, "query")
+    limit = _opt_int(inp, "limit", 10)
+    try:
+        results = _db().lookup_myanmar(query, limit=limit)
+    except Exception as exc:
+        logger.warning("myanmar dictionary lookup failed", exc_info=exc)
+        raise ToolError(
+            "The Myanmar dictionary is unavailable right now. Please try again.",
+            ToolErrorCode.UNAVAILABLE,
+        ) from exc
+    return {"query": query, "results": results, "count": len(results)}
+
+
+def _translate_zo_to_myanmar(inp: dict[str, Any]) -> Any:
+    word = _require_str(inp, "word")
+    try:
+        result = _db().translate_zo_my(word)
+    except Exception as exc:
+        logger.warning("myanmar translation failed", exc_info=exc)
+        raise ToolError(
+            "The Myanmar dictionary is unavailable right now. Please try again.",
+            ToolErrorCode.UNAVAILABLE,
+        ) from exc
+    if not result:
+        return {
+            "word": word,
+            "found": False,
+            "note": f"No Myanmar translation for '{word}' in the dictionary.",
+        }
+    return {"word": word, "found": True, **result}
+
+
+def _translate_myanmar_to_zo(inp: dict[str, Any]) -> Any:
+    word = _require_str(inp, "word")
+    try:
+        result = _db().translate_my_zo(word)
+    except Exception as exc:
+        logger.warning("myanmar translation failed", exc_info=exc)
+        raise ToolError(
+            "The Myanmar dictionary is unavailable right now. Please try again.",
+            ToolErrorCode.UNAVAILABLE,
+        ) from exc
+    if not result:
+        return {
+            "word": word,
+            "found": False,
+            "note": f"No Zolai entry for the Myanmar word '{word}' in the dictionary.",
+        }
+    return {"word": word, "found": True, **result}
 
 
 # ── Admin handlers (read/proposal surfaces — never a canonical write) ────────
@@ -240,7 +314,10 @@ def _web_search(inp: dict[str, Any]) -> Any:
         with DDGS() as ddgs:
             hits = list(ddgs.text(query, max_results=_opt_int(inp, "limit", 5)))
     except Exception as exc:
-        raise ToolError(f"web_search failed: {exc}") from exc
+        logger.warning("web_search failed", exc_info=exc)
+        raise ToolError(
+            "Web search failed; please try again.", ToolErrorCode.UNAVAILABLE
+        ) from exc
     return [
         {"title": h.get("title"), "url": h.get("href") or h.get("url"), "snippet": h.get("body")}
         for h in hits
@@ -256,12 +333,23 @@ HANDLERS = {
     "grammar_check": _grammar_check,
     "dictionary_lookup": _dictionary_lookup,
     "verse_lookup": _verse_lookup,
+    "search_myanmar_dictionary": _search_myanmar_dictionary,
+    "translate_zo_to_myanmar": _translate_zo_to_myanmar,
+    "translate_myanmar_to_zo": _translate_myanmar_to_zo,
     "knowledge_stats": _knowledge_stats,
     "kb_research": _kb_research,
     "review_queue_submit": _review_queue_submit,
     "provider_status": _provider_status,
     "web_search": _web_search,
+    # The generated ``foundation_*`` family (one handler per typed
+    # /api/v1/foundation contract — zolai/agent/tools/foundation.py).
+    **FOUNDATION_HANDLERS,
 }
+
+# Import-time: a published tool with no handler would be advertised and then
+# error on every call, and a handler with no tool is code no client can reach.
+# This module is the only place both tables are visible at once.
+assert_handlers_cover_specs(SPECS, HANDLERS, subject="tool registry")
 
 
 def execute_tool(
@@ -294,22 +382,47 @@ def execute_tool(
                 tool_name=name,
                 ok=False,
                 error=f"tool {name!r} is not allowed for this caller",
+                error_code=ToolErrorCode.FORBIDDEN,
                 turn=resolved_turn,
             )
         )
     handler = HANDLERS.get(name)
     if handler is None:
         return _done(
-            ToolResult(tool_name=name, ok=False, error=f"tool {name!r} has no handler", turn=resolved_turn)
+            ToolResult(
+                tool_name=name,
+                ok=False,
+                error=f"tool {name!r} has no handler",
+                error_code=ToolErrorCode.INTERNAL,
+                turn=resolved_turn,
+            )
         )
     try:
         data = handler(call.input or {})
     except ToolError as exc:
-        return _done(ToolResult(tool_name=name, ok=False, error=str(exc), turn=resolved_turn))
-    except Exception as exc:
-        logger.warning("tool %s failed: %s", name, exc)
         return _done(
-            ToolResult(tool_name=name, ok=False, error=f"{type(exc).__name__}: {exc}", turn=resolved_turn)
+            ToolResult(
+                tool_name=name,
+                ok=False,
+                error=str(exc),
+                error_code=exc.code,
+                turn=resolved_turn,
+            )
+        )
+    except Exception as exc:
+        # The raw exception belongs in the log, never on the wire: the caller
+        # gets a typed code and a human sentence (zolai/agent/tools/errors.py).
+        # ``exc_info`` keeps the traceback an operator needs.
+        logger.warning("tool %s failed", name, exc_info=exc)
+        failure = classify_failure(exc)
+        return _done(
+            ToolResult(
+                tool_name=name,
+                ok=False,
+                error=failure.message,
+                error_code=failure.code,
+                turn=resolved_turn,
+            )
         )
     return _done(
         ToolResult(tool_name=name, ok=True, data=data, turn=resolved_turn, call_id=call.call_id)
