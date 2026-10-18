@@ -25,6 +25,7 @@ from ..api.assistant_router import admin_router as admin_assistant_router
 from ..api.assistant_router import public_router as assistant_router
 from ..api.auth_middleware import ApiKeyMiddleware
 from ..api.auth_session_router import router as auth_session_router
+from ..api.bible_alias_router import router as bible_alias_router
 from ..api.desktop_router import router as desktop_router
 from ..api.foundation_router import router as foundation_router
 from ..api.jsonl_router import router as jsonl_router
@@ -431,6 +432,10 @@ def create_app() -> FastAPI:
     # app.include_router(jsonl_router)
     for route in jsonl_router.routes:
         app.router.routes.append(route)
+    # Versioned /api/v1/bible/* aliases. Same handler callables and the same
+    # ``dataset:read`` dependency as their /desktop/bible/* counterparts — the
+    # desktop routes are untouched. MUST be registered BEFORE the catch-all.
+    app.include_router(bible_alias_router)
     # Foundation Review Queue API
     app.include_router(foundation_router, prefix="/api/v1")
     # API-key admin (issue/list/rotate/revoke) — scope-gated, plaintext once

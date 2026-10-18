@@ -180,6 +180,16 @@ MEMBER_PREFIXES: tuple[str, ...] = (
     # ``/api/v1``, so the entire ``/desktop`` prefix had never been declared and
     # classify_route() returned "unclassified" for all 51 of them.
     "/desktop",
+    # ``/api/v1/bible/*`` is the **versioned alias** of ``/desktop/bible/*``
+    # (``zolai/api/bible_alias_router.py`` re-registers the same handler
+    # callables behind the same ``dataset:read`` dependency). Declaring it here
+    # is a bookkeeping statement, not a scope widening: the middleware already
+    # gated every ``/api/v1`` path, the alias router already required
+    # ``dataset:read``, and these 8 routes did not exist before this line.
+    # Without a declaration ``classify_route`` returns ``unclassified`` and the
+    # completeness guard in tests/test_rbac_public_matrix.py fails — "unclassified"
+    # is documented above as a bug, not a fourth class.
+    "/api/v1/bible",
 )
 
 #: Strict admin surface (401 anon in warn *and* enforce + scope-gated).
