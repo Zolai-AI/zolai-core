@@ -12,7 +12,7 @@ import logging
 import re
 import sqlite3
 
-from .zvs_checker import ZVSComplianceChecker
+from .zvs_strict import check_response as zvs_check_response
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,6 @@ class AnswerValidator:
             db_path: Path to zolai.db.
         """
         self.db_path = db_path
-        self._zvs_checker = ZVSComplianceChecker()
 
     async def validate(self, answer: str) -> dict:
         """
@@ -46,8 +45,9 @@ class AnswerValidator:
         corrections: list[str] = []
         confidence_impact = 0.0
 
-        # 1. ZVS compliance check
-        zvs_result = self._zvs_checker.check_response(answer)
+        # 1. ZVS compliance check — STRICT authority (zolai.zvs.validate,
+        # no historical-token suppression for AI answers; see zvs_strict.py).
+        zvs_result = zvs_check_response(answer)
         zvs_violations = zvs_result["violations"]
         if zvs_violations:
             confidence_impact -= 0.2 * len(zvs_violations)
