@@ -18,6 +18,8 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .errors import internal_error_envelope
+
 logger = logging.getLogger("zolai.desktop_app")
 
 # ---------------------------------------------------------------------------
@@ -172,7 +174,17 @@ def create_desktop_app() -> FastAPI:
                 ]
             }
         except Exception as e:
-            return {"plugins": [], "error": str(e)}
+            # Same {"plugins": [...], "error": <text>} shape as the success
+            # path minus the list; only the message value changes. Raw
+            # exception + traceback go to the log (zolai/api/errors.py).
+            detail = internal_error_envelope(
+                e,
+                logger=logger,
+                operation="desktop.plugins.list",
+                code="plugins_unavailable",
+                message="Plugins could not be listed. Check the server log for details.",
+            )
+            return {"plugins": [], "error": detail["message"]}
 
     # --- Provider endpoints ---
 

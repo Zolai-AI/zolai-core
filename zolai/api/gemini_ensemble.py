@@ -73,7 +73,15 @@ class GeminiEnsemble:
             except asyncio.TimeoutError:
                 errors[model] = "timeout"
             except Exception as e:
-                errors[model] = str(e)
+                # Raw exception + traceback to the log (with type context);
+                # `errors` is log-only, but never store text a future route
+                # could echo into a 200 body — keep a stable value instead.
+                logger.warning(
+                    "Ensemble model %s failed: %s: %s",
+                    model, type(e).__name__, e,
+                    exc_info=True,
+                )
+                errors[model] = "failed"
             logger.warning("Ensemble model %s failed: %s", model, errors.get(model, "unknown"))
 
         # Dispatch with staggered delays

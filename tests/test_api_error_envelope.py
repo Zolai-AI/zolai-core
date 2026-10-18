@@ -8,8 +8,21 @@ inside a ``detail={...}`` literal) hands the caller SQL, filesystem paths,
 driver internals and tracebacks. Several of the routes below are **public**,
 so an anonymous caller was reading them.
 
+The same leak has a second envelope: a handler that catches, logs nothing,
+and returns ``{"error": str(e)}`` inside an otherwise ordinary **200** body.
+``body_leaking_sites`` scans for that shape — exception text (or a subprocess
+``stderr``, which in the common case *is* a traceback) reaching a ``return``
+value, a response constructor (``JSONResponse`` / ``jsonable_encoder`` / …),
+a dict/list value written from a handler (``jobs[id]["error"] = str(e)``),
+or a container mutation (``errors.append(str(e))``). Status codes and
+response *shapes* are part of the callers' contract, so the fix at every site
+was to keep the shape and swap only the message value.
+
 The scan is an AST walk over ``zolai/api/*.py`` — not a grep — so a renamed
-variable or a nested ``detail`` literal is caught too.
+variable or a nested ``detail`` literal is caught too. Exception bindings are
+resolved **per enclosing function**, so a processed ``HTTPException.detail``
+echo (server.py's exception handler, whose ``exc`` is a parameter rather than
+a handler binding) is not a false positive.
 
 ``ALLOWLIST``
 -------------
@@ -19,7 +32,9 @@ itself: a string literal, or the caller's own identifier. Each entry records
 :func:`test_allowlist_entries_are_still_present`, that its source line still
 carries the documented code — so deleting or retyping a handler surfaces here
 instead of silently inheriting an exemption. Do not widen it: a new entry must
-name a raise site inside this repository and say which one.
+name a raise site inside this repository and say which one. One entry
+(``legacy_gemini_chat_error``) is a **known, deliberately deferred leak** in
+``server.py`` and is documented as such, not as "safe".
 
 Behavioural coverage (:func:`test_*` below) proves the envelope on real
 requests: the response keeps its status code and gains a human-readable
@@ -39,6 +54,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from zolai.api.desktop_router import router as desktop_router
 from zolai.api.errors import api_error, internal_error_envelope, internal_http_error
 from zolai.api.foundation_router import router as foundation_router
 
@@ -126,6 +142,22 @@ ALLOWLIST: tuple[AllowlistEntry, ...] = (
             "`raise ValueError(\"No feedback signals available for training\")` — a literal."
         ),
     ),
+    AllowlistEntry(
+        path="server.py",
+        code="legacy_gemini_chat_error",
+        marker='zolai_response=f"Gemini error: {str(e)}"',
+        reason=(
+            "KNOWN LEAK, DELIBERATELY DEFERRED (2026-10-18): the legacy POST /chat/gemini "
+            "handler returns the raw exception text inside a 200 ZolaiChatResponse "
+            "(zolai/api/server.py, `except Exception as e:` above the return). server.py is "
+            "shared — 3 pre-existing I001 errors plus another session's MCP hunks — and the "
+            "standing directive for this pass is to not touch it, so this one site is the "
+            "reported follow-up rather than a silent exemption. The marker pins the exact "
+            "expression: if the handler is fixed, this entry stops matching exactly one "
+            "violation and `test_allowlist_entries_are_still_present` fails, forcing the "
+            "entry's deletion."
+        ),
+    ),
 )
 
 
@@ -208,6 +240,172 @@ def _exempt(path: Path, snippet: str) -> AllowlistEntry | None:
     return None
 
 
+# ── the 200-body scan ────────────────────────────────────────────────────
+#
+# Same defect, different envelope: the handler keeps HTTP 200 and the
+# response *shape* callers depend on, but the message value is the raw
+# exception (``{"error": str(e)}``), a stored write that a status endpoint
+# later echoes (``jobs[id]["error"] = str(e)``), or a container mutation
+# (``errors.append(str(e))``).
+
+#: Exception types whose ``str()``/detail is a *processed* envelope, not raw
+#: text — echoing one is not this defect.
+_BODY_RESERVED = frozenset({"HTTPException"})
+
+#: Constructors that serialise straight into a response body.
+_RESPONSE_CTORS = frozenset(
+    {"JSONResponse", "PlainTextResponse", "HTMLResponse", "RedirectResponse", "Response", "jsonable_encoder"}
+)
+
+#: Container-mutation methods that park exception text where a later
+#: ``return`` can pick it up without ever naming the exception.
+_MUTATORS = frozenset({"append", "extend", "update", "add"})
+
+
+def _parent_map(tree: ast.AST) -> dict[ast.AST, ast.AST]:
+    parents: dict[ast.AST, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+    return parents
+
+
+def _enclosing_scope(node: ast.AST, parents: dict[ast.AST, ast.AST], tree: ast.AST) -> ast.AST:
+    """The innermost function containing ``node`` (the module as fallback)."""
+    current = node
+    while current in parents:
+        current = parents[current]
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return current
+    return tree
+
+
+def _scope_bindings(scope: ast.AST, tree: ast.AST) -> set[str]:
+    """``except ... as name`` bindings visible inside ``scope``.
+
+    Scoped to the *enclosing function* rather than the whole module (which is
+    what the HTTPException-detail scan uses) so that an unrelated handler's
+    ``except Exception as exc`` elsewhere in a large module cannot make a
+    parameter named ``exc`` — server.py's ``http_exception_handler``, whose
+    ``content={"detail": exc.detail}`` is FastAPI's processed envelope at the
+    original error status — look like raw exception text.
+    """
+    names: set[str] = set()
+    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        statements: list[ast.AST] = list(scope.body)
+    else:
+        statements = [tree]
+    for statement in statements:
+        for node in ast.walk(statement):
+            if isinstance(node, ast.ExceptHandler) and node.name:
+                type_node = node.type
+                if isinstance(type_node, ast.Name) and type_node.id in _BODY_RESERVED:
+                    continue
+                if isinstance(type_node, ast.Tuple) and any(
+                    isinstance(item, ast.Name) and item.id in _BODY_RESERVED
+                    for item in type_node.elts
+                ):
+                    continue
+                names.add(node.name)
+    return names
+
+
+def _unit_reasons(unit: ast.AST, names: set[str]) -> list[str]:
+    """Why this body value carries exception text, or ``[]`` when clean.
+
+    Deep checks — ``str(exc)``, an f-string, ``exc.args``-style access, a
+    subprocess ``stderr`` — run over the whole value; a *bare* exception name
+    counts only in an actual value position (the value itself, or a dict/list
+    element), so ``isinstance(exc, ProviderError)`` inside a conditional never
+    trips it.
+    """
+    reasons: set[str] = set()
+    for child in ast.walk(unit):
+        if isinstance(child, ast.Call) and isinstance(child.func, ast.Name) and child.func.id == "str":
+            if child.args and isinstance(child.args[0], ast.Name) and child.args[0].id in names:
+                reasons.add("str(exception)")
+            elif any(isinstance(arg, ast.Starred) for arg in child.args):
+                reasons.add("str(*args)")
+        elif isinstance(child, ast.JoinedStr):
+            for item in ast.walk(child):
+                if isinstance(item, ast.FormattedValue):
+                    inner = item.value
+                    if isinstance(inner, ast.Name) and inner.id in names:
+                        reasons.add("f-string interpolates the handler's exception name")
+                    elif (
+                        isinstance(inner, ast.Call)
+                        and isinstance(inner.func, ast.Name)
+                        and inner.func.id == "str"
+                        and inner.args
+                        and isinstance(inner.args[0], ast.Name)
+                        and inner.args[0].id in names
+                    ):
+                        reasons.add("f-string interpolates str(exception)")
+        elif isinstance(child, ast.Attribute):
+            if child.attr == "stderr":
+                # A failed script's stderr *is* a traceback, path and all.
+                reasons.add("subprocess stderr (a traceback in the common case)")
+            elif isinstance(child.value, ast.Name) and child.value.id in names:
+                # exc.args / exc.with_traceback — attribute access on the
+                # exception object itself is the raw message by another route.
+                reasons.add("attribute access on the exception object")
+        if isinstance(child, (ast.Dict, ast.List, ast.Set, ast.Tuple)):
+            elements = child.values if isinstance(child, ast.Dict) else child.elts
+            for element in elements:
+                if isinstance(element, ast.Name) and element.id in names:
+                    reasons.add("bare exception name as a dict/list value")
+    if isinstance(unit, ast.Name) and unit.id in names:
+        reasons.add("bare exception name as the value")
+    return sorted(reasons)
+
+
+def body_leaking_sites(path: Path) -> list[tuple[int, str, str]]:
+    """``(lineno, reason, snippet)`` for every 200-body value carrying exc text.
+
+    ``snippet`` is the whitespace-normalised source of the whole statement
+    (return / assignment / mutation / constructor call), so an allowlist
+    marker can pin the exact code it was granted for.
+    """
+    source = path.read_text()
+    tree = ast.parse(source)
+    parents = _parent_map(tree)
+    scope_cache: dict[ast.AST, set[str]] = {}
+    hits: list[tuple[int, str, str]] = []
+
+    def record(statement: ast.AST, unit: ast.AST, prefix: str) -> None:
+        scope = _enclosing_scope(unit, parents, tree)
+        if scope not in scope_cache:
+            scope_cache[scope] = _scope_bindings(scope, tree)
+        # Not short-circuiting on an empty binding set: the stderr rule must
+        # fire even in a function that never binds an exception name — a
+        # script's stderr reaches the body on its own merits.
+        names = scope_cache[scope]
+        snippet = " ".join((ast.get_source_segment(source, statement) or "").split())
+        for reason in _unit_reasons(unit, names):
+            hits.append((statement.lineno, f"{prefix}{reason}", snippet))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Return) and node.value is not None:
+            record(node, node.value, "body=")
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, (ast.Subscript, ast.Attribute)):
+                    record(node, node.value, "write=")
+                    break
+        elif isinstance(node, ast.AugAssign) and isinstance(node.target, (ast.Subscript, ast.Attribute)):
+            record(node, node.value, "write=")
+        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            call = node.value
+            func = call.func
+            if isinstance(func, ast.Attribute) and func.attr in _MUTATORS:
+                for arg in call.args:
+                    record(node, arg, "mutate=")
+            elif isinstance(func, ast.Name) and func.id in _RESPONSE_CTORS:
+                for arg in list(call.args) + [kw.value for kw in call.keywords]:
+                    record(node, arg, f"{func.id}():")
+    return sorted(set(hits))
+
+
 def test_no_raw_exception_text_in_http_exception_detail() -> None:
     """Fail on any raw exception text reaching an HTTPException detail."""
     violations: list[str] = []
@@ -218,17 +416,83 @@ def test_no_raw_exception_text_in_http_exception_detail() -> None:
     assert not violations, "raw exception text reaches a response:\n" + "\n".join(violations)
 
 
+def test_no_raw_exception_text_in_200_body() -> None:
+    """Fail on raw exception text reaching a 200-body value anywhere in ``zolai/api``.
+
+    This is the desktop-surface defect: ``{"error": str(e)}`` (or a stored
+    write / container mutation feeding one) inside an ordinary ``200`` —
+    same leak as the HTTPException-detail scan, different envelope.
+    """
+    violations: list[str] = []
+    for path in sorted(API_DIR.glob("*.py")):
+        for lineno, reason, snippet in body_leaking_sites(path):
+            if _exempt(path, snippet) is None:
+                violations.append(f"{path.name}:{lineno}: {reason}")
+    assert not violations, "raw exception text reaches a 200 body:\n" + "\n".join(violations)
+
+
+def test_body_scan_catches_the_pre_change_pattern(tmp_path: Path) -> None:
+    """Non-vacuity of the 200-body scan — it flags the code that shipped before the fix.
+
+    The three forms are the ones actually found in ``desktop_router.py`` /
+    ``pipeline.py`` (a dict-return, a stored write, a subprocess stderr); a
+    scan that could not see these would pass vacuously on any source.
+    """
+    source = '''async def db_query(sql: str):
+    """Routes a caller's SQL."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        return {"columns": [d[0] for d in cur.description], "count": 1}
+    except Exception as e:
+        return {"error": str(e)}
+
+async def job_status(job_id: str):
+    try:
+        run_job(job_id)
+    except Exception as e:
+        jobs[job_id]["error"] = str(e)
+    return {"job_id": job_id}
+
+def run_script(name: str):
+    r = subprocess.run([name], capture_output=True, text=True)
+    if r.returncode != 0:
+        return {"error": f"Script failed: {r.stderr[:500]}"}
+    return {"ok": True}
+'''
+    scan_target = tmp_path / "synthetic_router.py"
+    scan_target.write_text(source)
+    hits = body_leaking_sites(scan_target)
+    reasons = {reason for _, reason, _ in hits}
+    assert len(hits) == 3, f"expected exactly the 3 planted leaks, got: {hits}"
+    assert any(r.startswith("body=") and "str(exception)" in r for r in reasons), reasons
+    assert any(r.startswith("write=") and "str(exception)" in r for r in reasons), reasons
+    assert any("subprocess stderr" in r for r in reasons), reasons
+    # and the exemption lookup must not rescue an unlisted file
+    assert all(_exempt(scan_target, snippet) is None for _, _, snippet in hits)
+
+
 def test_allowlist_entries_are_still_present() -> None:
-    """Every exemption must still cover exactly one real violation."""
+    """Every exemption must still cover exactly one real violation.
+
+    Both scans are consulted: an entry granted against an HTTPException
+    ``detail`` must keep covering one detail violation, and one granted
+    against a 200 body must keep covering one body violation — if the code
+    behind it is fixed (or duplicated), the count leaves 1 and this fails,
+    forcing the entry's re-review.
+    """
     unused: list[str] = []
     for entry in ALLOWLIST:
         path = API_DIR / entry.path
         if not path.is_file():
             unused.append(f"{entry.path}: file no longer exists")
             continue
-        matched = [
-            lineno for lineno, _, snippet in leaking_sites(path) if entry.marker in snippet
-        ]
+        matched = sorted({
+            lineno
+            for scan in (leaking_sites(path), body_leaking_sites(path))
+            for lineno, _, snippet in scan
+            if entry.marker in snippet
+        })
         if len(matched) != 1:
             unused.append(
                 f"{entry.path} [{entry.code}]: {len(matched)} matching site(s) for marker "
@@ -471,3 +735,276 @@ def test_bad_input_is_still_400(client: TestClient, one_pending: None) -> None:
     response = client.post("/api/v1/foundation/search/cross-lingual", json={"query": "x", "source_lang": "fr"})
     assert response.status_code == 400
     assert response.json()["detail"] == "source_lang must be 'en' or 'zo'"
+
+
+# ── the desktop surface: 200 bodies converted in place ───────────────────
+
+
+@pytest.fixture()
+def desktop_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """``/desktop`` routes only — no database, no lifespan, no migrations.
+
+    ``ZOLAI_API_AUTH`` is pinned to ``warn`` so this file still passes when
+    another suite flips it: the desktop router's ``require_scope`` reads the
+    mode per request, and warn is the default dual-accept posture.
+    """
+    monkeypatch.setenv("ZOLAI_API_AUTH", "warn")
+    application = FastAPI()
+    application.include_router(desktop_router)  # prefix already /desktop
+    # Deliberately NOT a context manager: entering it would run the lifespan.
+    return TestClient(application, raise_server_exceptions=False)
+
+
+def _boom_get_db(*_args: Any, **_kwargs: Any) -> Any:
+    raise RuntimeError(LEAKY)
+
+
+@pytest.mark.parametrize(
+    ("path", "operation", "message"),
+    [
+        (
+            "/desktop/tables",
+            "desktop.db_tables",
+            "The table list could not be read. Retry in a few seconds.",
+        ),
+        (
+            "/desktop/dict/stats",
+            "desktop.dict_stats",
+            "Dictionary statistics could not be read. Retry in a few seconds.",
+        ),
+        (
+            "/desktop/bible/books",
+            "desktop.bible_books",
+            "The Bible book list could not be read. Retry in a few seconds.",
+        ),
+    ],
+)
+def test_desktop_200_error_hides_the_exception_but_logs_it(
+    path: str,
+    operation: str,
+    message: str,
+    desktop_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Converted handlers keep HTTP 200 and the single-key ``error`` shape."""
+    monkeypatch.setattr("zolai.api.desktop_router.get_db", _boom_get_db)
+
+    with caplog.at_level(logging.ERROR):
+        response = desktop_client.get(path)
+
+    # status and shape: the response is still 200 with exactly {"error": <text>}
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"error"}
+    assert body["error"] == message
+
+    # the message carries no exception text, SQL, path or traceback
+    text = response.text
+    assert LEAKY not in text
+    assert "SELECT" not in text
+    assert "no such column" not in text
+    assert "zolai.db" not in text
+    assert "/srv/zolai" not in text
+    assert "Traceback" not in text
+    assert "RuntimeError" not in text
+
+    # the operator keeps the whole truth: raw text + traceback + operation
+    assert LEAKY in caplog.text
+    assert "Traceback" in caplog.text
+    assert operation in caplog.text
+
+
+def test_desktop_script_failure_hides_the_exception_but_logs_it(
+    desktop_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """``run_script``'s generic handler — the shared path behind ~30 routes."""
+    monkeypatch.setattr(
+        "zolai.api.desktop_router.resolve_script", lambda name: Path("/tmp/fake.py")
+    )
+
+    def _raise(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError(LEAKY)
+
+    monkeypatch.setattr("zolai.api.desktop_router.subprocess.run", _raise)
+
+    with caplog.at_level(logging.ERROR):
+        response = desktop_client.get("/desktop/dict/non-zolai")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"error"}
+    assert body["error"] == (
+        "The check_non_zolai.py script could not be run. Check the server log for details."
+    )
+    assert LEAKY not in response.text
+    assert "Traceback" not in response.text
+
+    assert LEAKY in caplog.text
+    assert "Traceback" in caplog.text
+    assert "desktop.run_script" in caplog.text
+    # the script name reaches the log as a structured context field (never echoed)
+    assert any(
+        getattr(record, "script", None) == "check_non_zolai.py"
+        for record in caplog.records
+    )
+
+
+def test_desktop_script_stderr_is_logged_not_returned(
+    desktop_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failed script's stderr *is* a traceback — it goes to the log whole."""
+    monkeypatch.setattr(
+        "zolai.api.desktop_router.resolve_script", lambda name: Path("/tmp/fake.py")
+    )
+    raw_stderr = (
+        "Traceback (most recent call last):\n"
+        '  File "/srv/zolai/scripts/check_non_zolai.py", line 4, in <module>\n'
+        "sqlite3.OperationalError: no such table: dictionary\n"
+    )
+    monkeypatch.setattr(
+        "zolai.api.desktop_router.subprocess.run",
+        lambda *_a, **_k: types.SimpleNamespace(returncode=1, stderr=raw_stderr, stdout=""),
+    )
+
+    with caplog.at_level(logging.ERROR):
+        response = desktop_client.get("/desktop/dict/non-zolai")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {"error"}
+    assert body["error"] == (
+        "The check_non_zolai.py script failed. Check the server log for details."
+    )
+    assert "Traceback" not in response.text
+    assert "/srv/zolai" not in response.text
+    assert "sqlite3" not in response.text
+
+    assert raw_stderr in caplog.text
+    assert "desktop.run_script" in caplog.text
+
+
+# ── success payloads are byte-identical to the pre-change code ───────────
+#
+# The conversion touched only ``except`` branches; these three endpoints
+# assert the exact pre-change JSON so any accidental success-path drift fails.
+
+
+class _FakeCursor:
+    """Canned rows for one endpoint — no database anywhere near the test."""
+
+    def __init__(self, *, fetchall_seq: tuple = (), fetchone_seq: tuple = ()) -> None:
+        self.description = None
+        self._fetchall = list(fetchall_seq)
+        self._fetchone = list(fetchone_seq)
+        self._fa = 0
+        self._fo = 0
+
+    def execute(self, *_args: Any, **_kwargs: Any) -> _FakeCursor:
+        return self
+
+    def fetchall(self) -> list:
+        rows = self._fetchall[self._fa] if self._fa < len(self._fetchall) else []
+        self._fa += 1
+        return rows
+
+    def fetchone(self) -> Any:
+        row = self._fetchone[self._fo]
+        self._fo += 1
+        return row
+
+    def close(self) -> None:
+        pass
+
+
+class _FakeConn:
+    def __init__(self, cursor: _FakeCursor) -> None:
+        self._cursor = cursor
+
+    def cursor(self) -> _FakeCursor:
+        return self._cursor
+
+    def close(self) -> None:
+        pass
+
+
+@pytest.mark.parametrize(
+    ("path", "cursor", "expected"),
+    [
+        (
+            "/desktop/tables",
+            _FakeCursor(
+                fetchall_seq=[(("dictionary",), ("bible_verses",))],
+                fetchone_seq=[(10,), (10,)],
+            ),
+            {
+                "tables": [
+                    {"table": "dictionary", "rows": 10},
+                    {"table": "bible_verses", "rows": 10},
+                ],
+                "total": 2,
+            },
+        ),
+        (
+            "/desktop/dict/stats",
+            _FakeCursor(
+                fetchall_seq=[(("noun", 60), ("verb", 40))],
+                fetchone_seq=[(100,), (50,), (90,)],
+            ),
+            {
+                "total": 100,
+                "with_myanmar": 50,
+                "with_english": 90,
+                "pos_breakdown": {"noun": 60, "verb": 40},
+            },
+        ),
+        (
+            "/desktop/bible/books",
+            _FakeCursor(
+                fetchall_seq=[
+                    (
+                        ("GEN", "Genesis", 31, 1, 50),
+                        ("EXO", "Exodus", 40, 1, 40),
+                    )
+                ],
+            ),
+            {
+                "books": [
+                    {
+                        "abbr": "GEN",
+                        "name": "Genesis",
+                        "verses": 31,
+                        "min_chapter": 1,
+                        "max_chapter": 50,
+                    },
+                    {
+                        "abbr": "EXO",
+                        "name": "Exodus",
+                        "verses": 40,
+                        "min_chapter": 1,
+                        "max_chapter": 40,
+                    },
+                ],
+                "total": 2,
+            },
+        ),
+    ],
+)
+def test_desktop_success_payloads_unchanged(
+    path: str,
+    cursor: _FakeCursor,
+    expected: dict[str, Any],
+    desktop_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exact pre-change payloads — status, keys and values, not just "no error"."""
+    monkeypatch.setattr(
+        "zolai.api.desktop_router.get_db", lambda: _FakeConn(cursor)
+    )
+    response = desktop_client.get(path)
+    assert response.status_code == 200
+    assert response.json() == expected

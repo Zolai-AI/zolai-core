@@ -19,6 +19,8 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from .errors import internal_error_envelope
+
 logger = logging.getLogger(__name__)
 
 
@@ -82,8 +84,22 @@ class ZomiDailyLearningEngine:
             conn.commit()
 
         except Exception as e:
-            report.errors.append(str(e))
-            logger.error("Learning failed: %s", e)
+            # `report.errors` is printed by the CLI entry point: keep the
+            # list, swap only the message value; raw exception + traceback
+            # go to the log via internal_error_envelope (zolai/api/errors.py)
+            # — same logger as the old "Learning failed" line, now with the
+            # traceback attached.
+            detail = internal_error_envelope(
+                e,
+                logger=logger,
+                operation="zomidaily.learn",
+                code="learning_run_failed",
+                message=(
+                    "The learning run did not finish; results may be partial. "
+                    "Check the server log for details."
+                ),
+            )
+            report.errors.append(detail["message"])
         finally:
             conn.close()
 
