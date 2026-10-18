@@ -1,6 +1,11 @@
 # PLAN: MCP Layer inside `zolai-core` + Core Contract Hardening — PLAN_READY
 
-- **Status:** PLANNED — phased / multi-wave implementation, nothing written yet
+- **Status:** SURFACE SHIPPED & CUT OVER (2026-10-18) — the transport, the one-canonical-definition
+  registry, the cross-client handshake and the typed failure taxonomy are implemented, deployed
+  (core `88ce003` on pcore-server) and serving: `mcp.zolai.space` and `api.zolai.space/mcp` are both
+  answered by zolai-core, and `scripts/verify-mcp-cutover.sh` reports **14 PASS · 0 FAIL · 0
+  PENDING**. The wave list below is retained as the design record; a wave with no evidence in the
+  repository or in that verifier's output is still open.
 - **Repo:** `zolai-core` (single repo; Python 3.14, FastAPI, ruff, pytest)
 - **Date:** 2026-10-18
 - **Supersedes:** the earlier `zolai-mcp-server` (Cloudflare Worker) rewrite plan — **cancelled, out of scope**
