@@ -397,11 +397,11 @@ class TestScopeField:
         )
 
     def test_allow_list_for_record_reuses_the_one_role_resolver(self) -> None:
-        from zolai.api.rbac import ADMIN_SCOPES
         from zolai.agent.tools.registry import (
             allow_list_for_record,
             tool_tier_for_record,
         )
+        from zolai.api.rbac import ADMIN_SCOPES
 
         assert tool_tier_for_record(None) == "public"
         assert allow_list_for_record(None) == allow_list("public")
