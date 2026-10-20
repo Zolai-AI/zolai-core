@@ -18,7 +18,7 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
@@ -192,7 +192,12 @@ def oauth_db(tmp_path, monkeypatch) -> Iterator["DatabaseManager"]:
     """A temp SQLite store — **never** the live 2.4 GB ``data/zolai.db``."""
     mgr = DatabaseManager(f"sqlite:///{tmp_path / 'oauth.db'}")
     mgr.init_db()
+    from zolai.api import auth as api_auth
+    from zolai.data.migrations import create_api_keys_table
+
+    create_api_keys_table(mgr)
     monkeypatch.setattr(oauth, "_get_manager", lambda: mgr)
+    monkeypatch.setattr(api_auth, "_get_manager", lambda: mgr)
     oauth.ensure_oauth_tables()
     yield mgr
     mgr.dispose()
@@ -671,3 +676,578 @@ class TestAuthorizeEndpoint:
         response = client.post("/oauth/authorize", json={"client_id": "x"})
         assert response.status_code == 415
         assert response.json()["error"] == "unsupported_media_type"
+
+
+# ---------------------------------------------------------------------------
+# RFC 6749 §3.2 / §5 — token endpoint + access-token resolution
+# ---------------------------------------------------------------------------
+
+
+def _authorize_and_get_code(
+    client: TestClient, registered: dict, *, username: str = "founder"
+) -> tuple[str, str]:
+    """Full browser step: login + consent → the 302 carries the code.
+
+    Returns ``(code, code_verifier)`` — the verifier is the fixed PKCE
+    vector every test in this module uses.
+    """
+    from urllib.parse import parse_qs, urlsplit
+
+    query = _authorize_query(
+        registered["client_id"], registered["redirect_uris"][0]
+    )
+    flat = {k: v[0] for k, v in parse_qs(query).items()}
+    flat["username"] = username
+    flat["password"] = "correct horse battery staple"
+    response = client.post(
+        "/oauth/authorize",
+        data=flat,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302, response.text
+    code = parse_qs(urlsplit(response.headers["location"]).query)["code"][0]
+    return code, _PKCE_VECTOR_VERIFIER
+
+
+def _exchange_code(
+    client: TestClient, registered: dict, code: str, verifier: str
+) -> Any:
+    form: dict[str, str] = {
+        "grant_type": "authorization_code",
+        "client_id": registered["client_id"],
+        "redirect_uri": registered["redirect_uris"][0],
+        "code": code,
+        "code_verifier": verifier,
+    }
+    if registered.get("client_secret"):
+        form["client_secret"] = registered["client_secret"]
+    return client.post(
+        "/oauth/token",
+        data=form,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+
+
+class TestTokenEndpoint:
+    def test_full_round_trip_grants_a_narrowed_bearer_principal(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+    ) -> None:
+        """register → authorize → token → Bearer resolves, tier = role's."""
+        from zolai.api import rbac
+
+        code, verifier = _authorize_and_get_code(client, registered)
+        response = _exchange_code(client, registered, code, verifier)
+        assert response.status_code == 200, response.text
+        assert response.headers["cache-control"] == "no-store"
+        body = response.json()
+        assert body["token_type"] == "Bearer"
+        assert body["expires_in"] == oauth.access_ttl_seconds()
+        assert body["access_token"].startswith(oauth.ACCESS_TOKEN_PREFIX)
+        assert body["refresh_token"].startswith(oauth.REFRESH_TOKEN_PREFIX)
+        assert sorted(body["scope"].split()) == sorted(session_auth.ADMIN_SCOPES)
+
+        # The Bearer token resolves to a principal whose tier is the *user's*
+        # role via the existing rbac — admin here, because founder is admin.
+        record = oauth.resolve_access_token(body["access_token"])
+        assert record is not None
+        assert record["auth_source"] == "oauth"
+        assert record["username"] == "founder"
+        assert record["user_id"] == user_db["id"]
+        assert record["client_id"] == registered["client_id"]
+        assert sorted(record["scopes"]) == sorted(session_auth.ADMIN_SCOPES)
+        assert rbac.role_for(record) == "admin"
+
+    def test_grant_only_narrows_never_widens(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A member's token resolves to member scope — no admin vocabulary."""
+        from zolai.api import rbac
+
+        session_auth.set_user_role("founder", role="member", actor="test")
+        code, verifier = _authorize_and_get_code(client, registered)
+        response = _exchange_code(client, registered, code, verifier)
+        assert response.status_code == 200, response.text
+        scopes = response.json()["scope"].split()
+        assert scopes
+        # Member scopes ⊂ admin scopes (admin is the superset); the grant is
+        # exactly the member vocabulary — no admin-exclusive scope leaked.
+        admin_exclusive = set(session_auth.ADMIN_SCOPES) - set(
+            session_auth.MEMBER_SCOPES
+        )
+        assert not (set(scopes) & admin_exclusive)
+        assert set(scopes) <= set(session_auth.MEMBER_SCOPES)
+        record = oauth.resolve_access_token(response.json()["access_token"])
+        assert record is not None
+        assert rbac.role_for(record) == "member"
+
+    def test_plaintext_tokens_never_reach_the_database(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+        tmp_path: Any,
+    ) -> None:
+        code, verifier = _authorize_and_get_code(client, registered)
+        body = _exchange_code(client, registered, code, verifier).json()
+        with oauth_db.engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT access_token_hash, refresh_token_hash FROM oauth_tokens")
+            ).all()
+        assert len(rows) == 1
+        assert rows[0][0] == oauth.hash_token(body["access_token"])
+        assert rows[0][1] == oauth.hash_token(body["refresh_token"])
+        for path in tmp_path.iterdir():
+            blob = path.read_bytes()
+            assert body["access_token"].encode() not in blob, path.name
+            assert body["refresh_token"].encode() not in blob, path.name
+
+    def test_code_is_single_use_at_the_token_endpoint(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+    ) -> None:
+        code, verifier = _authorize_and_get_code(client, registered)
+        first = _exchange_code(client, registered, code, verifier)
+        assert first.status_code == 200, first.text
+        second = _exchange_code(client, registered, code, verifier)
+        assert second.status_code == 400
+        assert second.json()["error"] == "invalid_grant"
+        assert second.headers["cache-control"] == "no-store"
+
+    @pytest.mark.parametrize(
+        "field, value, needle",
+        [
+            ("code", "zolai_ac_bogus", "invalid_grant"),
+            ("code_verifier", "B" * 43, "invalid_grant"),  # wrong PKCE verifier
+            ("redirect_uri", "https://other.example/cb", "invalid_grant"),
+            ("code", "", "invalid_grant"),
+        ],
+    )
+    def test_every_code_failure_is_one_invalid_grant(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+        field: str,
+        value: str,
+        needle: str,
+    ) -> None:
+        code, verifier = _authorize_and_get_code(client, registered)
+        form = {
+            "grant_type": "authorization_code",
+            "client_id": registered["client_id"],
+            "client_secret": registered["client_secret"],
+            "redirect_uri": registered["redirect_uris"][0],
+            "code": code,
+            "code_verifier": verifier,
+            field: value,
+        }
+        response = client.post(
+            "/oauth/token",
+            data=form,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert response.status_code == 400, response.text
+        payload = response.json()
+        assert payload["error"] == needle
+        # The wire never reveals which check failed.
+        assert set(payload) == {"error", "error_description"}
+
+    def test_refresh_rotates_and_replays_are_refused(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+    ) -> None:
+        code, verifier = _authorize_and_get_code(client, registered)
+        first = _exchange_code(client, registered, code, verifier).json()
+
+        def _refresh(token: str) -> Any:
+            return client.post(
+                "/oauth/token",
+                data={
+                    "grant_type": "refresh_token",
+                    "client_id": registered["client_id"],
+                    "client_secret": registered["client_secret"],
+                    "refresh_token": token,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+
+        rotated = _refresh(first["refresh_token"])
+        assert rotated.status_code == 200, rotated.text
+        new = rotated.json()
+        assert new["access_token"] != first["access_token"]
+        assert new["refresh_token"] != first["refresh_token"]
+        assert new["token_type"] == "Bearer"
+
+        # Rotation revoked the old row: its access token dies with it, and the
+        # old refresh token cannot be replayed (single invalid_grant).
+        assert oauth.resolve_access_token(first["access_token"]) is None
+        replay = _refresh(first["refresh_token"])
+        assert replay.status_code == 400
+        assert replay.json()["error"] == "invalid_grant"
+        # The rotated pair works.
+        assert oauth.resolve_access_token(new["access_token"]) is not None
+
+    def test_refresh_token_of_another_client_is_invalid_grant(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+    ) -> None:
+        code, verifier = _authorize_and_get_code(client, registered)
+        tokens = _exchange_code(client, registered, code, verifier).json()
+        other = client.post(
+            "/oauth/register",
+            json={
+                "client_name": "Other Connector",
+                "redirect_uris": ["https://other.example/cb"],
+            },
+        ).json()
+        response = client.post(
+            "/oauth/token",
+            data={
+                "grant_type": "refresh_token",
+                "client_id": other["client_id"],
+                "client_secret": other["client_secret"],
+                "refresh_token": tokens["refresh_token"],
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert response.status_code == 400
+        assert response.json()["error"] == "invalid_grant"
+
+    def test_unsupported_grant_type_is_named(
+        self, client: TestClient, oauth_db: DatabaseManager, registered: dict
+    ) -> None:
+        response = client.post(
+            "/oauth/token",
+            data={
+                "grant_type": "password",
+                "client_id": registered["client_id"],
+                "client_secret": registered["client_secret"],
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert response.status_code == 400
+        assert response.json()["error"] == "unsupported_grant_type"
+
+    def test_client_auth_method_confusion_is_refused(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+    ) -> None:
+        """A public client cannot present a secret; secretless != confidential."""
+        import base64
+
+        public = client.post(
+            "/oauth/register",
+            json={
+                "client_name": "Public Connector",
+                "redirect_uris": ["https://pub.example/cb"],
+                "token_endpoint_auth_method": "none",
+            },
+        ).json()
+        assert "client_secret" not in public
+        code, verifier = _authorize_and_get_code(client, public)
+        # Presenting a fabricated Basic credential must not authenticate a
+        # client registered as token_endpoint_auth_method=none.
+        basic = base64.b64encode(
+            f"{public['client_id']}:zolai_cs_fabricated".encode()
+        ).decode()
+        response = client.post(
+            "/oauth/token",
+            data={
+                "grant_type": "authorization_code",
+                "redirect_uri": public["redirect_uris"][0],
+                "code": code,
+                "code_verifier": verifier,
+            },
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Authorization": f"Basic {basic}",
+            },
+        )
+        assert response.status_code == 401
+        assert response.json()["error"] == "invalid_client"
+
+    def test_confidential_client_authenticates_via_basic(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+    ) -> None:
+        import base64
+        from urllib.parse import quote
+
+        registered = client.post(
+            "/oauth/register",
+            json={
+                "client_name": "Confidential Connector",
+                "redirect_uris": ["https://conf.example/cb"],
+                "token_endpoint_auth_method": "client_secret_basic",
+            },
+        ).json()
+        secret = registered["client_secret"]
+        assert secret.startswith(oauth.CLIENT_SECRET_PREFIX)
+
+        code, verifier = _authorize_and_get_code(client, registered)
+        # RFC 6749 §2.3.1: id and secret are form-urlencoded before base64.
+        cred = base64.b64encode(
+            f"{quote(registered['client_id'], safe='')}:"
+            f"{quote(secret, safe='')}".encode()
+        ).decode()
+        response = client.post(
+            "/oauth/token",
+            data={
+                "grant_type": "authorization_code",
+                "redirect_uri": registered["redirect_uris"][0],
+                "code": code,
+                "code_verifier": verifier,
+            },
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Authorization": f"Basic {cred}",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["access_token"].startswith(oauth.ACCESS_TOKEN_PREFIX)
+
+        # Wrong secret for the same client → invalid_client, never a token.
+        bad = base64.b64encode(
+            f"{registered['client_id']}:{oauth.CLIENT_SECRET_PREFIX}wrong".encode()
+        ).decode()
+        denied = client.post(
+            "/oauth/token",
+            data={"grant_type": "refresh_token", "refresh_token": "zolai_rt_x"},
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Authorization": f"Basic {bad}",
+            },
+        )
+        assert denied.status_code == 401
+        assert denied.json()["error"] == "invalid_client"
+
+    def test_token_requires_urlencoded_form(
+        self, client: TestClient, oauth_db: DatabaseManager
+    ) -> None:
+        response = client.post("/oauth/token", json={"grant_type": "authorization_code"})
+        assert response.status_code == 415
+        assert response.json()["error"] == "unsupported_media_type"
+
+    def test_disabled_user_loses_every_oauth_grant(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+    ) -> None:
+        """The identity layer stays the kill switch — no second one."""
+        code, verifier = _authorize_and_get_code(client, registered)
+        tokens = _exchange_code(client, registered, code, verifier).json()
+        assert oauth.resolve_access_token(tokens["access_token"]) is not None
+
+        session_auth.set_user_enabled("founder", enabled=False, actor="test")
+        assert oauth.resolve_access_token(tokens["access_token"]) is None
+
+        session_auth.set_user_enabled("founder", enabled=True, actor="test")
+        assert oauth.resolve_access_token(tokens["access_token"]) is not None
+
+    def test_expired_or_revoked_access_token_resolves_to_none(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+    ) -> None:
+        code, verifier = _authorize_and_get_code(client, registered)
+        tokens = _exchange_code(client, registered, code, verifier).json()
+        with oauth_db.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE oauth_tokens SET access_expires_at = '2000-01-01 00:00:00' "
+                    "WHERE access_token_hash = :h"
+                ),
+                {"h": oauth.hash_token(tokens["access_token"])},
+            )
+        assert oauth.resolve_access_token(tokens["access_token"]) is None
+
+        with oauth_db.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE oauth_tokens SET access_expires_at = :future, "
+                    "revoked_at = :now WHERE access_token_hash = :h"
+                ),
+                {
+                    "future": oauth._now_plus(3600),
+                    "now": oauth._stamp(),
+                    "h": oauth.hash_token(tokens["access_token"]),
+                },
+            )
+        assert oauth.resolve_access_token(tokens["access_token"]) is None
+        # A foreign prefix is never a credential here.
+        assert oauth.resolve_access_token("zolai_ss_something") is None
+        assert oauth.resolve_access_token(None) is None
+
+    def test_resolve_updates_last_used_and_is_prefix_disciplined(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+    ) -> None:
+        code, verifier = _authorize_and_get_code(client, registered)
+        tokens = _exchange_code(client, registered, code, verifier).json()
+        record = oauth.resolve_access_token(tokens["access_token"])
+        assert record is not None
+        with oauth_db.engine.connect() as conn:
+            last_used = conn.execute(
+                text("SELECT last_used_at FROM oauth_tokens"),
+            ).scalar()
+        assert last_used is not None
+        # Key/display prefix discipline: never enough to reconstruct.
+        assert record["key_prefix"] == tokens["access_token"][:16]
+
+
+class TestMiddlewareBearerPath:
+    """The middleware edit: ``Bearer zolai_at_*`` → principal + narrowed tier."""
+
+    @pytest.fixture()
+    def guarded_client(
+        self, oauth_db: DatabaseManager, monkeypatch: pytest.MonkeyPatch
+    ) -> TestClient:
+        """One lifespan-free app: OAuth routes (ungated passthrough) + a
+        gated probe route behind ``ApiKeyMiddleware`` in **enforce** mode, so
+        the tier is actually enforced (warn would dual-accept and hide a
+        broken resolve)."""
+        from zolai.api.auth_middleware import ApiKeyMiddleware
+
+        monkeypatch.setenv("ZOLAI_API_AUTH", "enforce")
+        application = FastAPI()
+        application.include_router(oauth_router.router)
+        application.add_middleware(ApiKeyMiddleware)
+
+        @application.get("/api/v1/records/probe")
+        def _probe(request: Request) -> dict[str, Any]:
+            record = getattr(request.state, "api_key", None)
+            oauth_state = getattr(request.state, "oauth", None)
+            return {
+                "authenticated": record is not None,
+                "scopes": list((record or {}).get("scopes") or []),
+                "auth_source": (record or {}).get("auth_source"),
+                "oauth_identity": oauth_state,
+                "has_session_state": hasattr(request.state, "session"),
+            }
+
+        client = TestClient(application)
+        reset_rate_limiter()
+        yield client
+        reset_rate_limiter()
+
+    def test_bearer_access_token_resolves_through_the_middleware(
+        self,
+        guarded_client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+    ) -> None:
+        code, verifier = _authorize_and_get_code(guarded_client, registered)
+        tokens = _exchange_code(guarded_client, registered, code, verifier).json()
+
+        response = guarded_client.get(
+            "/api/v1/records/probe",
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["authenticated"] is True
+        assert body["auth_source"] == "oauth"
+        assert sorted(body["scopes"]) == sorted(session_auth.ADMIN_SCOPES)
+        assert body["oauth_identity"] == {
+            "user_id": user_db["id"],
+            "username": "founder",
+            "client_id": registered["client_id"],
+        }
+        # An OAuth grant is NOT a session: logout must never see one.
+        assert body["has_session_state"] is False
+
+    def test_expired_grant_falls_through_to_the_401_path(
+        self,
+        guarded_client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+    ) -> None:
+        code, verifier = _authorize_and_get_code(guarded_client, registered)
+        tokens = _exchange_code(guarded_client, registered, code, verifier).json()
+        with oauth_db.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE oauth_tokens SET access_expires_at = '2000-01-01 00:00:00' "
+                    "WHERE access_token_hash = :h"
+                ),
+                {"h": oauth.hash_token(tokens["access_token"])},
+            )
+        response = guarded_client.get(
+            "/api/v1/records/probe",
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        # Enforce: an unresolvable zolai_at_* is an ordinary missing key.
+        assert response.status_code == 401
+        assert response.json()["detail"]["error"] == "unauthorized"
+
+    def test_an_api_key_still_takes_the_unchanged_key_path(
+        self,
+        guarded_client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+    ) -> None:
+        """Regression: the OAuth branch must not shadow the key path."""
+        from zolai.api import auth as api_auth
+
+        plaintext = api_auth.generate_api_key()
+        with oauth_db.engine.begin() as conn:
+            from zolai.api.auth import hash_key
+
+            conn.execute(
+                text(
+                    "INSERT INTO api_keys (name, key_prefix, key_hash, scopes, "
+                    " created_by) VALUES (:n, :p, :h, :s, 0)"
+                ),
+                {
+                    "n": "probe-key",
+                    "p": plaintext[:16],
+                    "h": hash_key(plaintext),
+                    "s": '["dataset:read"]',
+                },
+            )
+        api_auth.invalidate_key_cache()
+        response = guarded_client.get(
+            "/api/v1/records/probe",
+            headers={"X-API-Key": plaintext},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["auth_source"] is None  # key path, not oauth
+        assert body["scopes"] == ["dataset:read"]
+        assert body["oauth_identity"] is None

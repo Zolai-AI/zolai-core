@@ -268,6 +268,22 @@ class ApiKeyMiddleware:
             return None
         return session_auth.resolve_session(token)
 
+    @staticmethod
+    def _resolve_oauth(token: str | None) -> dict[str, Any] | None:
+        """Resolve a ``zolai_at_*`` OAuth access token, or ``None``.
+
+        The prefix check runs *before* the import so the hot path (API keys,
+        sessions) never loads the authorization-server module; the literal
+        mirrors :data:`zolai.auth.oauth.ACCESS_TOKEN_PREFIX` and
+        :func:`~zolai.auth.oauth.resolve_access_token` re-checks it
+        authoritatively.
+        """
+        if not token or not token.startswith("zolai_at_"):
+            return None
+        from ..auth import oauth as oauth_as
+
+        return oauth_as.resolve_access_token(token)
+
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope.get("type") != "http":
             await self.app(scope, receive, send)
@@ -334,6 +350,59 @@ class ApiKeyMiddleware:
                     await send(message)
 
                 await self.app(scope, receive, send_session_wrapper)
+                return
+
+            # OAuth 2.1 access tokens (``zolai_at_*``): the MCP-connector
+            # credential. Resolved only after the key and session paths (a
+            # value that is neither a ``zolai_sk_`` key nor a ``zolai_ss_``
+            # session can only be an OAuth grant), published in the same
+            # ``state["api_key"]`` shape so ``require_scope`` / ``role_for``
+            # work unchanged. ``state["session"]`` is deliberately NOT set:
+            # an OAuth grant has no session to revoke or refresh, and
+            # ``POST /api/v1/auth/logout`` must never touch one.
+            oauth_record = await run_in_threadpool(self._resolve_oauth, token)
+            if oauth_record is not None:
+                state = scope.setdefault("state", {})
+                state["api_key"] = {
+                    "id": oauth_record.get("id"),
+                    "name": oauth_record.get("name"),
+                    "key_prefix": oauth_record.get("key_prefix"),
+                    "scopes": oauth_record.get("scopes") or [],
+                    "auth_source": oauth_record.get("auth_source"),
+                }
+                state["oauth"] = {
+                    "user_id": oauth_record.get("user_id"),
+                    "username": oauth_record.get("username"),
+                    "client_id": oauth_record.get("client_id"),
+                }
+
+                capacity = auth.api_rate_limit_rpm()
+                allowed, remaining, reset, retry_after = await run_in_threadpool(
+                    limiter.hit, f"oauth:{oauth_record.get('id')}", capacity
+                )
+                rate_headers = _rate_headers(capacity, remaining, reset)
+                if not allowed:
+                    await _send_json(
+                        send,
+                        429,
+                        {
+                            "detail": {
+                                "error": "rate_limited",
+                                "limit_rpm": capacity,
+                                "retry_after_s": retry_after,
+                            }
+                        },
+                        rate_headers + [(b"retry-after", str(retry_after).encode("ascii"))],
+                    )
+                    return
+
+                async def send_oauth_wrapper(message: Any) -> None:
+                    if message.get("type") == "http.response.start":
+                        existing = list(message.get("headers") or [])
+                        message["headers"] = existing + rate_headers
+                    await send(message)
+
+                await self.app(scope, receive, send_oauth_wrapper)
                 return
 
             # P2 public class: anonymous reads (and the public assistant) stay
