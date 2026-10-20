@@ -2234,6 +2234,7 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "assistant_chat_feedback_table": create_assistant_chat_feedback_table(mgr),
         "notification_tables": create_notification_tables(mgr),
         "eval_tables": create_eval_tables(mgr),
+        "oauth_tables": create_oauth_tables(mgr),
     }
 
 
@@ -2604,3 +2605,111 @@ def create_assistant_chat_feedback_table(mgr: DatabaseManager) -> dict[str, Any]
         errors.append(f"assistant_chat_feedback: {exc}")
     return {"created": created, "skipped": skipped, "errors": errors}
 
+
+# ---------------------------------------------------------------------------
+# W6 — OAuth 2.1 authorization server for the MCP endpoint (additive only).
+#
+# Three new tables; CREATE TABLE IF NOT EXISTS + CREATE INDEX IF NOT EXISTS,
+# 0 DROP / 0 RENAME / 0 ALTER of any existing table (the standing Master
+# Prompt §36 migration invariant, same shape as USERS_DDL/SESSIONS_DDL above).
+#
+# Reverse (rollback) SQL — inert until used, safe to run at any time:
+#     DROP INDEX IF EXISTS ix_oauth_tokens_user_id;
+#     DROP INDEX IF EXISTS ix_oauth_tokens_refresh;
+#     DROP INDEX IF EXISTS ix_oauth_tokens_client;
+#     DROP INDEX IF EXISTS ix_oauth_codes_client;
+#     DROP INDEX IF EXISTS ix_oauth_clients_id;
+#     DROP TABLE IF EXISTS oauth_tokens;
+#     DROP TABLE IF EXISTS oauth_authorization_codes;
+#     DROP TABLE IF EXISTS oauth_clients;
+# ---------------------------------------------------------------------------
+
+OAUTH_CLIENTS_DDL = """
+CREATE TABLE IF NOT EXISTS oauth_clients (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id TEXT NOT NULL UNIQUE,
+    client_secret_hash TEXT,
+    client_name TEXT NOT NULL,
+    redirect_uris TEXT NOT NULL DEFAULT '[]',
+    token_endpoint_auth_method TEXT NOT NULL DEFAULT 'client_secret_post',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+OAUTH_AUTHORIZATION_CODES_DDL = """
+CREATE TABLE IF NOT EXISTS oauth_authorization_codes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code_hash TEXT NOT NULL UNIQUE,
+    client_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    code_challenge TEXT NOT NULL,
+    code_challenge_method TEXT NOT NULL DEFAULT 'S256',
+    scopes TEXT NOT NULL DEFAULT '[]',
+    expires_at TEXT NOT NULL,
+    consumed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)
+"""
+
+OAUTH_TOKENS_DDL = """
+CREATE TABLE IF NOT EXISTS oauth_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    access_token_hash TEXT NOT NULL UNIQUE,
+    refresh_token_hash TEXT,
+    client_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    scopes TEXT NOT NULL DEFAULT '[]',
+    access_expires_at TEXT NOT NULL,
+    refresh_expires_at TEXT,
+    revoked_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_used_at TEXT
+)
+"""
+
+OAUTH_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_oauth_clients_name ON oauth_clients(client_name)",
+    "CREATE INDEX IF NOT EXISTS ix_oauth_codes_client ON oauth_authorization_codes(client_id)",
+    "CREATE INDEX IF NOT EXISTS ix_oauth_tokens_client ON oauth_tokens(client_id)",
+    "CREATE INDEX IF NOT EXISTS ix_oauth_tokens_user_id ON oauth_tokens(user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_oauth_tokens_refresh ON oauth_tokens(refresh_token_hash)",
+]
+
+
+def create_oauth_tables(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create the W6 OAuth tables (idempotent, additive only).
+
+    A table that already exists is reported as ``skipped`` and never rebuilt,
+    so existing rows (and any column added out of band) survive untouched.
+    Called from :func:`run_all_migrations` and, lazily, the first time
+    :mod:`zolai.auth.oauth` stores anything — so a CLI or test that never runs
+    app startup still gets its tables.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+    wanted = (
+        ("oauth_clients", OAUTH_CLIENTS_DDL),
+        ("oauth_authorization_codes", OAUTH_AUTHORIZATION_CODES_DDL),
+        ("oauth_tokens", OAUTH_TOKENS_DDL),
+    )
+    try:
+        with mgr.engine.connect() as conn:
+            for table, ddl in wanted:
+                if table in existing_tables:
+                    skipped.append(f"{table} (already exists)")
+                    continue
+                conn.execute(text(ddl))
+                created.append(table)
+            for idx_sql in OAUTH_INDEXES:
+                conn.execute(text(idx_sql))
+            conn.commit()
+    except Exception as exc:
+        errors.append(f"oauth_tables: {exc}")
+    return {"created": created, "skipped": skipped, "errors": errors}
