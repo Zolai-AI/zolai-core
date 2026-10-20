@@ -51,6 +51,7 @@ REST ``/api/v1/*`` — REST keeps its API-key/session auth untouched.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -533,3 +534,205 @@ def verify_client_secret(client: dict[str, Any], presented: str | None) -> bool:
     if not candidate:
         return False
     return secrets.compare_digest(hash_token(candidate), str(stored))
+
+
+# ---------------------------------------------------------------------------
+# PKCE (RFC 7636) — S256 mandatory, ``plain`` rejected everywhere
+# ---------------------------------------------------------------------------
+
+
+class PkceError(ValueError):
+    """A PKCE parameter violation. Messages are repo-authored literals."""
+
+
+def validate_code_challenge(
+    challenge: str | None, method: str | None
+) -> tuple[str, str]:
+    """Validate the authorize-time PKCE pair. Returns ``(challenge, "S256")``.
+
+    OAuth 2.1 makes PKCE required and confines it to ``S256``:
+
+    - missing challenge **or** missing method → error (a client must send both);
+    - ``plain`` → error (trivially forgeable — the whole point of leaving it
+      behind);
+    - any other method → error (unsupported);
+    - the challenge itself must be 43-128 unreserved characters
+      (RFC 7636 §4.2 — for S256 that is the base64url-no-pad SHA-256).
+
+    Raises:
+        PkceError: with a literal, human-readable reason.
+    """
+    clean_method = str(method or "").strip()
+    clean_challenge = str(challenge or "").strip()
+    if not clean_challenge:
+        raise PkceError("PKCE is required: code_challenge is missing")
+    if not clean_method:
+        raise PkceError("PKCE is required: code_challenge_method is missing")
+    if clean_method.lower() == "plain":
+        raise PkceError("code_challenge_method 'plain' is not accepted; use S256")
+    if clean_method.upper() != "S256":
+        raise PkceError(
+            f"unsupported code_challenge_method {clean_method!r}; only S256 is supported"
+        )
+    if not (PKCE_VERIFIER_MIN <= len(clean_challenge) <= PKCE_VERIFIER_MAX):
+        raise PkceError("code_challenge must be 43-128 characters")
+    if any(ch not in PKCE_VERIFIER_CHARSET for ch in clean_challenge):
+        raise PkceError("code_challenge contains characters outside the unreserved set")
+    return clean_challenge, "S256"
+
+
+def s256_challenge(verifier: str) -> str:
+    """``BASE64URL-NO-PAD(SHA256(verifier))`` — RFC 7636 §4.2."""
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
+def verify_code_verifier(verifier: str | None, method: str, challenge: str) -> bool:
+    """Constant-time PKCE check at the token endpoint. Never raises.
+
+    ``method`` is whatever the *code row* stored (``S256`` — anything else is
+    rejected outright, so a hand-edited row cannot downgrade to ``plain``),
+    and the verifier is length/charset-checked per RFC 7636 §4.1 first: a
+    malformed verifier fails instead of hashing to something that could match.
+    """
+    candidate = str(verifier or "")
+    if str(method or "").upper() != "S256":
+        return False
+    if not (PKCE_VERIFIER_MIN <= len(candidate) <= PKCE_VERIFIER_MAX):
+        return False
+    if any(ch not in PKCE_VERIFIER_CHARSET for ch in candidate):
+        return False
+    try:
+        computed = s256_challenge(candidate)
+    except (UnicodeEncodeError, ValueError):  # pragma: no cover - charset-checked above
+        return False
+    return secrets.compare_digest(computed, str(challenge or ""))
+
+
+# ---------------------------------------------------------------------------
+# Authorization codes — single-use, short-lived, hashed at rest
+# ---------------------------------------------------------------------------
+
+
+class AuthorizationCodeError(ValueError):
+    """Why a code exchange failed. ``reason`` is for logs, never the wire."""
+
+
+def store_authorization_code(
+    *,
+    client_id: str,
+    user_id: int,
+    redirect_uri: str,
+    code_challenge: str,
+    code_challenge_method: str,
+    scopes: list[str],
+) -> dict[str, Any]:
+    """Mint an authorization code (plaintext returned once, hash stored).
+
+    Returns ``{"code", "code_hash", "row_id", "expires_at"}``; callers must
+    forward only ``code`` (in the redirect) and keep the rest internal.
+    """
+    plaintext = AUTH_CODE_PREFIX + secrets.token_urlsafe(32)
+    code_hash = hash_token(plaintext)
+    expires_at = _now_plus(code_ttl_seconds())
+    ensure_oauth_tables()
+    with _get_manager().engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO oauth_authorization_codes "
+                "(code_hash, client_id, user_id, redirect_uri, code_challenge, "
+                " code_challenge_method, scopes, expires_at) "
+                "VALUES (:h, :cid, :uid, :uri, :challenge, :method, :scopes, :exp)"
+            ),
+            {
+                "h": code_hash,
+                "cid": str(client_id),
+                "uid": int(user_id),
+                "uri": str(redirect_uri),
+                "challenge": str(code_challenge),
+                "method": str(code_challenge_method),
+                "scopes": json.dumps(list(scopes)),
+                "exp": expires_at,
+            },
+        )
+        row = conn.execute(
+            text("SELECT id FROM oauth_authorization_codes WHERE code_hash = :h"),
+            {"h": code_hash},
+        ).first()
+    if row is None:  # pragma: no cover - defensive
+        raise AuthorizationCodeError("failed to persist the authorization code")
+    return {
+        "code": plaintext,
+        "code_hash": code_hash,
+        "row_id": int(row[0]),
+        "expires_at": expires_at,
+    }
+
+
+def consume_authorization_code(
+    *,
+    code: str | None,
+    client_id: str,
+    redirect_uri: str,
+    code_verifier: str | None,
+) -> dict[str, Any]:
+    """Validate + **consume** a code at the token endpoint (one shot).
+
+    Checks, in order: the code exists, belongs to this client, was issued for
+    exactly this ``redirect_uri``, is unexpired, is not already consumed, and
+    passes PKCE (S256, constant time). Consumption is a conditional
+    ``UPDATE ... WHERE consumed_at IS NULL`` inside one transaction, so two
+    racing exchanges of the same code cannot both win.
+
+    Returns the grant: ``{"user_id", "scopes", "client_id"}``.
+
+    Raises:
+        AuthorizationCodeError: any failure — the endpoint answers a single
+        ``invalid_grant`` for all of them (the ``reason`` never reaches the
+        wire, so a prober cannot tell "consumed" from "wrong client").
+    """
+    if not code:
+        raise AuthorizationCodeError("missing code")
+    code_hash = hash_token(str(code))
+    now = _stamp()
+    with _get_manager().engine.begin() as conn:
+        row = conn.execute(
+            text(
+                "SELECT id, client_id, user_id, redirect_uri, code_challenge, "
+                "code_challenge_method, scopes, expires_at, consumed_at "
+                "FROM oauth_authorization_codes WHERE code_hash = :h"
+            ),
+            {"h": code_hash},
+        ).first()
+        if row is None:
+            raise AuthorizationCodeError("unknown code")
+        found = dict(row._mapping)
+        if found.get("consumed_at"):
+            raise AuthorizationCodeError("code already consumed")
+        if str(found.get("expires_at") or "") <= now:
+            raise AuthorizationCodeError("code expired")
+        if str(found.get("client_id")) != str(client_id):
+            raise AuthorizationCodeError("code was issued to another client")
+        if str(found.get("redirect_uri")) != str(redirect_uri):
+            raise AuthorizationCodeError("redirect_uri mismatch")
+        if not verify_code_verifier(
+            code_verifier,
+            str(found.get("code_challenge_method") or ""),
+            str(found.get("code_challenge") or ""),
+        ):
+            raise AuthorizationCodeError("PKCE verification failed")
+        claimed = conn.execute(
+            text(
+                "UPDATE oauth_authorization_codes SET consumed_at = :now "
+                "WHERE id = :id AND consumed_at IS NULL"
+            ),
+            {"now": now, "id": int(found["id"])},
+        )
+        if int(claimed.rowcount or 0) != 1:
+            # Lost the race against a concurrent exchange of the same code.
+            raise AuthorizationCodeError("code already consumed")
+        return {
+            "user_id": int(found["user_id"]),
+            "scopes": _decode_json_list(found.get("scopes")),
+            "client_id": str(found["client_id"]),
+        }
