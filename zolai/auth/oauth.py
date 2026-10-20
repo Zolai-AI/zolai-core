@@ -54,7 +54,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
+import time
 from typing import Any
+
+from sqlalchemy import text
 
 # ── Token / identifier formats ───────────────────────────────────────────────
 #
@@ -329,3 +333,203 @@ def _now_plus(seconds: int) -> str:
     from datetime import datetime, timedelta, timezone
 
     return _stamp(datetime.now(timezone.utc) + timedelta(seconds=seconds))
+
+
+# ---------------------------------------------------------------------------
+# Dynamic client registration (RFC 7591) — ``oauth_clients`` rows
+# ---------------------------------------------------------------------------
+
+#: Redirect-URI policy: ``https`` anywhere, ``http`` **only** on loopback
+#: (RFC 8252 §7.3 — native apps and local dev servers). An authorization code
+#: is worth exactly the URI it is delivered to, so an arbitrary ``http://``
+#: receiver (cleartext, any host) is refused at registration time.
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "[::1]"})
+
+#: Bounds on registration metadata (DoS hygiene for an open endpoint).
+MAX_REDIRECT_URIS = 10
+MAX_URI_LENGTH = 2000
+MAX_CLIENT_NAME_LENGTH = 200
+
+#: Grant/response types this server implements.
+SUPPORTED_GRANT_TYPES = frozenset({"authorization_code", "refresh_token"})
+SUPPORTED_RESPONSE_TYPES = frozenset({"code"})
+SUPPORTED_AUTH_METHODS = frozenset(
+    {"client_secret_post", "client_secret_basic", "none"}
+)
+
+
+class ClientMetadataError(ValueError):
+    """Invalid RFC 7591 ``client_metadata`` (maps to ``invalid_client_metadata``)."""
+
+
+def validate_redirect_uris(uris: Any) -> list[str]:
+    """Validate + normalize ``redirect_uris`` (https, or http on loopback).
+
+    Raises:
+        ClientMetadataError: not a list, empty, too many, unparseable, a
+        fragment/userinfo-carrying URI, plain ``http`` off-loopback, or a
+        non-http(s) scheme.
+    """
+    from urllib.parse import urlsplit
+
+    if not isinstance(uris, (list, tuple)) or not uris:
+        raise ClientMetadataError("redirect_uris must be a non-empty array")
+    if len(uris) > MAX_REDIRECT_URIS:
+        raise ClientMetadataError(f"at most {MAX_REDIRECT_URIS} redirect_uris")
+    cleaned: list[str] = []
+    for raw in uris:
+        uri = str(raw or "").strip()
+        if not uri or len(uri) > MAX_URI_LENGTH:
+            raise ClientMetadataError("each redirect_uri must be a bounded non-empty URI")
+        try:
+            parts = urlsplit(uri)
+        except ValueError as exc:
+            raise ClientMetadataError(f"unparseable redirect_uri: {uri!r}") from exc
+        if parts.scheme not in {"http", "https"}:
+            raise ClientMetadataError(
+                f"unsupported redirect_uri scheme {parts.scheme!r} (https required; "
+                "http only on loopback)"
+            )
+        if parts.fragment:
+            raise ClientMetadataError("redirect_uri must not carry a fragment")
+        if parts.username or parts.password:
+            raise ClientMetadataError("redirect_uri must not carry userinfo")
+        if parts.scheme == "http" and (parts.hostname or "").lower() not in _LOOPBACK_HOSTS:
+            raise ClientMetadataError(
+                "http redirect_uri is only allowed on loopback (localhost/127.0.0.1)"
+            )
+        if not parts.hostname:
+            raise ClientMetadataError(f"redirect_uri without a host: {uri!r}")
+        cleaned.append(uri)
+    return cleaned
+
+
+def _decode_json_list(raw: Any) -> list[str]:
+    """Stored JSON array column -> list (a hand-edited row never 500s)."""
+    if isinstance(raw, (list, tuple)):
+        return [str(v) for v in raw]
+    try:
+        value = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return []
+    return [str(v) for v in value] if isinstance(value, list) else []
+
+
+def register_client(
+    *,
+    client_name: str,
+    redirect_uris: Any,
+    token_endpoint_auth_method: str = "client_secret_post",
+    grant_types: Any = None,
+    response_types: Any = None,
+) -> dict[str, Any]:
+    """Persist a dynamically registered client (RFC 7591).
+
+    Returns the **registration response record** — for a confidential client
+    it carries ``client_secret`` (plaintext, returned **once**; only its
+    SHA-256 hash reaches the row). ``redirect_uris`` are validated first, so
+    an open registration endpoint can never mint a client that ships codes in
+    cleartext to an arbitrary http host.
+
+    Raises:
+        ClientMetadataError: on any invalid metadata (before any write).
+    """
+    name = str(client_name or "").strip()
+    if not name or len(name) > MAX_CLIENT_NAME_LENGTH:
+        raise ClientMetadataError(
+            f"client_name must be 1-{MAX_CLIENT_NAME_LENGTH} characters"
+        )
+    uris = validate_redirect_uris(redirect_uris)
+    method = str(token_endpoint_auth_method or "client_secret_post").strip()
+    if method not in SUPPORTED_AUTH_METHODS:
+        raise ClientMetadataError(
+            f"unsupported token_endpoint_auth_method {method!r}; "
+            f"expected one of {sorted(SUPPORTED_AUTH_METHODS)}"
+        )
+    for field, allowed, supplied in (
+        ("grant_types", SUPPORTED_GRANT_TYPES, grant_types),
+        ("response_types", SUPPORTED_RESPONSE_TYPES, response_types),
+    ):
+        if supplied is None:
+            continue
+        if not isinstance(supplied, (list, tuple)) or not set(map(str, supplied)) <= allowed:
+            raise ClientMetadataError(
+                f"{field} must be a subset of {sorted(allowed)}"
+            )
+
+    client_id = CLIENT_ID_PREFIX + secrets.token_urlsafe(24)
+    plaintext_secret: str | None = None
+    secret_hash: str | None = None
+    if method != "none":
+        plaintext_secret = CLIENT_SECRET_PREFIX + secrets.token_urlsafe(32)
+        secret_hash = hash_token(plaintext_secret)
+
+    ensure_oauth_tables()
+    with _get_manager().engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO oauth_clients "
+                "(client_id, client_secret_hash, client_name, redirect_uris, "
+                " token_endpoint_auth_method) "
+                "VALUES (:client_id, :secret_hash, :name, :uris, :method)"
+            ),
+            {
+                "client_id": client_id,
+                "secret_hash": secret_hash,
+                "name": name,
+                "uris": json.dumps(uris),
+                "method": method,
+            },
+        )
+    response: dict[str, Any] = {
+        "client_id": client_id,
+        "client_id_issued_at": int(time.time()),
+        # 0 == "never expires" (RFC 7591 §3.2).
+        "client_secret_expires_at": 0,
+        "client_name": name,
+        "redirect_uris": uris,
+        "grant_types": ["authorization_code", "refresh_token"],
+        "response_types": ["code"],
+        "token_endpoint_auth_method": method,
+    }
+    if plaintext_secret is not None:
+        response["client_secret"] = plaintext_secret
+    return response
+
+
+def get_client(client_id: str | None) -> dict[str, Any] | None:
+    """Fetch a registered client by id, ``redirect_uris`` decoded. Never raises."""
+    if not client_id:
+        return None
+    ensure_oauth_tables()
+    with _get_manager().engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT client_id, client_secret_hash, client_name, redirect_uris, "
+                "token_endpoint_auth_method FROM oauth_clients WHERE client_id = :cid"
+            ),
+            {"cid": str(client_id)},
+        ).first()
+    if row is None:
+        return None
+    found = dict(row._mapping)
+    found["redirect_uris"] = _decode_json_list(found.get("redirect_uris"))
+    return found
+
+
+def verify_client_secret(client: dict[str, Any], presented: str | None) -> bool:
+    """Constant-time client credential check.
+
+    A public client (``token_endpoint_auth_method='none'``) stores no secret
+    and must present none; a confidential client must present the exact
+    plaintext whose SHA-256 matches the row. Timing does not split between
+    "no secret registered" and "wrong secret": both are a single
+    :func:`hashlib.sha256` + :func:`secrets.compare_digest`.
+    """
+    stored = client.get("client_secret_hash")
+    candidate = str(presented or "")
+    if not stored:
+        return candidate == ""
+    if not candidate:
+        return False
+    return secrets.compare_digest(hash_token(candidate), str(stored))
