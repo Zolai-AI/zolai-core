@@ -131,10 +131,10 @@ def _require_row(catalog_id: str) -> dict[str, Any]:
 #: All use OpenAI-compatible wire (GET {base}/models with Bearer auth).
 #: ``brain``: was excluded (no listing believed); actually serves OpenAI shape.
 #: ``anthropic``: uses Anthropic's OpenAI-compat endpoint with standard /models.
+#: ``google-gemini``: uses Google OpenAI-compat endpoint with standard /models.
 #: ``custom`` excluded — no guarantee of listing shape.
-#: ``google-gemini`` catalog-only: its OpenAI-compat /models returns different shape.
 _REMOTE_FETCH_ADAPTERS = frozenset({"openai", "openrouter", "brain", "anthropic"})
-_CATALOG_ONLY_IDS = frozenset({"google-gemini"})  # Gemini OpenAI-compat /models returns different shape
+_CATALOG_ONLY_IDS = frozenset()  # All providers with OpenAI-compat /models now supported
 
 
 def _models_endpoint(base_url: str) -> str:
