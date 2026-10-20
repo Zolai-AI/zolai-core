@@ -15,13 +15,18 @@ lifespan) and monkeypatched ``_get_manager`` seams are the pattern here.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from zolai.api import auth, oauth_router
+from zolai.api.auth_middleware import reset_rate_limiter
+from zolai.api.oauth_router import DEFAULT_REGISTER_RPM
 from zolai.auth import oauth
+from zolai.data.database import DatabaseManager
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -175,3 +180,184 @@ class TestProtectedResourceMetadata:
             '"https://mcp.zolai.space/.well-known/oauth-protected-resource"'
         )
         assert 'error="invalid_token"' in invalid
+
+
+# ---------------------------------------------------------------------------
+# RFC 7591 — dynamic client registration
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def oauth_db(tmp_path, monkeypatch) -> Iterator["DatabaseManager"]:
+    """A temp SQLite store — **never** the live 2.4 GB ``data/zolai.db``."""
+    mgr = DatabaseManager(f"sqlite:///{tmp_path / 'oauth.db'}")
+    mgr.init_db()
+    monkeypatch.setattr(oauth, "_get_manager", lambda: mgr)
+    oauth.ensure_oauth_tables()
+    yield mgr
+    mgr.dispose()
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter() -> Iterator[None]:
+    reset_rate_limiter()
+    yield
+    reset_rate_limiter()
+
+
+class TestClientRegistration:
+    def test_confidential_client_secret_hashed_never_stored_plain(
+        self, client: TestClient, oauth_db: DatabaseManager, tmp_path: Any
+    ) -> None:
+        response = client.post(
+            "/oauth/register",
+            json={
+                "client_name": "ChatGPT connector",
+                "redirect_uris": ["https://chatgpt.com/api/mcp/callback"],
+            },
+        )
+        assert response.status_code == 201, response.text
+        doc = response.json()
+        assert doc["client_id"].startswith(oauth.CLIENT_ID_PREFIX)
+        secret = doc["client_secret"]
+        assert secret.startswith(oauth.CLIENT_SECRET_PREFIX)
+        assert doc["client_secret_expires_at"] == 0
+        assert response.headers["cache-control"] == "no-store"
+        assert doc["grant_types"] == ["authorization_code", "refresh_token"]
+        assert doc["token_endpoint_auth_method"] == "client_secret_post"
+
+        with oauth_db.engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT client_secret_hash FROM oauth_clients WHERE client_id = :c"),
+                {"c": doc["client_id"]},
+            ).first()
+        assert row is not None
+        assert row[0] == oauth.hash_token(secret)
+        # The plaintext secret appears in **no** file on disk, anywhere.
+        for path in tmp_path.iterdir():
+            blob = path.read_bytes()
+            assert secret.encode() not in blob, f"plaintext secret leaked into {path.name}"
+
+    def test_public_client_registration_has_no_secret(
+        self, client: TestClient, oauth_db: DatabaseManager
+    ) -> None:
+        response = client.post(
+            "/oauth/register",
+            json={
+                "client_name": "Gemini CLI",
+                "redirect_uris": ["http://localhost:1441/callback"],
+                "token_endpoint_auth_method": "none",
+            },
+        )
+        assert response.status_code == 201, response.text
+        doc = response.json()
+        assert "client_secret" not in doc
+        assert doc["token_endpoint_auth_method"] == "none"
+        stored = oauth.get_client(doc["client_id"])
+        assert stored is not None and stored["client_secret_hash"] is None
+        # Loopback http is the native-app allowance (RFC 8252 §7.3).
+        assert stored["redirect_uris"] == ["http://localhost:1441/callback"]
+
+    @pytest.mark.parametrize(
+        "metadata, reason",
+        [
+            ({"client_name": "x", "redirect_uris": ["http://evil.example/cb"]},
+             "plain http off-loopback"),
+            ({"client_name": "x", "redirect_uris": ["https://ok.example/cb#frag"]},
+             "fragment"),
+            ({"client_name": "x", "redirect_uris": []}, "empty uris"),
+            ({"redirect_uris": ["https://ok.example/cb"]}, "missing client_name"),
+            ({"client_name": "x"}, "missing redirect_uris"),
+            ({"client_name": "x", "redirect_uris": ["https://ok.example/cb"],
+              "grant_types": ["password"]}, "unsupported grant"),
+            ({"client_name": "x", "redirect_uris": ["https://ok.example/cb"],
+              "response_types": ["token"]}, "unsupported response type"),
+            ({"client_name": "x", "redirect_uris": ["https://ok.example/cb"],
+              "token_endpoint_auth_method": "jwt-bearer"}, "unsupported auth method"),
+            ({"client_name": "x",
+              "redirect_uris": ["ftp://files.example/cb"]}, "non-http scheme"),
+        ],
+    )
+    def test_invalid_metadata_is_invalid_client_metadata(
+        self, client: TestClient, oauth_db: DatabaseManager, metadata: dict, reason: str
+    ) -> None:
+        response = client.post("/oauth/register", json=metadata)
+        assert response.status_code == 400, f"{reason}: {response.text}"
+        detail = response.json()["detail"]
+        assert detail["error"] == "invalid_client_metadata", reason
+
+    @pytest.mark.parametrize("scope", ["not-a-scope", "rag:read_everything"])
+    def test_registration_scope_must_be_in_the_frozen_vocabulary(
+        self, client: TestClient, oauth_db: DatabaseManager, scope: str
+    ) -> None:
+        response = client.post(
+            "/oauth/register",
+            json={
+                "client_name": "x",
+                "redirect_uris": ["https://ok.example/cb"],
+                "scope": scope,
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"]["error"] == "invalid_client_metadata"
+
+    def test_registration_accepts_a_valid_frozen_scope(
+        self, client: TestClient, oauth_db: DatabaseManager
+    ) -> None:
+        response = client.post(
+            "/oauth/register",
+            json={
+                "client_name": "x",
+                "redirect_uris": ["https://ok.example/cb"],
+                "scope": "rag:read dataset:read",
+            },
+        )
+        assert response.status_code == 201, response.text
+
+    def test_verify_client_secret_confidential_vs_public(
+        self, client: TestClient, oauth_db: DatabaseManager
+    ) -> None:
+        confidential = client.post(
+            "/oauth/register",
+            json={
+                "client_name": "c",
+                "redirect_uris": ["https://ok.example/cb"],
+            },
+        ).json()
+        stored = oauth.get_client(confidential["client_id"])
+        assert stored is not None
+        assert oauth.verify_client_secret(stored, confidential["client_secret"]) is True
+        assert oauth.verify_client_secret(stored, confidential["client_secret"] + "x") is False
+        assert oauth.verify_client_secret(stored, None) is False
+        assert oauth.verify_client_secret(stored, "") is False
+
+        public = client.post(
+            "/oauth/register",
+            json={
+                "client_name": "p",
+                "redirect_uris": ["http://localhost:1/cb"],
+                "token_endpoint_auth_method": "none",
+            },
+        ).json()
+        stored_public = oauth.get_client(public["client_id"])
+        assert stored_public is not None
+        assert oauth.verify_client_secret(stored_public, None) is True
+        # A public client cannot be impersonated by *presenting* a secret either.
+        assert oauth.verify_client_secret(stored_public, "anything") is False
+
+    def test_registration_is_rate_limited_per_ip(
+        self, client: TestClient, oauth_db: DatabaseManager
+    ) -> None:
+        payload = {
+            "client_name": "flood",
+            "redirect_uris": ["https://ok.example/cb"],
+        }
+        for _ in range(DEFAULT_REGISTER_RPM):
+            assert client.post("/oauth/register", json=payload).status_code == 201
+        blocked = client.post("/oauth/register", json=payload)
+        assert blocked.status_code == 429
+        assert "retry-after" in blocked.headers
+
+    def test_unknown_client_id_is_not_found(self, oauth_db: DatabaseManager) -> None:
+        assert oauth.get_client("zolai_cid_nope") is None
+        assert oauth.get_client(None) is None

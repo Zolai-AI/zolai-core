@@ -31,19 +31,22 @@ else derived from the forwarded/host headers), so the document a client
 fetches on ``mcp.zolai.space`` points back at ``mcp.zolai.space`` and the
 one on ``api.zolai.space`` points at ``api.zolai.space``.
 
-The ``/oauth/register`` (RFC 7591), ``/oauth/authorize`` (authorization code
-+ PKCE, S256 only) and ``/oauth/token`` (RFC 6749 §4.1.3 / §6) routes are
-appended below as their components land.
+``POST /oauth/register`` (RFC 7591) appends below; ``/oauth/authorize`` and
+``/oauth/token`` follow in the next commits of this series.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
+from starlette.concurrency import run_in_threadpool
 
+from ..api import auth as api_auth
 from ..auth import oauth
+from .auth_middleware import client_ip, limiter
 
 router = APIRouter(tags=["oauth"])
 
@@ -114,3 +117,105 @@ async def well_known_oauth_protected_resource_mcp(request: Request) -> JSONRespo
 async def mcp_relative_oauth_protected_resource(request: Request) -> JSONResponse:
     """Path-relative form — the variant MCP clients probe next to the endpoint."""
     return _pr_metadata(request)
+
+
+# ---------------------------------------------------------------------------
+# RFC 7591 — dynamic client registration
+# ---------------------------------------------------------------------------
+
+#: Anonymous registration bucket (registrations/minute per IP). Open
+#: registration is required by the MCP ecosystem (ChatGPT/Gemini register on
+#: first connect), so the control is a rate limit, not a credential.
+DEFAULT_REGISTER_RPM = 10
+
+
+class RegistrationIn(BaseModel):
+    """RFC 7591 ``client_metadata``.
+
+    Every field is optional at the type level so validation errors can be
+    reported as RFC 6749 ``invalid_client_metadata`` (400) instead of
+    framework 422 envelopes — OAuth clients parse those. Unknown extension
+    fields are ignored, as RFC 7591 §2 requires.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    client_name: str | None = Field(default=None, max_length=500)
+    redirect_uris: list[str] | None = None
+    grant_types: list[str] | None = None
+    response_types: list[str] | None = None
+    token_endpoint_auth_method: str | None = None
+    scope: str | None = None
+
+
+def _invalid_metadata(description: str) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={
+            "error": "invalid_client_metadata",
+            "error_description": description,
+        },
+    )
+
+
+async def _register_rate_limit(scope: Any) -> None:
+    capacity = DEFAULT_REGISTER_RPM
+    allowed, _remaining, _reset, retry_after = await run_in_threadpool(
+        limiter.hit, f"oauth:register:{client_ip(scope)}", capacity
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "rate_limited",
+                "scope": "oauth_register",
+                "limit_rpm": capacity,
+                "retry_after_s": retry_after,
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+@router.post("/oauth/register", status_code=201)
+async def oauth_register(body: RegistrationIn, request: Request) -> JSONResponse:
+    """Open dynamic client registration (RFC 7591).
+
+    Issues ``client_id`` (+ ``client_secret`` for a confidential client —
+    shown **once**; only its SHA-256 reaches ``oauth_clients``). Security
+    rests on two things: redirect URIs are pinned here (https, or http only
+    on loopback) and every authorization code later checks against them, and
+    the token endpoint checks the secret in constant time. A client asking
+    for ``token_endpoint_auth_method='none'`` registers as a *public* client
+    — no secret exists then, and PKCE is what protects its codes (mandatory
+    for everyone anyway).
+
+    ``scope`` (if sent) is validated against the frozen vocabulary and
+    otherwise advisory: what a grant may actually carry is decided at
+    ``/oauth/authorize`` by intersecting the request with the *user's* role —
+    a registration can never widen a role.
+    """
+    await _register_rate_limit(request.scope)
+
+    if body.scope:
+        for raw_scope in body.scope.split():
+            if raw_scope not in api_auth.VALID_ACTIONS:
+                raise _invalid_metadata(
+                    f"scope {raw_scope!r} is not in the frozen action vocabulary"
+                )
+
+    try:
+        response = await run_in_threadpool(
+            oauth.register_client,
+            client_name=body.client_name or "",
+            redirect_uris=body.redirect_uris,
+            token_endpoint_auth_method=(
+                body.token_endpoint_auth_method or "client_secret_post"
+            ),
+            grant_types=body.grant_types,
+            response_types=body.response_types,
+        )
+    except oauth.ClientMetadataError as exc:
+        raise _invalid_metadata(str(exc)) from None
+
+    # The response carries a plaintext secret — never cacheable.
+    return JSONResponse(content=response, status_code=201, headers={"Cache-Control": "no-store"})
