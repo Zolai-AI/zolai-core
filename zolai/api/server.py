@@ -35,6 +35,7 @@ from ..api.linguistics_router import router as linguistics_router
 from ..api.mcp_router import root_router as mcp_root_router
 from ..api.mcp_router import router as mcp_router
 from ..api.metrics_router import router as metrics_router
+from ..api.oauth_router import router as oauth_router
 from ..api.providers_router import router as providers_router
 from ..api.rag_router import router as rag_router
 from ..api.rbac import auth_router as auth_info_router
@@ -495,6 +496,12 @@ def create_app() -> FastAPI:
     # (mcp.zolai.space -> core :8001/mcp). Same handler, same public route
     # declaration, same anonymous bucket; also before the catch-all.
     app.include_router(mcp_root_router)
+    # W6 OAuth 2.1 for the MCP endpoint — RFC 8414/9728 discovery documents +
+    # /oauth/{register,authorize,token}. Sits outside /api/v1, so
+    # ApiKeyMiddleware never gates it (discovery must answer with no
+    # credential), but it MUST stay registered before the catch-all below:
+    # /.well-known/* is a GET /{path:path} shape.
+    app.include_router(oauth_router)
 
     # --- Static File Serving for Desktop App ---
     from fastapi.responses import FileResponse
