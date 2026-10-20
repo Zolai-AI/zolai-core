@@ -16,8 +16,9 @@ Done-when asserted here:
 - the import-time guards fire: a dotted tool name (illegal on the OpenAI wire
   the same spec is served to), an out-of-vocabulary scope, a declared tool with
   no handler, and a handler with no declared tool;
-- the published surface is unchanged by any of it: public/member/admin stay
-  8/21/26 with byte-identical name sets.
+- the published surface is exactly the declared one: public/member/admin stay
+  8 with byte-identical name sets, and the member/admin tiers carry the B1a
+  language family (public 8 / member 26 / admin 31) and nothing else.
 
 Pure: no DB, no network, no FastAPI app.
 """
@@ -64,10 +65,22 @@ _WORD = {"type": "object", "properties": {"word": {"type": "string"}}, "required
 
 # ── The published surface, frozen ────────────────────────────────────────────
 #
-# Captured from the registry before B0 and re-asserted here: this batch changes
-# plumbing + annotations only, so a tool may not be added, removed or reordered.
+# Captured from the registry before B0 (public 8 / member 21 / admin 26) and
+# re-asserted here.  B0 added plumbing + annotations only, so that batch changed
+# no name.  B1a (zolai/agent/tools/language.py) added exactly five member-tier
+# language tools; nothing was removed or reordered, so the public tier is still
+# byte-identical and every pre-B1a name is still present in both grown tiers.
 
-EXPECTED_COUNTS = {"public": 8, "member": 21, "admin": 26}
+EXPECTED_COUNTS = {"public": 8, "member": 26, "admin": 31}
+
+#: The five B1a language tools — member tier, never anonymous.
+LANGUAGE_TOOL_NAMES: tuple[str, ...] = (
+    "lex_search",
+    "pos_tag",
+    "syllable_segment",
+    "word_detail",
+    "zvs_validate",
+)
 
 EXPECTED_TIERS: dict[str, list[str]] = {
     "public": [
@@ -103,6 +116,7 @@ EXPECTED_TIERS: dict[str, list[str]] = {
             "foundation_search_topical",
             "foundation_translate_enhanced",
             "foundation_validate_structure",
+            *LANGUAGE_TOOL_NAMES,
         ]
     ),
     "admin": sorted(
@@ -128,6 +142,7 @@ EXPECTED_TIERS: dict[str, list[str]] = {
             "foundation_search_topical",
             "foundation_translate_enhanced",
             "foundation_validate_structure",
+            *LANGUAGE_TOOL_NAMES,
             "knowledge_stats",
             "kb_research",
             "provider_status",
@@ -419,11 +434,34 @@ class TestScopeField:
         assert tool_tier_for_record(admin_record) == "admin"
         assert allow_list_for_record(admin_record) == allow_list("admin")
 
-        # A member record keeps the whole member tier (nothing in it declares a
-        # scope) and can never reach the admin extras.
+        # A member record reaches exactly the member-tier tools its own scopes
+        # satisfy — the per-tool scope only ever *removes*, never adds — and it
+        # can never reach the admin extras.
+        #
+        # (Before B1a no member-tier tool declared a ``scope``, so a minimal
+        # member record kept the whole tier unconditionally.  The B1a language
+        # family is the first member-tier narrowing, so the assertion is now
+        # "the tier minus exactly the tools whose action this record lacks"
+        # rather than "the tier".)
         member_record = {"scopes": ["agent:run", "agent:read"]}
         assert tool_tier_for_record(member_record) == "member"
-        assert allow_list_for_record(member_record) == allow_list("member")
+        member_via_record = allow_list_for_record(member_record)
+        assert member_via_record == allow_list("member", granted=set(member_record["scopes"]))
+        assert member_via_record < allow_list("member")
+        assert allow_list("member") - member_via_record == {
+            name for name in allow_list("member") if SPECS[name].scope
+        }
+
+        # A record holding the whole member read set keeps everything but the
+        # one member-tier tool whose action no session scope set carries yet:
+        # ``pos_tag``/``pos:read`` (``session_auth.MEMBER_SCOPES`` has 5
+        # entries and no ``pos:read`` — the §6.3 fix for that is a *REST*
+        # behaviour change and therefore deliberately not part of B1a).
+        from zolai.api.session_auth import MEMBER_SCOPES
+
+        read_member = {"scopes": list(MEMBER_SCOPES)}
+        assert allow_list("member") - allow_list_for_record(read_member) == {"pos_tag"}
+        assert allow_list_for_record(read_member) < allow_list("admin")
 
         # A record with no readable scope list: the tier decides, unchanged.
         assert tool_tier_for_record({"scopes": None}) == "member"
