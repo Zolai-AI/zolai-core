@@ -22,7 +22,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from zolai.api import auth, oauth_router
+from zolai.api import auth, oauth_router, session_auth
 from zolai.api.auth_middleware import reset_rate_limiter
 from zolai.api.oauth_router import DEFAULT_REGISTER_RPM
 from zolai.auth import oauth
@@ -283,8 +283,9 @@ class TestClientRegistration:
     ) -> None:
         response = client.post("/oauth/register", json=metadata)
         assert response.status_code == 400, f"{reason}: {response.text}"
-        detail = response.json()["detail"]
-        assert detail["error"] == "invalid_client_metadata", reason
+        payload = response.json()
+        assert payload["error"] == "invalid_client_metadata", reason
+        assert "detail" not in payload  # RFC 6749 §5.2 top-level shape
 
     @pytest.mark.parametrize("scope", ["not-a-scope", "rag:read_everything"])
     def test_registration_scope_must_be_in_the_frozen_vocabulary(
@@ -299,7 +300,7 @@ class TestClientRegistration:
             },
         )
         assert response.status_code == 400
-        assert response.json()["detail"]["error"] == "invalid_client_metadata"
+        assert response.json()["error"] == "invalid_client_metadata"
 
     def test_registration_accepts_a_valid_frozen_scope(
         self, client: TestClient, oauth_db: DatabaseManager
@@ -361,3 +362,312 @@ class TestClientRegistration:
     def test_unknown_client_id_is_not_found(self, oauth_db: DatabaseManager) -> None:
         assert oauth.get_client("zolai_cid_nope") is None
         assert oauth.get_client(None) is None
+
+
+# ---------------------------------------------------------------------------
+# RFC 6749 §4.1 — authorize: PKCE (S256 only) + consent + code issuance
+# ---------------------------------------------------------------------------
+
+#: RFC 7636 Appendix B test vector (verifier -> challenge).
+_PKCE_VECTOR_VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+_PKCE_VECTOR_CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+
+
+def _verifier() -> str:
+    """A syntactically valid 43-char code_verifier."""
+    return "A" * 43
+
+
+def _authorize_query(client_id: str, redirect_uri: str, **overrides: str) -> str:
+    from urllib.parse import urlencode
+
+    params = {
+        "response_type": "code",
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "code_challenge": _PKCE_VECTOR_CHALLENGE,
+        "code_challenge_method": "S256",
+        "state": "xyz-123",
+    }
+    params.update(overrides)
+    return urlencode(params)
+
+
+@pytest.fixture()
+def user_db(oauth_db: DatabaseManager, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Temp store + one real account through the *existing* identity layer."""
+    monkeypatch.setattr(session_auth, "_get_manager", lambda: oauth_db)
+    return session_auth.create_user(
+        username="founder",
+        password="correct horse battery staple",
+        role="admin",
+        actor="test",
+    )
+
+
+@pytest.fixture()
+def registered(client: TestClient, oauth_db: DatabaseManager) -> dict[str, Any]:
+    response = client.post(
+        "/oauth/register",
+        json={
+            "client_name": "Test Connector",
+            "redirect_uris": ["https://client.example/cb"],
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+class TestPkce:
+    def test_rfc_7636_appendix_b_vector(self) -> None:
+        assert oauth.s256_challenge(_PKCE_VECTOR_VERIFIER) == _PKCE_VECTOR_CHALLENGE
+
+    def test_validate_accepts_s256_and_normalizes(self) -> None:
+        challenge, method = oauth.validate_code_challenge(_PKCE_VECTOR_CHALLENGE, "S256")
+        assert (challenge, method) == (_PKCE_VECTOR_CHALLENGE, "S256")
+
+    @pytest.mark.parametrize(
+        "challenge, method, needle",
+        [
+            (None, "S256", "missing"),
+            ("", "S256", "missing"),
+            (_PKCE_VECTOR_CHALLENGE, None, "missing"),
+            (_PKCE_VECTOR_CHALLENGE, "", "missing"),
+            (_PKCE_VECTOR_CHALLENGE, "plain", "plain"),
+            (_PKCE_VECTOR_CHALLENGE, "PLAIN", "plain"),
+            (_PKCE_VECTOR_CHALLENGE, "S512", "unsupported"),
+            ("too-short", "S256", "43-128"),
+            ("!" * 43, "S256", "unreserved"),
+        ],
+    )
+    def test_validate_rejects(
+        self, challenge: str | None, method: str | None, needle: str
+    ) -> None:
+        with pytest.raises(oauth.PkceError) as excinfo:
+            oauth.validate_code_challenge(challenge, method)
+        assert needle in str(excinfo.value).lower()
+
+    def test_verify_correct_verifier_only(self) -> None:
+        assert oauth.verify_code_verifier(
+            _PKCE_VECTOR_VERIFIER, "S256", _PKCE_VECTOR_CHALLENGE
+        )
+        assert not oauth.verify_code_verifier("B" * 43, "S256", _PKCE_VECTOR_CHALLENGE)
+        assert not oauth.verify_code_verifier(None, "S256", _PKCE_VECTOR_CHALLENGE)
+        # plain can never succeed even against a stored row that says so.
+        assert not oauth.verify_code_verifier(
+            _PKCE_VECTOR_VERIFIER, "plain", _PKCE_VECTOR_CHALLENGE
+        )
+        # Length/charset guards fail *before* any comparison.
+        assert not oauth.verify_code_verifier("short", "S256", _PKCE_VECTOR_CHALLENGE)
+        assert not oauth.verify_code_verifier("!" * 43, "S256", _PKCE_VECTOR_CHALLENGE)
+
+
+class TestAuthorizeEndpoint:
+    def test_get_renders_login_and_consent_form(
+        self, client: TestClient, oauth_db: DatabaseManager, registered: dict
+    ) -> None:
+        query = _authorize_query(
+            registered["client_id"], registered["redirect_uris"][0]
+        )
+        response = client.get(f"/oauth/authorize?{query}")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/html")
+        body = response.text
+        assert "Test Connector" in body
+        assert 'name="username"' in body and 'name="password"' in body
+        assert 'name="code_challenge" value=""' not in body
+        assert _PKCE_VECTOR_CHALLENGE in body  # bound into the form (hidden)
+        assert 'name="state" value="xyz-123"' in body
+        assert 'action="/oauth/authorize"' in body
+
+    @pytest.mark.parametrize(
+        "overrides, error",
+        [
+            ({"code_challenge_method": "plain"}, "invalid_request"),
+            ({"code_challenge": ""}, "invalid_request"),
+            ({"code_challenge_method": ""}, "invalid_request"),
+            ({"client_id": "zolai_cid_missing"}, "invalid_client"),
+            ({"redirect_uri": "https://attacker.example/cb"}, "invalid_request"),
+            ({"response_type": "token"}, "unsupported_response_type"),
+            ({"scope": "not-a-real-scope"}, "invalid_scope"),
+        ],
+    )
+    def test_get_refuses_before_showing_a_login_form(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        registered: dict,
+        overrides: dict,
+        error: str,
+    ) -> None:
+        query = _authorize_query(
+            **{
+                "client_id": registered["client_id"],
+                "redirect_uri": registered["redirect_uris"][0],
+                **overrides,
+            }
+        )
+        response = client.get(f"/oauth/authorize?{query}")
+        # Refused directly (400), never by redirecting to a URI, and never by
+        # showing a form whose submission could not succeed.
+        assert response.status_code == 400, response.text
+        assert response.json()["error"] == error
+        assert "username" not in response.text
+
+    @pytest.mark.parametrize("method_key", ["code_challenge", "code_challenge_method"])
+    def test_plain_and_missing_are_always_refused(
+        self, client: TestClient, oauth_db: DatabaseManager, registered: dict, method_key: str
+    ) -> None:
+        """PKCE is mandatory: dropping either half never yields a form."""
+        query = _authorize_query(
+            registered["client_id"],
+            registered["redirect_uris"][0],
+            **({"code_challenge_method": "plain"} if method_key == "code_challenge_method" else {}),
+        )
+        if method_key == "code_challenge":
+            query = query.replace(_PKCE_VECTOR_CHALLENGE, "")  # challenge absent
+        response = client.get(f"/oauth/authorize?{query}")
+        assert response.status_code == 400
+        assert response.json()["error"] == "invalid_request"
+
+    def test_post_verifies_credentials_and_redirects_with_code(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+        tmp_path: Any,
+    ) -> None:
+        from urllib.parse import parse_qs, urlsplit
+
+        query = _authorize_query(
+            registered["client_id"], registered["redirect_uris"][0]
+        )
+        form = parse_qs(query)
+        flat = {k: v[0] for k, v in form.items()}
+        flat["username"] = "founder"
+        flat["password"] = "correct horse battery staple"
+        response = client.post(
+            "/oauth/authorize",
+            data=flat,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 302, response.text
+        location = response.headers["location"]
+        assert location.startswith(registered["redirect_uris"][0])
+        redirected = parse_qs(urlsplit(location).query)
+        code = redirected["code"][0]
+        assert code.startswith(oauth.AUTH_CODE_PREFIX)
+        assert redirected["state"] == ["xyz-123"]
+        assert response.headers["cache-control"] == "no-store"
+
+        # Hashed at rest; plaintext code nowhere on disk; admin role grants
+        # exactly the existing admin scope set (no new vocabulary).
+        with oauth_db.engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT code_hash, consumed_at, scopes, user_id "
+                    "FROM oauth_authorization_codes WHERE code_hash = :h"
+                ),
+                {"h": oauth.hash_token(code)},
+            ).first()
+        assert row is not None
+        assert row[0] == oauth.hash_token(code)
+        assert row[1] is None
+        assert sorted(__import__("json").loads(row[2])) == sorted(
+            session_auth.ADMIN_SCOPES
+        )
+        assert row[3] == user_db["id"]
+        for path in tmp_path.iterdir():
+            assert code.encode() not in path.read_bytes(), path.name
+
+    def test_post_narrows_a_requested_grant_to_the_role(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A requested scope can only narrow — never widen."""
+        from urllib.parse import parse_qs
+
+        session_auth.set_user_role("founder", role="member", actor="test")
+        query = _authorize_query(
+            registered["client_id"],
+            registered["redirect_uris"][0],
+            scope="dataset:read settings:write",  # settings:write is admin-only
+        )
+        flat = {k: v[0] for k, v in parse_qs(query).items()}
+        flat["username"] = "founder"
+        flat["password"] = "correct horse battery staple"
+        response = client.post(
+            "/oauth/authorize",
+            data=flat,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 302, response.text
+        from urllib.parse import parse_qs as _pq
+        from urllib.parse import urlsplit
+
+        code = _pq(urlsplit(response.headers["location"]).query)["code"][0]
+        with oauth_db.engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT scopes FROM oauth_authorization_codes WHERE code_hash = :h"),
+                {"h": oauth.hash_token(code)},
+            ).first()
+        import json as _json
+
+        # The member keeps dataset:read; settings:write (admin) is dropped.
+        assert _json.loads(row[0]) == ["dataset:read"]
+
+    def test_post_bad_password_gets_the_form_back_401(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+    ) -> None:
+        query = _authorize_query(
+            registered["client_id"], registered["redirect_uris"][0]
+        )
+        from urllib.parse import parse_qs
+
+        flat = {k: v[0] for k, v in parse_qs(query).items()}
+        flat["username"] = "founder"
+        flat["password"] = "wrong password entirely"
+        response = client.post(
+            "/oauth/authorize",
+            data=flat,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert response.status_code == 401
+        assert response.headers["content-type"].startswith("text/html")
+        assert "Invalid username or password." in response.text
+        # One shape for unknown user and wrong password (no enumeration), and
+        # no code was minted.
+        assert "zolai_ac_" not in response.text
+        with oauth_db.engine.connect() as conn:
+            count = conn.execute(
+                text("SELECT COUNT(*) FROM oauth_authorization_codes")
+            ).scalar()
+        assert count == 0
+
+        flat["password"] = "correct horse battery staple"
+        flat["username"] = "no-such-user"
+        second = client.post(
+            "/oauth/authorize",
+            data=flat,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert second.status_code == 401
+        assert "Invalid username or password." in second.text
+
+    def test_post_requires_urlencoded_form(
+        self, client: TestClient, oauth_db: DatabaseManager, registered: dict
+    ) -> None:
+        response = client.post("/oauth/authorize", json={"client_id": "x"})
+        assert response.status_code == 415
+        assert response.json()["error"] == "unsupported_media_type"
