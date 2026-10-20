@@ -18,6 +18,7 @@ caller passes ``persist: true`` (admin only) — chat ≠ run; agent runs stay o
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -33,6 +34,7 @@ from ..agent.tools.registry import allow_list
 from ..agent.tools.types import ToolCall
 from ..engines import engine_mode, llm_allowed
 from . import auth, rbac
+from .errors import api_error
 
 
 # ── Role-specific system prompts ──────────────────────────────────────────────
@@ -114,6 +116,10 @@ class ChatIn(BaseModel):
     user-provided keys (OpenAI, OpenRouter, Gemini, custom). This allows
     users to specify which provider their key belongs to without needing
     a server-side catalog entry.
+
+    ``api_key`` / ``user_provider`` are accepted on the **admin** route only
+    (gated by the resolved admin role). The public route rejects any
+    caller-supplied credential with 400 — see ``PUBLIC_CREDENTIAL_FIELDS``.
     """
 
     message: str = Field(min_length=1, max_length=8000)
@@ -470,26 +476,73 @@ def _finish(
     return out
 
 
+#: Body fields the **public** chat route refuses (MCP invariant M3: a
+#: tool/API must never accept a caller-supplied credential). ``api_key`` /
+#: ``user_provider`` are real ``ChatIn`` fields (the admin route legitimately
+#: accepts them, gated on the *resolved* admin role — never on a
+#: client-declared field); ``token`` / ``authorization`` are rejected at the
+#: raw-JSON level so a smuggled credential-shaped key cannot ride along even
+#: though the pydantic model would ignore it.
+PUBLIC_CREDENTIAL_FIELDS: tuple[str, ...] = (
+    "api_key",
+    "user_provider",
+    "token",
+    "authorization",
+)
+
+
+def _supplied_credential_fields(body: "ChatIn", request: Request) -> list[str]:
+    """Names (never values) of credential-shaped fields present in the body."""
+    supplied: set[str] = set()
+    for field in ("api_key", "user_provider"):
+        if getattr(body, field, None):
+            supplied.add(field)
+    try:
+        raw = request._body  # cached by FastAPI's own body parsing
+        payload = json.loads(raw) if raw else {}
+    except Exception:  # unreadable/absent raw body — the model check above stands
+        payload = {}
+    if isinstance(payload, dict):
+        for field in PUBLIC_CREDENTIAL_FIELDS:
+            if payload.get(field):
+                supplied.add(field)
+    return sorted(supplied)
+
+
 @public_router.post("/chat")
-def public_chat(body: ChatIn) -> dict[str, Any]:
+async def public_chat(body: ChatIn, request: Request) -> dict[str, Any]:
     """Anonymous-safe chat — public in every auth mode (rbac.PUBLIC_ROUTES).
 
     An optional ``provider``/``model`` override is validated **before** the
     run (DB read only): unknown/disabled provider → 404, model not on the
     row → 400, in every engine mode including ``rule``.
 
-    ``api_key`` is an optional per-request override for the provider's API key
-    (user-provided, not stored server-side).
-
-    ``user_provider`` is an optional per-request provider override for
-    user-provided keys (OpenAI, OpenRouter, Gemini, custom).
+    This route is reachable with **no credential at all**, so it never
+    accepts one: a body carrying ``api_key`` / ``user_provider`` (or a
+    smuggled ``token`` / ``authorization``) is refused with 400 and the
+    stable code ``caller_supplied_credentials_forbidden`` — the credential
+    value is never echoed, logged or forwarded. Callers who want a per-request
+    key use the admin chat, which is gated on the resolved admin role.
     """
+    supplied = _supplied_credential_fields(body, request)
+    if supplied:
+        raise HTTPException(
+            status_code=400,
+            detail=api_error(
+                "caller_supplied_credentials_forbidden",
+                "This public endpoint never accepts credentials in the request "
+                "body. Server-side providers need no caller key; to use your own "
+                "key, sign in and use the admin chat instead.",
+                fields=supplied,  # field NAMES only — never the values
+            ),
+        )
+
     from .providers_router import validate_selection
 
     validate_selection(body.provider, body.model, assistant="public")
     return run_assistant(
         body.message, admin=False, persist=False,
-        provider=body.provider, model=body.model, api_key=body.api_key, user_provider=body.user_provider,
+        provider=body.provider, model=body.model,
     )
 
 
