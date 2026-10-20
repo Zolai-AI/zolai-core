@@ -46,6 +46,7 @@ response.
 from __future__ import annotations
 
 import html
+import logging
 from typing import Any
 from urllib.parse import parse_qs, quote
 
@@ -60,6 +61,8 @@ from ..auth import oauth
 from .auth_middleware import client_ip, limiter
 
 router = APIRouter(tags=["oauth"])
+
+logger = logging.getLogger("zolai.oauth")
 
 #: Cache policy for discovery documents: dynamic (origin-derived), so never
 #: shared by a proxy for long. RFC 8414 allows caching; 60s is a compromise.
@@ -229,7 +232,11 @@ async def oauth_register(body: RegistrationIn, request: Request) -> JSONResponse
             response_types=body.response_types,
         )
     except oauth.ClientMetadataError as exc:
-        return _invalid_metadata(str(exc))
+        # The specific (repo-authored) reason stays server-side: the
+        # error-envelope gate forbids *any* str(exception) in a response
+        # body, and RFC 7591 only requires the error code to be nameable.
+        logger.debug("oauth register rejected: %s", exc)
+        return _invalid_metadata("client metadata failed validation")
 
     # The response carries a plaintext secret — never cacheable.
     return JSONResponse(content=response, status_code=201, headers={"Cache-Control": "no-store"})
@@ -270,7 +277,14 @@ def _validate_authorize_params(
             form.get("code_challenge"), form.get("code_challenge_method")
         )
     except oauth.PkceError as exc:
-        return None, _oauth_error(400, "invalid_request", str(exc))
+        # Same rule: one fixed, accurate description outward; the authored
+        # detail (which parameter, which bound) goes to the server log.
+        logger.debug("oauth authorize PKCE rejected: %s", exc)
+        return None, _oauth_error(
+            400,
+            "invalid_request",
+            "code_challenge must be present, use S256 and be 43-128 unreserved characters",
+        )
     requested = [s for s in str(form.get("scope") or "").split() if s]
     grantable = set(oauth.grantable_scopes())
     for raw_scope in requested:
@@ -491,3 +505,143 @@ async def oauth_authorize_post(request: Request) -> Response:
     if params["state"]:
         target += f"&state={quote(params['state'], safe='')}"
     return RedirectResponse(target, status_code=302, headers={"Cache-Control": "no-store"})
+
+
+# ── RFC 6749 §3.2 — token endpoint ──────────────────────────────────────────
+
+#: Per-IP cap on ``POST /oauth/token``. Refresh rotation makes this the one
+#: OAuth endpoint a healthy client calls repeatedly, so it is looser than
+#: registration (10/min) but still far below any legitimate interactive rate.
+DEFAULT_TOKEN_RPM = 30
+
+
+def _parse_basic(header: str) -> tuple[str | None, str | None]:
+    """Decode ``Authorization: Basic base64(urlencode(id):urlencode(secret))``.
+
+    RFC 6749 §2.3.1: both halves are form-urlencoded *before* base64 (many
+    clients send them raw; ``unquote`` on a raw value is a no-op unless it
+    contains a literal ``%``).  Malformed input yields ``(None, None)`` — the
+    caller answers ``invalid_client``, never an exception.
+    """
+    import base64
+
+    try:
+        decoded = base64.b64decode(header.split(" ", 1)[1].strip()).decode("utf-8")
+    except Exception:  # noqa: BLE001 - any decode failure is just "no credentials"
+        return None, None
+    client_id, sep, secret = decoded.partition(":")
+    if not sep:
+        return None, None
+    from urllib.parse import unquote
+
+    return unquote(client_id) or None, unquote(secret) or None
+
+
+async def _token_rate_limit(scope: Any) -> None:
+    capacity = DEFAULT_TOKEN_RPM
+    allowed, _remaining, _reset, retry_after = await run_in_threadpool(
+        limiter.hit, f"oauth:token:{client_ip(scope)}", capacity
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "rate_limited",
+                "scope": "oauth_token",
+                "limit_rpm": capacity,
+                "retry_after_s": retry_after,
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
+
+
+def _token_client_auth(request: Request, form: dict[str, str]) -> tuple[dict[str, Any] | None, JSONResponse | None]:
+    """Authenticate the caller against its registered method (§2.3). One method
+    per request: ``client_secret_basic`` wins if the header is present, else
+    ``client_secret_post`` (body secret), else ``none`` (public client)."""
+    header = request.headers.get("authorization", "")
+    if header.lower().startswith("basic "):
+        cid, secret = _parse_basic(header)
+        method = "client_secret_basic"
+    elif form.get("client_secret"):
+        cid, secret = form.get("client_id"), form.get("client_secret")
+        method = "client_secret_post"
+    else:
+        cid, secret = form.get("client_id"), None
+        method = "none"
+    client = oauth.get_client(cid)
+    if client is None:
+        return None, _oauth_error(401, "invalid_client", "unknown client_id")
+    registered = str(client.get("token_endpoint_auth_method") or "none")
+    if registered != method:
+        # A public client cannot present a secret; a confidential one cannot
+        # downgrade to anonymous. Method confusion is refused outright.
+        return None, _oauth_error(
+            401,
+            "invalid_client",
+            f"client must authenticate with {registered}",
+        )
+    if not oauth.verify_client_secret(client, secret):
+        return None, _oauth_error(401, "invalid_client", "client authentication failed")
+    return client, None
+
+
+@router.post("/oauth/token")
+async def oauth_token(request: Request) -> Response:
+    """``POST /oauth/token`` — authorization_code + refresh_token grants.
+
+    RFC 6749 §5.2 envelopes, ``Cache-Control: no-store`` on every response,
+    and a single ``invalid_grant`` for every code/refresh failure so a prober
+    cannot tell "consumed" from "expired" from "wrong client".
+    """
+    content_type = request.headers.get("content-type", "")
+    if "application/x-www-form-urlencoded" not in content_type:
+        return _oauth_error(
+            415,
+            "unsupported_media_type",
+            "POST /oauth/token expects application/x-www-form-urlencoded",
+        )
+    await _token_rate_limit(request.scope)
+    raw = await request.body()
+    parsed = parse_qs(raw.decode("utf-8", errors="replace"), keep_blank_values=True)
+    form = {key: values[0] for key, values in parsed.items() if values}
+
+    client, error = _token_client_auth(request, form)
+    if error is not None:
+        return error
+    assert client is not None
+
+    grant_type = str(form.get("grant_type") or "")
+    if grant_type == "authorization_code":
+        try:
+            grant = await run_in_threadpool(
+                oauth.consume_authorization_code,
+                code=form.get("code"),
+                client_id=str(client["client_id"]),
+                redirect_uri=str(form.get("redirect_uri") or ""),
+                code_verifier=form.get("code_verifier"),
+            )
+        except oauth.AuthorizationCodeError:
+            return _oauth_error(400, "invalid_grant", "authorization code rejected")
+        tokens = await run_in_threadpool(
+            oauth.issue_tokens,
+            client_id=str(client["client_id"]),
+            user_id=int(grant["user_id"]),
+            scopes=list(grant["scopes"]),
+        )
+    elif grant_type == "refresh_token":
+        try:
+            tokens = await run_in_threadpool(
+                oauth.refresh_tokens,
+                refresh_token=form.get("refresh_token"),
+                client_id=str(client["client_id"]),
+            )
+        except oauth.TokenError:
+            return _oauth_error(400, "invalid_grant", "refresh token rejected")
+    else:
+        return _oauth_error(
+            400,
+            "unsupported_grant_type",
+            "only authorization_code and refresh_token are implemented",
+        )
+    return JSONResponse(content=tokens, headers={"Cache-Control": "no-store"})

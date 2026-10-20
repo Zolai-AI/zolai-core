@@ -56,6 +56,7 @@ import hashlib
 import json
 import os
 import secrets
+import threading
 import time
 from typing import Any
 
@@ -736,3 +737,192 @@ def consume_authorization_code(
             "scopes": _decode_json_list(found.get("scopes")),
             "client_id": str(found["client_id"]),
         }
+
+
+# ---------------------------------------------------------------------------
+# Access / refresh tokens (RFC 6749 §5) — ``oauth_tokens`` rows
+# ---------------------------------------------------------------------------
+
+
+class TokenError(ValueError):
+    """Why a token request failed. ``reason`` is for logs, never the wire."""
+
+
+def issue_tokens(
+    *,
+    client_id: str,
+    user_id: int,
+    scopes: list[str],
+) -> dict[str, Any]:
+    """Mint an access + refresh token pair (plaintext returned **once**).
+
+    Only SHA-256 hashes are stored (``access_token_hash`` /
+    ``refresh_token_hash``); the plaintexts leave this function and never
+    touch disk or a log line.  The response contract is RFC 6749 §5.1:
+    ``access_token`` / ``refresh_token`` / ``expires_in`` /
+    ``token_type='Bearer'`` / ``scope``.
+    """
+    access = ACCESS_TOKEN_PREFIX + secrets.token_urlsafe(32)
+    refresh = REFRESH_TOKEN_PREFIX + secrets.token_urlsafe(32)
+    access_hash = hash_token(access)
+    refresh_hash = hash_token(refresh)
+    access_expires_at = _now_plus(access_ttl_seconds())
+    refresh_expires_at = _now_plus(refresh_ttl_seconds())
+    ensure_oauth_tables()
+    with _get_manager().engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO oauth_tokens (access_token_hash, refresh_token_hash, "
+                " client_id, user_id, scopes, access_expires_at, refresh_expires_at) "
+                "VALUES (:a, :r, :cid, :uid, :scopes, :arexp, :rexp)"
+            ),
+            {
+                "a": access_hash,
+                "r": refresh_hash,
+                "cid": str(client_id),
+                "uid": int(user_id),
+                "scopes": json.dumps(list(scopes)),
+                "arexp": access_expires_at,
+                "rexp": refresh_expires_at,
+            },
+        )
+    return {
+        "access_token": access,
+        "refresh_token": refresh,
+        "token_type": "Bearer",
+        "expires_in": access_ttl_seconds(),
+        "scope": " ".join(scopes),
+    }
+
+
+def refresh_tokens(*, refresh_token: str | None, client_id: str) -> dict[str, Any]:
+    """Rotate a refresh token into a fresh access + refresh pair (one shot).
+
+    Rotation is unconditional: the presented row is revoked in the same
+    transaction that issues the replacement, so a stolen refresh token that
+    loses the race (or is replayed afterwards) is worth nothing — the honest
+    holder's rotation already revoked the hash it shares.  A token issued to
+    another client, an expired one and a revoked one all answer the single
+    ``invalid_grant`` the endpoint reports.
+
+    Raises:
+        TokenError: any failure — the endpoint never leaks which one.
+    """
+    if not refresh_token:
+        raise TokenError("missing refresh_token")
+    presented_hash = hash_token(str(refresh_token))
+    now = _stamp()
+    with _get_manager().engine.begin() as conn:
+        row = conn.execute(
+            text(
+                "SELECT id, client_id, user_id, scopes, refresh_expires_at, revoked_at "
+                "FROM oauth_tokens WHERE refresh_token_hash = :h"
+            ),
+            {"h": presented_hash},
+        ).first()
+        if row is None:
+            raise TokenError("unknown refresh token")
+        found = dict(row._mapping)
+        if found.get("revoked_at"):
+            raise TokenError("refresh token revoked")
+        if str(found.get("refresh_expires_at") or "") <= now:
+            raise TokenError("refresh token expired")
+        if str(found.get("client_id")) != str(client_id):
+            raise TokenError("refresh token was issued to another client")
+        claimed = conn.execute(
+            text(
+                "UPDATE oauth_tokens SET revoked_at = :now "
+                "WHERE id = :id AND revoked_at IS NULL"
+            ),
+            {"now": now, "id": int(found["id"])},
+        )
+        if int(claimed.rowcount or 0) != 1:
+            raise TokenError("refresh token already rotated")
+        scopes = _decode_json_list(found.get("scopes"))
+        user_id = int(found["user_id"])
+    # New pair on a fresh row: the revoked row stays as the rotation trail.
+    return issue_tokens(
+        client_id=str(client_id), user_id=user_id, scopes=scopes
+    )
+
+
+#: ``last_used_at`` write throttle for OAuth rows (≤ 1 write/60s per token,
+#: mirroring :func:`zolai.api.session_auth._touch_last_used` — the resolve
+#: path runs on every MCP request and must stay read-only in the common case).
+_TOUCH_THROTTLE_S = 60.0
+_touch_lock = threading.Lock()
+_touch_marks: dict[str, float] = {}
+
+
+def _touch_token_used(row_id: Any, token_hash: str) -> None:
+    """Throttled ``last_used_at`` update for an ``oauth_tokens`` row."""
+    now = time.monotonic()
+    with _touch_lock:
+        last = _touch_marks.get(token_hash)
+        if last is not None and now - last < _TOUCH_THROTTLE_S:
+            return
+        if len(_touch_marks) >= 4096:
+            _touch_marks.clear()
+        _touch_marks[token_hash] = now
+    try:
+        with _get_manager().engine.begin() as conn:
+            conn.execute(
+                text("UPDATE oauth_tokens SET last_used_at = :stamp WHERE id = :id"),
+                {"stamp": _stamp(), "id": int(row_id)},
+            )
+    except Exception:  # noqa: BLE001 - observability only, never breaks auth
+        pass
+
+
+def resolve_access_token(token: str | None) -> dict[str, Any] | None:
+    """Resolve a ``zolai_at_*`` access token to a principal record, or ``None``.
+
+    The record is deliberately the **same shape** the middleware publishes for
+    an API key (``id``/``name``/``key_prefix``/``scopes``) so
+    ``require_scope`` / ``role_for`` / ``has_role`` work unchanged, plus the
+    identity fields ``auth_source='oauth'``, ``user_id``, ``username`` and
+    ``client_id``.  ``scopes`` is the grant minted at the token endpoint —
+    already narrowed to the user's role at authorize time, so an OAuth
+    principal can never reach a tier its user does not hold.
+
+    Returns ``None`` for missing / foreign-prefix / unknown / expired /
+    revoked tokens, and for a grant whose user has since been **disabled or
+    deleted** — disabling the account kills its OAuth grants with it (the
+    identity layer stays the single source of truth for that).
+    """
+    if not token or not token.startswith(ACCESS_TOKEN_PREFIX):
+        return None
+    presented_hash = hash_token(token)
+    now = _stamp()
+    with _get_manager().engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT t.id, t.client_id, t.user_id, t.scopes, "
+                "       t.access_expires_at, t.revoked_at, u.username, u.enabled "
+                "FROM oauth_tokens t "
+                "LEFT JOIN users u ON u.id = t.user_id "
+                "WHERE t.access_token_hash = :h"
+            ),
+            {"h": presented_hash},
+        ).first()
+    if row is None:
+        return None
+    found = dict(row._mapping)
+    if found.get("revoked_at"):
+        return None
+    if str(found.get("access_expires_at") or "") <= now:
+        return None
+    if found.get("username") is None or not found.get("enabled"):
+        # User disabled or deleted after the grant was minted.
+        return None
+    _touch_token_used(found["id"], presented_hash)
+    return {
+        "id": f"oauth:{found['id']}",
+        "name": f"oauth:{found['client_id']}",
+        "key_prefix": token[:16],
+        "scopes": _decode_json_list(found.get("scopes")),
+        "auth_source": "oauth",
+        "user_id": int(found["user_id"]),
+        "username": str(found["username"]),
+        "client_id": str(found["client_id"]),
+    }
