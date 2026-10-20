@@ -3,14 +3,14 @@
 Why this module exists (P0, 2026-10-18)
 ---------------------------------------
 ``zolai/api/zvs_checker.py`` (the *lenient* checker this replaces on the API
-paths) defines ``HISTORICAL_EXCEPTIONS`` as a list that contains the ZVS 2018
-forbidden forms themselves — ``pathian``, ``bawipa``, ``siangpahrang``,
-``fapa``, ``cu``, ``cun`` — so its ``check_response`` **skips** them and
-``check_response("Pathian in Pathian")`` returned ``is_compliant: True``.
-Both user-facing validation paths (``server.py``'s ``/chat/zolai`` +
-``/chat/gemini`` endpoints and ``AnswerValidator``) imported that lenient
-authority, so user-facing answers could be rubber-stamped with deprecated
-orthography — a direct violation of the org ground truth (ZVS 2018).
+paths) lists the ZVS 2018 deprecated orthography tokens — the set defined in
+``zolai/zvs/rules_data.py`` — inside its own ``HISTORICAL_EXCEPTIONS``, so
+its ``check_response`` **skips** them: a sentence built entirely from
+deprecated forms came back ``is_compliant: True``.  Both user-facing
+validation paths (``server.py``'s ``/chat/zolai`` + ``/chat/gemini``
+endpoints and ``AnswerValidator``) imported that lenient authority, so
+user-facing answers could be rubber-stamped with deprecated orthography —
+a direct violation of the org ground truth (ZVS 2018).
 
 The strict authority
 --------------------
@@ -25,9 +25,9 @@ both are unconditional forbidden-form matchers — only the lenient
 One deliberate difference for AI output
 ---------------------------------------
 ``zolai.zvs.validate``'s default exception registry suppresses *historical*
-tokens (``pathian`` …) when they are attested in the Tedim Bible corpus — the
-TDB77 translation uses the old orthography, so in production that whitelist
-would once again let an AI answer saying ``Pathian`` pass.  An AI answer is
+tokens when they are attested in the Tedim Bible corpus — the TDB77
+translation uses the old orthography, so in production that whitelist would
+once again let an AI answer in the old orthography pass.  An AI answer is
 **modern text**, not a quoted scripture/historical snippet, so this adapter
 passes an exception registry with **no** rule/token/phrase suppressions: every
 ZVS 2018 forbidden form is reported, Bible-attestation or not.  The registry
