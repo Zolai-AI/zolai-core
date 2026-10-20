@@ -87,8 +87,19 @@ class TestNamespace:
         admin = allow_list("admin")
         assert public <= member <= admin
         # The member namespace is exactly the public set + the family + the two
-        # remaining bare analysis tools.
-        assert member == public | set(fnd.FOUNDATION_TOOL_NAMES) | {"word_related", "analyze_text"}
+        # remaining bare analysis tools + the B1a language family.
+        assert member == (
+            public
+            | set(fnd.FOUNDATION_TOOL_NAMES)
+            | {"word_related", "analyze_text"}
+            | {
+                "lex_search",
+                "word_detail",
+                "syllable_segment",
+                "pos_tag",
+                "zvs_validate",
+            }
+        )
 
     def test_the_member_list_is_public_then_family_then_analysis(self) -> None:
         """Declaration order is stable (snapshot of the contract order)."""
