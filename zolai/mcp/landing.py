@@ -117,21 +117,106 @@ def _tool_count_line() -> str:
 
 
 _STYLE = """
-:root { color-scheme: light dark; }
-body { font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
-       margin: 0 auto; max-width: 60rem; padding: 2rem 1.25rem 4rem; }
-h1 { font-size: 1.7rem; margin: 0 0 .25rem; }
-h2 { font-size: 1.15rem; margin: 2.25rem 0 .5rem; }
-p, li { max-width: 60rem; }
-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
-table { border-collapse: collapse; width: 100%; margin: .75rem 0 0; }
-th, td { border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-         padding: .45rem .6rem; text-align: left; vertical-align: top; }
-th { font-weight: 600; }
-td.name { white-space: nowrap; }
-.tier { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
-.muted { opacity: .75; }
-ul.endpoints { padding-left: 1.1rem; }
+:root {
+  color-scheme: light dark;
+  --space-xs: .25rem; --space-sm: .5rem; --space-md: 1rem; --space-lg: 1.5rem;
+  --space-xl: 2rem; --space-2xl: 3rem;
+  --radius-sm: .25rem; --radius-md: .5rem; --radius-lg: .75rem;
+  --border-color: color-mix(in srgb, currentColor 20%, transparent);
+  --muted-opacity: .7;
+  --code-bg: color-mix(in srgb, currentColor 10%, transparent);
+  --table-header-bg: color-mix(in srgb, currentColor 8%, transparent);
+  --card-bg: color-mix(in srgb, currentColor 5%, transparent);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, currentColor 30%, transparent);
+  --shadow-sm: 0 1px 2px color-mix(in srgb, currentColor 10%, transparent);
+  --shadow-md: 0 4px 6px -1px color-mix(in srgb, currentColor 10%, transparent);
+  --transition-fast: 150ms ease; --transition-normal: 250ms ease;
+}
+
+/* ==================== BASE & TYPOGRAPHY ==================== */
+*, *::before, *::after { box-sizing: border-box; }
+html { font-size: 100%; -webkit-text-size-adjust: 100%; }
+body {
+  font: clamp(15px, 1.6vw, 17px) / 1.6 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  margin: 0; padding: 0; min-width: 0; max-width: 100%;
+  background: canvas; color: canvastext;
+}
+main { width: min(100% - 2*var(--space-md), 64rem); margin: 0 auto; padding: var(--space-lg) var(--space-md) var(--space-2xl); }
+@media (min-width: 48rem) { main { padding: var(--space-xl) var(--space-lg) var(--space-2xl); } }
+@media (min-width: 64rem) { main { padding: var(--space-2xl) var(--space-xl) var(--space-2xl); } }
+
+h1 { font-size: clamp(1.5rem, 4vw, 2.25rem); font-weight: 700; line-height: 1.2; margin: 0 0 var(--space-sm); letter-spacing: -.02em; }
+h2 { font-size: clamp(1.25rem, 3vw, 1.5rem); font-weight: 600; line-height: 1.3; margin: var(--space-2xl) 0 var(--space-md); color: inherit; }
+h3 { font-size: clamp(1rem, 2.5vw, 1.125rem); font-weight: 600; margin: var(--space-lg) 0 var(--space-sm); }
+p, li { max-width: 75ch; line-height: 1.65; margin: var(--space-sm) 0; }
+a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+a:hover, a:focus { text-decoration-thickness: 2px; }
+code, kbd, samp { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: .9em; background: var(--code-bg); padding: .1em .35em; border-radius: var(--radius-sm); word-break: break-word; }
+pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; line-height: 1.55; background: var(--code-bg); padding: var(--space-md); border-radius: var(--radius-md); overflow-x: auto; margin: var(--space-md) 0; max-width: 100%; }
+pre code { background: transparent; padding: 0; font-size: inherit; }
+
+/* ==================== UTILITIES ==================== */
+.muted { opacity: var(--muted-opacity); font-size: .92rem; }
+.tier { display: inline-flex; align-items: center; font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; padding: .1rem .45rem; border-radius: var(--radius-sm); background: var(--table-header-bg); white-space: nowrap; }
+.tier-public { background: color-mix(in srgb, green 15%, transparent); }
+.tier-member { background: color-mix(in srgb, blue 15%, transparent); }
+.tier-admin { background: color-mix(in srgb, purple 15%, transparent); }
+.tier-unreachable { background: color-mix(in srgb, red 15%, transparent); }
+
+/* ==================== ENDPOINTS LIST ==================== */
+ul.endpoints { list-style: none; padding: 0; margin: var(--space-md) 0; display: flex; flex-wrap: wrap; gap: var(--space-sm); }
+ul.endpoints li { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: var(--space-sm) var(--space-md); font-size: .9rem; min-width: 0; flex: 1 1 280px; }
+ul.endpoints code { background: transparent; padding: 0; font-size: inherit; }
+
+/* ==================== TABLES - RESPONSIVE ==================== */
+.table-wrapper { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: var(--space-md) 0; border: 1px solid var(--border-color); border-radius: var(--radius-lg); background: canvas; }
+.table-wrapper::-webkit-scrollbar { height: 8px; }
+.table-wrapper::-webkit-scrollbar-thumb { background: color-mix(in srgb, currentColor 30%, transparent); border-radius: 4px; }
+table { border-collapse: collapse; width: 100%; min-width: 600px; font-size: .9rem; }
+th, td { border: none; border-bottom: 1px solid var(--border-color); padding: var(--space-sm) var(--space-md); text-align: left; vertical-align: top; }
+th { background: var(--table-header-bg); font-weight: 600; font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: inherit; opacity: .85; position: sticky; top: 0; z-index: 1; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--table-header-bg); }
+td.name { white-space: nowrap; font-weight: 500; min-width: 160px; }
+td.name code { background: transparent; padding: 0; font-size: .95em; }
+td.description { max-width: 45ch; }
+td.notes { max-width: 30ch; }
+td.args code { background: transparent; padding: 0; font-size: .85em; }
+
+/* ==================== MOBILE CARD VIEW (<= 480px) ==================== */
+@media (max-width: 480px) {
+  .table-wrapper { border: none; border-radius: 0; min-width: 0; overflow: visible; }
+  .table-wrapper table, .table-wrapper thead, .table-wrapper tbody, .table-wrapper th, .table-wrapper td, .table-wrapper tr {
+    display: block; width: 100%; box-sizing: border-box; }
+  .table-wrapper thead { display: none; }
+  .table-wrapper tr { margin-bottom: var(--space-lg); padding: var(--space-md); background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
+  .table-wrapper td { border: none; padding: var(--space-xs) 0; display: flex; flex-wrap: wrap; gap: var(--space-sm); align-items: flex-start; min-height: 2.5rem; }
+  .table-wrapper td::before { content: attr(data-label); font-weight: 600; font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: inherit; opacity: .65; min-width: 80px; flex-shrink: 0; }
+  .table-wrapper td.name { font-weight: 600; font-size: 1rem; padding-bottom: var(--space-sm); border-bottom: 1px solid var(--border-color); margin-bottom: var(--space-xs); }
+  .table-wrapper td.name::before { display: none; }
+  .table-wrapper td.tier .tier { font-size: .65rem; }
+}
+
+/* ==================== TABLET VIEW (481px - 768px) ==================== */
+@media (min-width: 481px) and (max-width: 768px) {
+  .table-wrapper { min-width: 0; }
+  table { font-size: .85rem; }
+  th, td { padding: var(--space-sm) var(--space-sm); }
+  td.name { min-width: 140px; }
+  td.description { max-width: 35ch; }
+}
+
+/* ==================== FOCUS & ACCESSIBILITY ==================== */
+:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+/* ==================== PRINT ==================== */
+@media print {
+  .table-wrapper { overflow: visible; border: none; }
+  .table-wrapper table { min-width: 100%; page-break-inside: auto; }
+  .table-wrapper tr { page-break-inside: avoid; break-inside: avoid; }
+  main { max-width: none; padding: 0; }
+}
 """
 
 
@@ -184,7 +269,7 @@ def render_landing(*, generated_at: str | None = None) -> str:
             continue
         parts.append(f'<h2 id="tier-{tier}">{esc(tier.title())} tools ({len(tier_rows)})</h2>')
         parts.append(f'<p class="muted">{esc(TIER_BLURB[tier])}</p>')
-        parts.append("<table>")
+        parts.append('<div class="table-wrapper"><table>')
         parts.append(
             "<thead><tr><th>Tool</th><th>What it does</th>"
             "<th>Arguments</th><th>Notes</th></tr></thead><tbody>"
@@ -192,14 +277,15 @@ def render_landing(*, generated_at: str | None = None) -> str:
         for row in tier_rows:
             parts.append(
                 f'<tr data-tool="{esc(row["name"])}" data-tier="{esc(row["tier"])}">'
-                f'<td class="name"><code>{esc(row["name"])}</code><br>'
-                f'<span class="tier muted">{esc(row["title"])}</span></td>'
-                f"<td>{esc(row['description'])}</td>"
-                f"<td><code>{esc(_arguments(row))}</code></td>"
-                f'<td class="muted">{esc(_notes(row))}</td>'
+                f'<td class="name" data-label="Tool"><code>{esc(row["name"])}</code><br>'
+                f'<span class="tier tier-{row["tier"]}">{esc(row["tier"])}</span>'
+                f'<span class="title muted">{esc(row["title"])}</span></td>'
+                f'<td data-label="Description">{esc(row["description"])}</td>'
+                f'<td data-label="Arguments"><code>{esc(_arguments(row))}</code></td>'
+                f'<td data-label="Notes" class="muted">{esc(_notes(row))}</td>'
                 "</tr>"
             )
-        parts.append("</tbody></table>")
+        parts.append("</tbody></table></div>")
 
     unreachable = [row for row in rows if row["tier"] == "unreachable"]
     if unreachable:
