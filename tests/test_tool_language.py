@@ -414,6 +414,36 @@ class TestStrictZvsWiring:
         assert hit["forbidden"] == "ram"
         assert hit["preferred"] == "gam"
 
+    @pytest.mark.parametrize(
+        ("bad", "good"),
+        [
+            ("pathian", "pasian"),
+            ("ram", "gam"),
+            ("fapa", "tapa"),
+            ("bawipa", "topa"),
+            ("siangpahrang", "kumpipa"),
+            ("cu", "tua"),
+            ("cun", "tua"),
+        ],
+    )
+    def test_every_forbidden_form_is_non_compliant(self, zvs_off_db, bad, good) -> None:
+        """The whole AGENTS.md forbidden list, under the strict authority.
+
+        ``zolai/api/zvs_checker.py`` answers compliant for several of these
+        (its ``HISTORICAL_EXCEPTIONS`` skip-list), which is exactly why the
+        tool must never call it.  ``context="modern"`` refuses the historical
+        registry, so a hit here can only come from the rules themselves.
+        """
+        result = _run("zvs_validate", {"text": f"Ka {bad} hi.", "context": "modern"})
+        assert result.ok, result.error
+        assert result.data["is_valid"] is False, f"{bad!r} was reported compliant"
+        hits = [v for v in result.data["violations"] if v["forbidden"] == bad]
+        assert hits, (
+            f"no violation named {bad!r}; saw "
+            f"{[v['forbidden'] for v in result.data['violations']]}"
+        )
+        assert hits[0]["preferred"] == good
+
     def test_pathian_is_not_reported_as_compliant(self, zvs_off_db) -> None:
         # The whole reason this batch refuses ``zolai/api/zvs_checker.py``: its
         # exception list skips pathian/fapa/bawipa/cu/cun outright, so
