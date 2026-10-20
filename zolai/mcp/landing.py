@@ -177,7 +177,7 @@ th, td { border: none; border-bottom: 1px solid var(--border-color); padding: va
 th { background: var(--table-header-bg); font-weight: 600; font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: inherit; opacity: .85; position: sticky; top: 0; z-index: 1; }
 tr:last-child td { border-bottom: none; }
 tr:hover td { background: var(--table-header-bg); }
-td.name { white-space: nowrap; font-weight: 500; min-width: 160px; }
+td.name { font-weight: 500; min-width: 160px; }
 td.name code { background: transparent; padding: 0; font-size: .95em; }
 td.description { max-width: 45ch; }
 td.notes { max-width: 30ch; }
@@ -186,20 +186,21 @@ td.args code { background: transparent; padding: 0; font-size: .85em; }
 /* ==================== MOBILE CARD VIEW (<= 480px) ==================== */
 @media (max-width: 480px) {
   .table-wrapper { border: none; border-radius: 0; min-width: 0; overflow: visible; }
+  .table-wrapper table { min-width: 0; }
   .table-wrapper table, .table-wrapper thead, .table-wrapper tbody, .table-wrapper th, .table-wrapper td, .table-wrapper tr {
     display: block; width: 100%; box-sizing: border-box; }
   .table-wrapper thead { display: none; }
   .table-wrapper tr { margin-bottom: var(--space-lg); padding: var(--space-md); background: var(--card-bg); border: 1px solid var(--border-color); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
-  .table-wrapper td { border: none; padding: var(--space-xs) 0; display: flex; flex-wrap: wrap; gap: var(--space-sm); align-items: flex-start; min-height: 2.5rem; }
+  .table-wrapper td { border: none; padding: var(--space-xs) 0; display: flex; flex-wrap: wrap; gap: var(--space-sm); align-items: flex-start; min-height: 2.5rem; overflow-wrap: anywhere; }
   .table-wrapper td::before { content: attr(data-label); font-weight: 600; font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: inherit; opacity: .65; min-width: 80px; flex-shrink: 0; }
-  .table-wrapper td.name { font-weight: 600; font-size: 1rem; padding-bottom: var(--space-sm); border-bottom: 1px solid var(--border-color); margin-bottom: var(--space-xs); }
+  .table-wrapper td.name { font-weight: 600; font-size: 1rem; padding-bottom: var(--space-sm); border-bottom: 1px solid var(--border-color); margin-bottom: var(--space-xs); white-space: normal; min-width: 0; }
   .table-wrapper td.name::before { display: none; }
   .table-wrapper td.tier .tier { font-size: .65rem; }
 }
 
 /* ==================== TABLET VIEW (481px - 768px) ==================== */
 @media (min-width: 481px) and (max-width: 768px) {
-  .table-wrapper { min-width: 0; }
+  .table-wrapper { min-width: 0; overflow-x: auto; }
   table { font-size: .85rem; }
   th, td { padding: var(--space-sm) var(--space-sm); }
   td.name { min-width: 140px; }
