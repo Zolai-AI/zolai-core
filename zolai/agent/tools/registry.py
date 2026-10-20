@@ -13,9 +13,13 @@ rendered from them (see :mod:`zolai.agent.tools.render`).  Classification:
   ``search_myanmar_dictionary``, ``translate_zo_to_myanmar``,
   ``translate_myanmar_to_zo``
 - **member** — the public set above, the remaining analysis tools
-  (``analyze_text``, ``word_related``) and the whole generated ``foundation_*``
+  (``analyze_text``, ``word_related``), the whole generated ``foundation_*``
   family (one tool per typed ``/api/v1/foundation/*`` contract — see
-  :mod:`zolai.agent.tools.foundation`)
+  :mod:`zolai.agent.tools.foundation`) and the ``language`` family
+  (``lex_search``, ``word_detail``, ``syllable_segment``, ``pos_tag``,
+  ``zvs_validate`` — see :mod:`zolai.agent.tools.language`).  The language
+  tools are **not** anonymous: widening the anonymous set is a founder decision
+  (registry-extension §5.7) and was not taken here.
 - **admin extras** — knowledge-base introspection + proposal surfaces:
   ``knowledge_stats``, ``kb_research``, ``review_queue_submit``,
   ``provider_status`` (names/enabled/model — **never keys**)
@@ -29,6 +33,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from .foundation import FOUNDATION_SPECS, FOUNDATION_TOOL_NAMES
+from .language import LANGUAGE_SPECS, LANGUAGE_TOOL_NAMES
 from .render import render_many
 from .types import ToolSpec, ToolSpecError
 
@@ -277,6 +282,10 @@ SPECS: dict[str, ToolSpec] = {
     # ``/api/v1/foundation/*`` contract, so a tool can never disagree with the
     # route it wraps (zolai/agent/tools/foundation.py).
     **FOUNDATION_SPECS,
+    # B1a — the language family: five bilingual/linguistic reads that call the
+    # very functions their REST twins call (zolai/agent/tools/language.py).
+    # Member tier only; the anonymous set is untouched.
+    **LANGUAGE_SPECS,
 }
 
 
@@ -339,9 +348,9 @@ def allow_list(scope: str, *, granted: Iterable[str] | None = None) -> frozenset
     """Tool allow-list for a caller scope.
 
     ``public`` → the anonymous retrieval/analysis set (retrieval tools +
-    3 Myanmar lookups); ``member`` → every Zolai analysis tool plus the
-    generated ``foundation_*`` family; ``admin`` → that plus the admin extras
-    and the optional web tool.
+    3 Myanmar lookups); ``member`` → every Zolai analysis tool, the generated
+    ``foundation_*`` family and the ``language`` family; ``admin`` → that plus
+    the admin extras and the optional web tool.
 
     ``granted`` is the caller's own scope set.  It can only ever *narrow* the
     tier (see :func:`tool_scope_allows`), so the result is always a subset of
@@ -350,11 +359,16 @@ def allow_list(scope: str, *, granted: Iterable[str] | None = None) -> frozenset
     if scope == "public":
         tier: frozenset[str] = ANONYMOUS_TOOLS
     elif scope == "member":
-        tier = frozenset(PUBLIC_TOOLS) | frozenset(FOUNDATION_TOOL_NAMES)
+        tier = (
+            frozenset(PUBLIC_TOOLS)
+            | frozenset(FOUNDATION_TOOL_NAMES)
+            | frozenset(LANGUAGE_TOOL_NAMES)
+        )
     elif scope == "admin":
         tier = (
             frozenset(PUBLIC_TOOLS)
             | frozenset(FOUNDATION_TOOL_NAMES)
+            | frozenset(LANGUAGE_TOOL_NAMES)
             | frozenset(ADMIN_TOOLS)
             | frozenset(OPTIONAL_TOOLS)
         )

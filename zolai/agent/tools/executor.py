@@ -20,6 +20,7 @@ from ...rag.retrieve import UnifiedRetriever
 from .errors import classify_failure
 from .family import assert_handlers_cover_specs
 from .foundation import FOUNDATION_HANDLERS
+from .language import LANGUAGE_HANDLERS
 from .registry import SPECS, get_tool
 from .types import ToolCall, ToolError, ToolErrorCode, ToolResult
 
@@ -344,6 +345,9 @@ HANDLERS = {
     # The generated ``foundation_*`` family (one handler per typed
     # /api/v1/foundation contract — zolai/agent/tools/foundation.py).
     **FOUNDATION_HANDLERS,
+    # B1a — the language family (zolai/agent/tools/language.py): each handler
+    # is one in-process call into the function its REST twin routes to.
+    **LANGUAGE_HANDLERS,
 }
 
 # Import-time: a published tool with no handler would be advertised and then
