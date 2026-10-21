@@ -58,7 +58,7 @@ app.get('/', async (c) => {
 ### Result
 ```bash
 ✅ curl https://zolai.space/api/csrf-token
-{"token":"92c3a79ee2d8164a8222c3f51317240eeccd23fa234d25b79e8ff760d9b7ca8c"}
+{"token":"<csrf-token-from-endpoint>"}
 ```
 
 ---
