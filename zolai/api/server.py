@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -382,6 +383,52 @@ def _stop_monitoring() -> None:
 # --- App Factory ---
 
 
+def _is_production_environment() -> bool:
+    """Whether this process believes it is production.
+
+    Same convention as ``zolai.notifications.service``: ``ENVIRONMENT`` names
+    the deployment, defaulting to ``development``.  ``production`` (any case)
+    or a real hostname (``ENVIRONMENT`` unset in a systemd unit / Dockerfile)
+    count as production; a named dev/staging sandbox does not.
+    """
+    env = os.environ.get("ENVIRONMENT", "").strip().lower()
+    if env:
+        return env == "production" or bool(
+            re.fullmatch(r"\d{1,3}(\.\d{1,3}){3}", env)
+        ) or env in {"prod", "staging"}
+    # Unset: production is the common case for a deployed uvicorn unit, and it
+    # is the only reading under which this warning is useful at all.
+    return True
+
+
+def _warn_if_auth_not_enforced() -> None:
+    """Warn at startup when ``ZOLAI_API_AUTH`` is not ``enforce`` in production.
+
+    ``warn`` (the shipped default) accepts unauthenticated ``/api/v1`` reads
+    and only logs them, so a production box left on it serves the table
+    inventory, row counts and audit rows to anyone who asks — which is exactly
+    how ``/api/v1/predictions/health``, ``/desktop/tables``, ``/api/v1/audit``
+    and ``/api/v1/foundation/stats`` were measured answering 200 with no
+    credential.  This is a **warning**, never a refusal: flipping the mode is
+    an operational decision that must be paired with issuing consumer keys
+    first, and tests legitimately run in ``warn``/``off``.
+
+    Fires from the lifespan only, so importing this module is silent and no
+    test that merely constructs an app sees a new log line.
+    """
+    mode = auth.api_auth_mode()
+    if mode == "enforce" or not _is_production_environment():
+        return
+    logger.warning(
+        "ZOLAI_API_AUTH=%r in production: /api/v1 accepts unauthenticated "
+        "reads and only logs them, so data-bearing routes (e.g. "
+        "/api/v1/predictions/health, /desktop/tables, /api/v1/audit, "
+        "/api/v1/foundation/stats) answer 200 with no credential. Issue "
+        "consumer keys, then set ZOLAI_API_AUTH=enforce.",
+        mode,
+    )
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
 
@@ -417,6 +464,8 @@ def create_app() -> FastAPI:
 
         # Monitoring: FK guard, build info and the background metrics sampler.
         _start_monitoring()
+
+        _warn_if_auth_not_enforced()
 
         logger.info("Zolai API started on %s:%d", config.api_host, config.api_port)
         yield
