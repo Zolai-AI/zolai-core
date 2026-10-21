@@ -1251,3 +1251,160 @@ class TestMiddlewareBearerPath:
         assert body["auth_source"] is None  # key path, not oauth
         assert body["scopes"] == ["dataset:read"]
         assert body["oauth_identity"] is None
+
+
+# ---------------------------------------------------------------------------
+# C5 — the strict WWW-Authenticate challenge (flag-gated, DEFAULT OFF)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def mcp_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+    """Real MCP transports + OAuth routes behind ``ApiKeyMiddleware``.
+
+    Lifespan-free (never ``create_app``): ``tools/list`` needs no DB, and the
+    OAuth/session seams come from the ``oauth_db``/``user_db`` fixtures.
+    ``ZOLAI_API_AUTH`` is pinned to ``warn`` — the shipped default — so the
+    flag under test is the only variable.
+    """
+    from zolai.api.auth_middleware import ApiKeyMiddleware
+    from zolai.api.mcp_router import root_router as mcp_root_router
+    from zolai.api.mcp_router import router as mcp_router
+
+    monkeypatch.setenv("ZOLAI_API_AUTH", "warn")
+    application = FastAPI()
+    application.include_router(oauth_router.router)
+    application.include_router(mcp_router)
+    application.include_router(mcp_root_router)
+    application.add_middleware(ApiKeyMiddleware)
+    return application
+
+
+@pytest.fixture()
+def mcp_client(mcp_app: FastAPI) -> TestClient:
+    return TestClient(mcp_app)
+
+
+_TOOLS_LIST = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+
+
+class TestStrictChallenge:
+    """``ZOLAI_MCP_OAUTH_REQUIRED`` — opt-in strict, default byte-identical.
+
+    Parametrized over ``oauth.MCP_PATHS`` (the source of truth) so the
+    middleware's two path literals cannot drift away from this constant
+    without failing a gate.
+    """
+
+    @pytest.mark.parametrize("mcp_path", sorted(oauth.MCP_PATHS))
+    def test_flag_off_keyless_mcp_still_serves_200(
+        self,
+        mcp_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        mcp_path: str,
+    ) -> None:
+        """Default-safe: Claude / Cursor / OpenCode / VS Code / Gemini CLI."""
+        from zolai.agent.tools.registry import allow_list
+
+        monkeypatch.delenv("ZOLAI_MCP_OAUTH_REQUIRED", raising=False)
+        response = mcp_client.post(mcp_path, json=_TOOLS_LIST)
+        assert response.status_code == 200, response.text
+        assert "www-authenticate" not in response.headers, "no challenge by default"
+        tools = response.json()["result"]["tools"]
+        # The anonymous tier, unchanged: the real handler answered with the
+        # registry's public allow-list (8 today), not an error shell.
+        assert len(tools) == len(allow_list("public"))
+        assert len(tools) > 0
+
+    @pytest.mark.parametrize("mcp_path", sorted(oauth.MCP_PATHS))
+    def test_strict_flag_challenges_keyless_mcp_with_absolute_resource_metadata(
+        self,
+        mcp_client: TestClient,
+        strict_flag: str,
+        mcp_path: str,
+    ) -> None:
+        response = mcp_client.post(mcp_path, json=_TOOLS_LIST)
+        assert response.status_code == 401, response.text
+        header = response.headers["www-authenticate"]
+        assert header.startswith("Bearer resource_metadata=")
+        metadata_url = header.split('"')[1]
+        assert metadata_url == (
+            "http://testserver/.well-known/oauth-protected-resource"
+        ), "resource_metadata must be an absolute URL of the RFC 9728 document"
+        # No credential was presented → RFC 6750 forbids an error attribute.
+        assert "error=" not in header
+        assert response.json() == {
+            "detail": {"error": "unauthorized", "reason": "oauth_required"},
+        }
+
+    def test_strict_flag_still_serves_discovery_without_a_credential(
+        self, mcp_client: TestClient, strict_flag: str
+    ) -> None:
+        """Strict mode must not turn off the switch that turns it on."""
+        for path in AS_PATHS:
+            response = mcp_client.get(path)
+            assert response.status_code == 200, f"{path} must stay public: {response.text}"
+            assert "www-authenticate" not in response.headers, path
+            assert response.json()["issuer"] == "http://testserver"
+        for path in PRM_PATHS:
+            response = mcp_client.get(path)
+            assert response.status_code == 200, f"{path} must stay public: {response.text}"
+            assert "www-authenticate" not in response.headers, path
+            assert response.json()["resource"].startswith("http://testserver/")
+
+    def test_strict_flag_serves_a_valid_bearer_unchanged(
+        self,
+        mcp_client: TestClient,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+        strict_flag: str,
+    ) -> None:
+        """A resolved OAuth principal is never challenged — only absence is."""
+        from zolai.agent.tools.registry import allow_list
+
+        code, verifier = _authorize_and_get_code(client, registered)
+        tokens = _exchange_code(client, registered, code, verifier).json()
+        response = mcp_client.post(
+            "/mcp",
+            json=_TOOLS_LIST,
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        assert response.status_code == 200, response.text
+        assert "www-authenticate" not in response.headers
+        tools = response.json()["result"]["tools"]
+        # Admin user via rbac.role_for — strictly wider than the anonymous set.
+        assert len(tools) == len(allow_list("admin"))
+        assert len(tools) > len(allow_list("public"))
+
+    def test_strict_flag_rejects_an_expired_bearer_with_invalid_token(
+        self,
+        mcp_client: TestClient,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+        strict_flag: str,
+    ) -> None:
+        """A presented-but-dead zolai_at_* gets RFC 6750 ``error``."""
+        code, verifier = _authorize_and_get_code(client, registered)
+        tokens = _exchange_code(client, registered, code, verifier).json()
+        with oauth_db.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE oauth_tokens SET access_expires_at = '2000-01-01 00:00:00' "
+                    "WHERE access_token_hash = :h"
+                ),
+                {"h": oauth.hash_token(tokens["access_token"])},
+            )
+        response = mcp_client.post(
+            "/mcp",
+            json=_TOOLS_LIST,
+            headers={"Authorization": f"Bearer {tokens['access_token']}"},
+        )
+        assert response.status_code == 401
+        header = response.headers["www-authenticate"]
+        assert header.startswith("Bearer resource_metadata=")
+        assert 'error="invalid_token"' in header
+        assert "error_description=" in header
