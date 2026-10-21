@@ -16,7 +16,7 @@ curl -s "http://192.168.100.7:3000/api/csrf-token" | jq .
 **Result:**
 ```json
 {
-  "token": "32c0f21f2d671647067c1f98ac26b750de6d8d08127361513911d929da73e490"
+  "token": "<csrf-token-from-endpoint>"
 }
 ```
 
@@ -31,7 +31,7 @@ curl -s -i "http://192.168.100.7:3000/api/csrf-token" 2>&1 | grep -i "set-cookie
 
 **Result:**
 ```
-set-cookie: __csrf-token=aca5bca286650eab0fad2ca35bb8b06e0c3045cb977e40d7d058aa083e14264b; Max-Age=86400; Path=/; HttpOnly; SameSite=Lax
+set-cookie: __csrf-token=<csrf-token-from-set-cookie>; Max-Age=86400; Path=/; HttpOnly; SameSite=Lax
 ```
 
 **Status:** ✅ PASS - Cookie set correctly with:
@@ -44,7 +44,7 @@ set-cookie: __csrf-token=aca5bca286650eab0fad2ca35bb8b06e0c3045cb977e40d7d058aa0
 
 ### ✅ Test 3: POST with CSRF Token in Header
 ```bash
-TOKEN="32c0f21f2d671647067c1f98ac26b750de6d8d08127361513911d929da73e490"
+TOKEN="<csrf-token-from-set-cookie>"
 curl -s -X POST "http://192.168.100.7:3000/api/content/posts" \
   -H "X-CSRF-Token: $TOKEN" \
   -H "Content-Type: application/json" \
@@ -89,7 +89,7 @@ curl -s -X POST "http://192.168.100.7:3000/api/content/posts" \
 
 ### ✅ Test 5: POST with CSRF Token in Body
 ```bash
-TOKEN="32c0f21f2d671647067c1f98ac26b750de6d8d08127361513911d929da73e490"
+TOKEN="<csrf-token-from-set-cookie>"
 curl -s -X POST "http://192.168.100.7:3000/api/content/posts" \
   -H "Content-Type: application/json" \
   -H "Cookie: __csrf-token=$TOKEN" \

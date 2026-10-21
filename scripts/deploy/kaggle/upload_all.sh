@@ -1,6 +1,14 @@
 #!/bin/bash
 
-export KAGGLE_API_TOKEN="[REMOVED:Kaggle API token]"
+# Kaggle credential comes from the environment only -- never hardcode secrets.
+if [ -z "${KAGGLE_API_TOKEN:-}" ]; then
+    echo "ERROR: KAGGLE_API_TOKEN is not set or empty." >&2
+    echo "       Export it before running, e.g.:" >&2
+    echo "         export KAGGLE_API_TOKEN=<your-kaggle-api-token>" >&2
+    echo "       (or place credentials in ~/.kaggle/kaggle.json)." >&2
+    exit 1
+fi
+export KAGGLE_API_TOKEN
 
 echo "╔════════════════════════════════════════════════════════════════════════════╗"
 echo "║                    UPLOADING DATASET & NOTEBOOK                           ║"
