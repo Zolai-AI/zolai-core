@@ -32,9 +32,9 @@ itself: a string literal, or the caller's own identifier. Each entry records
 :func:`test_allowlist_entries_are_still_present`, that its source line still
 carries the documented code — so deleting or retyping a handler surfaces here
 instead of silently inheriting an exemption. Do not widen it: a new entry must
-name a raise site inside this repository and say which one. One entry
-(``legacy_gemini_chat_error``) is a **known, deliberately deferred leak** in
-``server.py`` and is documented as such, not as "safe".
+name a raise site inside this repository and say which one. There are no known
+deferred leaks: every entry covers a site whose message is a literal or the
+caller's own identifier.
 
 Behavioural coverage (:func:`test_*` below) proves the envelope on real
 requests: the response keeps its status code and gains a human-readable
@@ -140,22 +140,6 @@ ALLOWLIST: tuple[AllowlistEntry, ...] = (
             "`except ValueError` on the training pipeline; the only raise site is "
             "zolai/learning/finetuning/pipeline.py:152 "
             "`raise ValueError(\"No feedback signals available for training\")` — a literal."
-        ),
-    ),
-    AllowlistEntry(
-        path="server.py",
-        code="legacy_gemini_chat_error",
-        marker='zolai_response=f"Gemini error: {str(e)}"',
-        reason=(
-            "KNOWN LEAK, DELIBERATELY DEFERRED (2026-10-18): the legacy POST /chat/gemini "
-            "handler returns the raw exception text inside a 200 ZolaiChatResponse "
-            "(zolai/api/server.py, `except Exception as e:` above the return). server.py is "
-            "shared — 3 pre-existing I001 errors plus another session's MCP hunks — and the "
-            "standing directive for this pass is to not touch it, so this one site is the "
-            "reported follow-up rather than a silent exemption. The marker pins the exact "
-            "expression: if the handler is fixed, this entry stops matching exactly one "
-            "violation and `test_allowlist_entries_are_still_present` fails, forcing the "
-            "entry's deletion."
         ),
     ),
 )
