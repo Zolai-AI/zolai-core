@@ -1350,9 +1350,13 @@ def create_app() -> FastAPI:
                 context_source=context_source,
                 vocabulary=[],
             )
-        except Exception as e:
+        except Exception:
+            # Never echo exception text into a 200 body: it can carry file
+            # paths, provider payloads or driver internals. The traceback goes
+            # to the server log; the caller gets a stable literal.
+            logger.exception("legacy /chat/gemini failed")
             return ZolaiChatResponse(
-                zolai_response=f"Gemini error: {str(e)}",
+                zolai_response="Gemini chat is unavailable",
                 zvs_compliant=True,
                 context_source="error",
                 vocabulary=[],
