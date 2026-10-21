@@ -53,7 +53,7 @@ class SecurityConfig(BaseModel):
     max_rag_request_size: int = MAX_RAG_REQUEST_SIZE
     api_key_warn_days: int = API_KEY_WARN_DAYS
     api_key_expire_days: int = API_KEY_EXPIRE_DAYS
-    cors_origins: list[str] = Field(default_factory=lambda: ["https://zolai.space", "https://api.zolai.space"])
+    cors_origins: list[str] = Field(default_factory=lambda: list(DEFAULT_CORS_ORIGINS))
     enable_sql_protection: bool = True
     enable_xss_protection: bool = True
 
@@ -179,16 +179,41 @@ def create_cors_middleware(origins: list[str] | None = None) -> CORSMiddleware:
     return CORSMiddleware(**cors_kwargs(origins))
 
 
-#: Trusted browser origins.  ``ZOLAI_CORS_ORIGINS`` (comma-separated) overrides.
-#: ``allow_credentials=True`` REQUIRES an explicit allowlist — a wildcard would
-#: make Starlette reflect any ``Origin`` (including ``null``) with credentials.
+#: Trusted browser origins — the only three deployed surfaces that call this
+#: API, plus the two local dev origins Vite actually binds to (host ``0.0.0.0``
+#: is reachable as both ``localhost`` and ``127.0.0.1``).  Nothing else is
+#: trusted, so the list stays short and auditable.
+#:
+#: ``ZOLAI_CORS_ORIGINS`` (comma-separated) overrides it wholesale; there is no
+#: merge.  ``allow_credentials=True`` REQUIRES an explicit allowlist — a
+#: wildcard makes Starlette reflect **any** ``Origin`` (including ``null``)
+#: with credentials, which is the core#1 defect this list exists to prevent.
+#:
+#: The request ``Origin`` is never reflected unless it matches an entry here:
+#: Starlette's ``CORSMiddleware`` echoes the caller's origin only for allowlist
+#: hits, so an unknown origin and ``Origin: null`` get **no**
+#: ``Access-Control-Allow-Origin`` — which is the only header the browser
+#: consults, so the response stays unreadable to that page.  (Starlette does
+#: still emit the static ``Allow-Credentials``/``Expose-Headers`` fields on a
+#: non-CORS request; they are inert without ``Allow-Origin``.)
 DEFAULT_CORS_ORIGINS: list[str] = [
-    "https://studio.zolai.space",
     "https://zolai.space",
-    "https://api.zolai.space",
+    "https://studio.zolai.space",
+    "https://journey.zolai.space",
     "http://localhost:5173",
-    "http://localhost:3000",
+    "http://127.0.0.1:5173",
 ]
+
+#: Exact contract — a guard against the allowlist silently growing or drifting.
+#: ``tests/test_cors_allowlist.py`` asserts :data:`DEFAULT_CORS_ORIGINS` equals
+#: this tuple, so adding an origin is a deliberate two-line change.
+CORS_ALLOWED_ORIGINS: tuple[str, ...] = (
+    "https://zolai.space",
+    "https://studio.zolai.space",
+    "https://journey.zolai.space",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+)
 
 #: Explicit method/header allow-lists (no ``*``) so credentials stay safe.
 CORS_METHODS: list[str] = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
