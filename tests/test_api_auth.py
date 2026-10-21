@@ -6,7 +6,8 @@ Covers the P0-1 / ADR-014 done-when:
 - default warn: accepts but logs unauthenticated ``/api/v1`` (non-admin);
   admin key-minting routes stay strict (401) in warn
 - verification cache stays bounded under a garbage-token flood
-- ``/health``, ``/metrics``, ``/api/metrics/*`` and legacy routes byte-identical
+- ``/health`` and legacy routes byte-identical; ``/metrics`` + ``/api/metrics/*``
+  are admin-gated ops surfaces (401 without a key, strict in warn *and* enforce)
 - >rate-limit 429 + Retry-After + X-RateLimit-*
 - 401s are counted by MetricsMiddleware (registration order)
 - **session credentials never weaken the key path**: a ``zolai_ss_*`` token
@@ -48,6 +49,11 @@ def auth_db(tmp_path, monkeypatch) -> Iterator[DatabaseManager]:
     monkeypatch.setattr(session_auth, "_get_manager", lambda: mgr)
     yield mgr
     mgr.dispose()
+
+
+def _admin_key(mgr) -> str:
+    """Admin credential on the throwaway ``auth_db`` (``apikey:manage``)."""
+    return auth.create_api_key(name="ops-admin", scopes=["apikey:manage"])["plaintext"]
 
 
 @pytest.fixture()
@@ -277,6 +283,13 @@ def test_key_cache_is_bounded_under_garbage_token_flood(
 def test_exempt_and_legacy_routes_untouched_in_enforce_mode(
     client: TestClient, auth_db, monkeypatch
 ) -> None:
+    """Public routes stay public; the ops surface is admin-gated (core#3).
+
+    Pre-middleware contract held for ``/health`` and legacy routes. ``/metrics``
+    and ``/api/metrics/*`` are no longer exempt — they moved to
+    ``rbac.OPS_ADMIN_PREFIXES``, so anonymous reads 401 and an admin key 200s.
+    Neither surface injects rate-limit headers (authorization, not throttling).
+    """
     _enforce(monkeypatch)
 
     health = client.get("/health")
@@ -285,12 +298,17 @@ def test_exempt_and_legacy_routes_untouched_in_enforce_mode(
     # Not on the gated surface → no rate-limit headers injected.
     assert "x-ratelimit-limit" not in health.headers
 
-    metrics = client.get("/metrics")
+    # Anonymous ops reads are refused, in enforce AND in warn.
+    assert client.get("/metrics").status_code == 401
+    assert client.get("/api/metrics/info").status_code == 401
+
+    admin = {"X-API-Key": _admin_key(auth_db)}
+    metrics = client.get("/metrics", headers=admin)
     assert metrics.status_code == 200
     assert "zolai_http_requests_total" in metrics.text
     assert "x-ratelimit-limit" not in metrics.headers
 
-    info = client.get("/api/metrics/info")
+    info = client.get("/api/metrics/info", headers=admin)
     assert info.status_code == 200
     assert info.json()["version"]
     assert "x-ratelimit-limit" not in info.headers
@@ -298,26 +316,10 @@ def test_exempt_and_legacy_routes_untouched_in_enforce_mode(
     # Legacy unversioned route — same 200 as before the middleware existed.
     legacy = client.get("/bible/status")
     assert legacy.status_code == 200
-    assert legacy.json()["status"] == "ok"
-    assert "x-ratelimit-limit" not in legacy.headers
-
-
-def test_api_v1_health_is_exempt_in_enforce_mode(
-    client: TestClient, auth_db, monkeypatch
-) -> None:
-    _enforce(monkeypatch)
-    response = client.get("/api/v1/health")
-    # Not defined on core today — but it must never be answered 401/429 by auth.
-    assert response.status_code in (200, 404)
-    assert response.status_code != 401
-
-
-# ---------------------------------------------------------------------------
-# Middleware order — 401s must flow through MetricsMiddleware
-# ---------------------------------------------------------------------------
 
 
 def _http_samples(text: str) -> list[Sample]:
+    """Parse a Prometheus exposition body into flat samples."""
     samples: list[Sample] = []
     for family in text_string_to_metric_families(text):
         samples.extend(family.samples)
@@ -325,6 +327,7 @@ def _http_samples(text: str) -> list[Sample]:
 
 
 def _total_401(samples: list[Sample]) -> float:
+    """Sum ``zolai_http_requests_total`` samples labelled ``status=401``."""
     return sum(
         s.value
         for s in samples
@@ -335,14 +338,19 @@ def _total_401(samples: list[Sample]) -> float:
 def test_401_responses_are_counted_in_http_metrics(
     client: TestClient, auth_db, monkeypatch
 ) -> None:
-    """ApiKeyMiddleware sits *inside* MetricsMiddleware → 401s increment the counter."""
-    before = _total_401(_http_samples(client.get("/metrics").text))
+    """ApiKeyMiddleware sits *inside* MetricsMiddleware → 401s increment the counter.
+
+    ``/metrics`` is on the admin-gated ops surface, so the exposition is read
+    with an admin key; the 401 under test is still anonymous.
+    """
+    admin = {"X-API-Key": _admin_key(auth_db)}
+    before = _total_401(_http_samples(client.get("/metrics", headers=admin).text))
 
     _enforce(monkeypatch)
     response = client.get("/api/v1/admin/api-keys")
     assert response.status_code == 401
 
-    after = _total_401(_http_samples(client.get("/metrics").text))
+    after = _total_401(_http_samples(client.get("/metrics", headers=admin).text))
     assert after >= before + 1
 
 

@@ -19,6 +19,9 @@ from prometheus_client.parser import Sample, text_string_to_metric_families
 from zolai.api.server import create_app
 from zolai.monitoring import record_operation, track_operation
 from zolai.monitoring.metrics import metric_value
+from zolai.api import auth as api_auth
+from zolai.data.database import DatabaseManager as _AuthDatabaseManager
+from zolai.data.migrations import create_api_keys_table as _create_api_keys_table
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -26,10 +29,39 @@ from zolai.monitoring.metrics import metric_value
 
 
 @pytest.fixture(scope="module")
-def client() -> Iterator[TestClient]:
-    """App client with lifespan running (build info + sampler + FK guard)."""
+def _ops_admin_key(tmp_path_factory) -> Iterator[str]:
+    """Throwaway auth DB + admin key.
+
+    ``/metrics`` is now on the admin-gated ops surface (``rbac.OPS_ADMIN_PREFIXES``),
+    so these exposition tests must authenticate to read it. The key lives on a
+    module-scoped throwaway DB — never the live one — via the same
+    ``auth._get_manager`` seam ``test_api_auth.py`` uses.
+    """
+    db_path = tmp_path_factory.mktemp("auth") / "auth.db"
+    mgr = _AuthDatabaseManager(f"sqlite:///{db_path}")
+    mgr.init_db()
+    _create_api_keys_table(mgr)
+
+    original = api_auth._get_manager
+    api_auth._get_manager = lambda: mgr
+    try:
+        key = api_auth.create_api_key(name="ops-admin", scopes=["apikey:manage"])
+        yield key["plaintext"]
+    finally:
+        api_auth._get_manager = original
+        mgr.dispose()
+
+
+@pytest.fixture(scope="module")
+def client(_ops_admin_key: str) -> Iterator[TestClient]:
+    """App client with lifespan running (build info + sampler + FK guard).
+
+    Carries an admin ``X-API-Key`` so the now-admin-gated ``/metrics`` surface
+    answers 200; these tests exercise the exposition format, not authorization.
+    """
     app = create_app()
     with TestClient(app) as test_client:
+        test_client.headers.update({"X-API-Key": _ops_admin_key})
         yield test_client
 
 

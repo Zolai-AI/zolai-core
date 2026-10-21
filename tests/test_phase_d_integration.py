@@ -16,7 +16,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from zolai.api import auth
 from zolai.data.database import DatabaseManager
+from zolai.data.migrations import create_api_keys_table
 from zolai.data.repositories import get_foundation_repositories
 
 # ---------------------------------------------------------------------------
@@ -96,8 +98,22 @@ def client(tmp_db):
     from zolai.api.server import create_app
     app = create_app()
 
-    with TestClient(app, raise_server_exceptions=False) as c:
-        yield c
+    # ``/review/`` is on the admin-gated ops surface (``rbac.OPS_ADMIN_PREFIXES``).
+    # Mint the admin key on the SAME throwaway ``mgr`` the fixture already owns
+    # (never the live DB) and present it per-request, so anonymous 401 is intact.
+    create_api_keys_table(mgr)
+    # Keep the seam patched for the WHOLE client lifetime: ``resolve_key``
+    # reads ``auth._get_manager`` at request time, so restoring early would
+    # make the minted key unresolvable (anonymous 401).
+    original_get_manager = auth._get_manager
+    auth._get_manager = lambda: mgr
+    admin_key = auth.create_api_key(name="phase-d-admin", scopes=["apikey:manage"])
+    try:
+        with TestClient(app, raise_server_exceptions=False) as c:
+            c.headers.update({"X-API-Key": admin_key["plaintext"]})
+            yield c
+    finally:
+        auth._get_manager = original_get_manager
 
     zolai.config.config.paths.db = original_db
     zolai.config.config.paths.data = original_data

@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from zolai.api import auth
 from zolai.api.metrics_schemas import (
     AlertsResponse,
     EvalRunResponse,
@@ -18,6 +19,7 @@ from zolai.api.metrics_schemas import (
 )
 from zolai.api.server import create_app
 from zolai.data.database import DatabaseManager
+from zolai.data.migrations import create_api_keys_table
 from zolai.monitoring import store
 
 # ---------------------------------------------------------------------------
@@ -26,9 +28,33 @@ from zolai.monitoring import store
 
 
 @pytest.fixture(scope="module")
-def client() -> Iterator[TestClient]:
+def _ops_admin_key(tmp_path_factory) -> Iterator[str]:
+    """Throwaway auth DB + admin key for the gated ops surface.
+
+    ``/api/metrics/*`` rides ``rbac.OPS_ADMIN_PREFIXES`` (admin, strict in warn
+    *and* enforce), so these tests authenticate rather than expect 401. The key
+    lives on a module-scoped throwaway DB — never the live one — via the same
+    ``auth._get_manager`` seam ``test_api_auth.py`` uses.
+    """
+    db_path = tmp_path_factory.mktemp("auth") / "auth.db"
+    mgr = DatabaseManager(f"sqlite:///{db_path}")
+    mgr.init_db()
+    create_api_keys_table(mgr)
+    original = auth._get_manager
+    auth._get_manager = lambda: mgr
+    try:
+        key = auth.create_api_key(name="ops-admin", scopes=["apikey:manage"])
+        yield key["plaintext"]
+    finally:
+        auth._get_manager = original
+        mgr.dispose()
+
+
+@pytest.fixture(scope="module")
+def client(_ops_admin_key: str) -> Iterator[TestClient]:
     """App client with lifespan running (FK guard, build info, sampler)."""
     with TestClient(create_app()) as test_client:
+        test_client.headers.update({"X-API-Key": _ops_admin_key})
         yield test_client
 
 

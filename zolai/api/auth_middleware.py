@@ -37,7 +37,7 @@ from typing import Any
 from starlette.concurrency import run_in_threadpool
 
 from . import auth, session_auth
-from .rbac import is_public_chat_path, is_public_path
+from .rbac import is_ops_admin_path, is_public_chat_path, is_public_path, role_for
 
 #: Only this prefix is gated (boundary-aware: ``/api/v1x`` is not gated).
 API_PREFIX = "/api/v1"
@@ -50,10 +50,11 @@ API_PREFIX = "/api/v1"
 EXTRA_PROTECTED_PATHS: frozenset[str] = frozenset({"/mcp"})
 
 #: Paths never gated — documented exemptions (ADR-002 / ADR-014).
+#: ``/metrics`` was removed 2026-10-21: it is now on the admin-gated ops
+#: surface (``rbac.OPS_ADMIN_PREFIXES``), so it is no longer "never gated".
 EXEMPT_PATHS: frozenset[str] = frozenset(
     {
         "/health",
-        "/metrics",
         "/api/v1/health",
     }
 )
@@ -290,12 +291,72 @@ class ApiKeyMiddleware:
             return
 
         path = str(scope.get("path") or "")
-        if not is_protected_path(path) or scope.get("method") == "OPTIONS":
+        if scope.get("method") == "OPTIONS":
             await self.app(scope, receive, send)
             return
 
         mode = auth.api_auth_mode()
         if mode == "off":
+            await self.app(scope, receive, send)
+            return
+
+        # Ops surface (``/metrics``/``/api/metrics``/``/review``/``/docs``/
+        # ``/redoc``/``/openapi.json``): strict admin, gated here because these
+        # routes sit outside ``/api/v1`` and carry no route-level dependency.
+        # 401 for anonymous in warn *and* enforce, 403 for a resolved non-admin,
+        # only ``ZOLAI_API_AUTH=off`` bypasses (handled above). ``ZOLAI_DEV_DOCS``
+        # re-opens only the explorer trio via ``is_ops_admin_path``. No new
+        # rate-limit bucket: these surfaces were never rate-limited and the fix
+        # here is authorization, not throttling.
+        if is_ops_admin_path(path):
+            ops_token = extract_key(scope.get("headers"))
+            ops_record: dict[str, Any] | None = None
+            if ops_token:
+                ops_record = await run_in_threadpool(auth.resolve_key, ops_token)
+            if ops_record is None:
+                ops_record = await run_in_threadpool(self._resolve_session, ops_token)
+            if ops_record is None:
+                auth.log_auth_failure(
+                    "missing_key" if not ops_token else "invalid_key",
+                    path,
+                    ops_token[: auth.PREFIX_LEN] if ops_token else None,
+                )
+                await _send_json(
+                    send,
+                    401,
+                    {
+                        "detail": {
+                            "error": "unauthorized",
+                            "reason": "missing_api_key" if not ops_token else "invalid_api_key",
+                        }
+                    },
+                )
+                return
+            if role_for(ops_record) != "admin":
+                await _send_json(
+                    send,
+                    403,
+                    {
+                        "detail": {
+                            "error": "forbidden",
+                            "required_role": "admin",
+                            "role": role_for(ops_record),
+                            "reason": "insufficient_role",
+                        }
+                    },
+                )
+                return
+            ops_state = scope.setdefault("state", {})
+            ops_state["api_key"] = {
+                "id": ops_record.get("id"),
+                "name": ops_record.get("name"),
+                "key_prefix": ops_record.get("key_prefix"),
+                "scopes": ops_record.get("scopes") or [],
+            }
+            await self.app(scope, receive, send)
+            return
+
+        if not is_protected_path(path):
             await self.app(scope, receive, send)
             return
 
@@ -404,6 +465,41 @@ class ApiKeyMiddleware:
 
                 await self.app(scope, receive, send_oauth_wrapper)
                 return
+
+            # C5 strict challenge — ``ZOLAI_MCP_OAUTH_REQUIRED`` (default OFF).
+            # Reached only after every credential path above (API key,
+            # session, OAuth bearer) has failed to resolve.  With the flag
+            # unset — today's default — this block is never entered: keyless
+            # Claude / Cursor / OpenCode / VS Code / Gemini CLI fall through
+            # to the public branch below and keep their anonymous 200 byte for
+            # byte.  With the flag on, either MCP transport path answers 401
+            # plus the RFC 6750 challenge a ChatGPT/Gemini connector follows
+            # back to the RFC 9728 document (served unconditionally either
+            # way).  The two literals mirror ``zolai.auth.oauth.MCP_PATHS`` and
+            # the tests parametrize over that constant, so drift fails a gate;
+            # the authoritative ``is_mcp_path`` check runs once the module is
+            # loaded.  A presented-but-unresolvable ``zolai_at_*`` credential
+            # gets ``error="invalid_token"`` (RFC 6750 §3.1); a credential-less
+            # call gets the bare challenge.
+            if path in ("/mcp", "/api/v1/mcp"):
+                from ..auth import oauth as oauth_as
+
+                if oauth_as.is_mcp_path(path) and oauth_as.mcp_oauth_required():
+                    challenge = oauth_as.www_authenticate(
+                        scope, error="invalid_token" if token else None
+                    )
+                    await _send_json(
+                        send,
+                        401,
+                        {
+                            "detail": {
+                                "error": "unauthorized",
+                                "reason": "oauth_required",
+                            }
+                        },
+                        [(b"www-authenticate", challenge.encode("latin-1"))],
+                    )
+                    return
 
             # P2 public class: anonymous reads (and the public assistant) stay
             # open in warn *and* enforce — rate limited per IP, never 401.
