@@ -25,6 +25,7 @@ Route classes (also the declaration table the completeness guard walks):
 
 from __future__ import annotations
 
+import os
 from typing import Any, Callable
 
 from fastapi import APIRouter, HTTPException, Request
@@ -73,7 +74,11 @@ def _norm(method: str | None) -> str | None:
 
 PUBLIC_ROUTES: tuple[tuple[str | None, str], ...] = (
     (None, "/health"),
-    (None, "/metrics"),
+    # ``(None, "/metrics")`` was removed 2026-10-21 (P0 ops-surface gate):
+    # the Prometheus exposition dump listed every metric family, process
+    # detail and route label for anonymous callers. ``/metrics`` now rides
+    # ``OPS_ADMIN_PREFIXES`` below — admin tier, strict in warn *and*
+    # enforce. ``/health`` stays public as the anonymous liveness probe.
     (None, "/api/v1/health"),
     # Identity probe — never 401s, so Studio can gate its own UI.
     ("GET", "/api/v1/auth/me"),
@@ -209,6 +214,45 @@ MEMBER_PREFIXES: tuple[str, ...] = (
 #: keeps ``classify_route`` honest for anything that ever adds an HTTP sibling.
 ADMIN_PREFIXES: tuple[str, ...] = ("/api/v1/admin", "/api/v1/learning/ws")
 
+#: Ops / API-surface paths gated admin at the **middleware** (they sit
+#: outside ``/api/v1``, so ``is_protected_path`` had never covered them and
+#: every one of these answered anonymous HTTP 200 on production when this
+#: gate was added, 2026-10-21):
+#:
+#: - ``/metrics``      — the Prometheus exposition dump (every metric
+#:                       family, process info, per-route labels).
+#: - ``/api/metrics``  — the JSON ops views (summary, health, eval runs,
+#:                       alerts, build info, annotations CRUD).
+#: - ``/review``       — the review-queue HTML UI (``zolai/ui/routes.py``):
+#:                       pending knowledge rows before promotion.
+#: - ``/docs`` / ``/redoc`` / ``/openapi.json`` — FastAPI's explorer. The
+#:                       OpenAPI schema is the full route inventory with
+#:                       request/response shapes: reconnaissance value, so
+#:                       it is admin by default; :func:`dev_docs_open`
+#:                       (``ZOLAI_DEV_DOCS``, **default off**) re-opens
+#:                       *only* these three for local development.
+#:
+#: Enforcement lives in ``ApiKeyMiddleware`` (strict admin: 401 anon in
+#: warn *and* enforce, 403 for a resolved non-admin, only
+#: ``ZOLAI_API_AUTH=off`` bypasses) — the same semantics as
+#: ``require_role(ROLE_ADMIN, strict=True)``, applied one layer earlier
+#: because these routes carry no route-level dependency to hang it on.
+#: ``/metrics``, ``/api/metrics`` and ``/review`` are **not** re-opened by
+#: ``ZOLAI_DEV_DOCS``; Prometheus scrapes must present an admin key.
+OPS_ADMIN_PREFIXES: tuple[str, ...] = (
+    "/metrics",
+    "/api/metrics",
+    "/review",
+    "/docs",
+    "/redoc",
+    "/openapi.json",
+)
+
+#: The explorer subset of :data:`OPS_ADMIN_PREFIXES` that the
+#: ``ZOLAI_DEV_DOCS`` escape hatch may re-open. Prefix-matched, so
+#: ``/docs/oauth2-redirect`` rides along with ``/docs``.
+DEV_DOCS_PATHS: tuple[str, ...] = ("/docs", "/redoc", "/openapi.json")
+
 #: Method-scoped strict-admin entries, matched before ADMIN_PREFIXES.
 #: Needed where one prefix carries both public reads and admin mutations —
 #: ``/api/v1/learning`` serves the learning surface publicly while letting only
@@ -280,6 +324,36 @@ def is_public_chat_path(method: str | None, path: str) -> bool:
         if norm in (None, "POST") and path == entry:
             return True
     return False
+
+
+def dev_docs_open() -> bool:
+    """Whether ``ZOLAI_DEV_DOCS`` re-opens the API explorer (default **off**).
+
+    Values ``1``/``true``/``on``/``yes`` (case-insensitive) enable it; any
+    other value, unset or blank keeps ``/docs``, ``/redoc`` and
+    ``/openapi.json`` admin-gated. Read live at call time (same pattern as
+    ``auth.api_auth_mode``) so a dev can export it per-shell. The hatch
+    never applies to ``/metrics``, ``/api/metrics`` or ``/review``.
+    """
+    raw = os.environ.get("ZOLAI_DEV_DOCS", "")
+    return raw.strip().lower() in {"1", "true", "on", "yes"}
+
+
+def is_ops_admin_path(path: str) -> bool:
+    """True when ``path`` sits on the middleware-gated ops surface.
+
+    Consulted by :class:`zolai.api.auth_middleware.ApiKeyMiddleware`. The
+    ``ZOLAI_DEV_DOCS`` escape hatch (default off) is applied **here**, so
+    every caller of this predicate sees the effective decision — with the
+    hatch on, the explorer trio reports ``False`` (served like an ordinary
+    unlisted route) while ``/metrics``, ``/api/metrics`` and ``/review``
+    stay ``True``.
+    """
+    if not path:
+        return False
+    if dev_docs_open() and any(_prefix_match(path, p) for p in DEV_DOCS_PATHS):
+        return False
+    return any(_prefix_match(path, p) for p in OPS_ADMIN_PREFIXES)
 
 
 def is_admin_path(path: str, method: str | None = None) -> bool:
