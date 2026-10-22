@@ -188,6 +188,20 @@ All GET/POST/PUT/DELETE calls are made against `API` (the base URL from
 
 ---
 
+## Public Assistant (`POST /api/v1/assistant/chat`)
+
+This route intentionally accepts anonymous Studio requests in every
+`ZOLAI_API_AUTH` mode. Anonymous chat is limited by the resolved client address
+to `ZOLAI_PUBLIC_CHAT_RATE_LIMIT_RPM` requests per minute (default: 10).
+
+When deploying behind a reverse proxy, configure Uvicorn to trust only the
+proxy addresses and make the proxy sanitize forwarded client-address headers.
+The rate limiter uses the ASGI client address after Uvicorn resolves headers
+from a trusted proxy; it does not trust `X-Forwarded-For` supplied directly by
+the caller.
+
+---
+
 ## Identity Routes (`/api/v1/auth/...`)
 
 Username + password sign-in, beside — never in front of — API-key auth.

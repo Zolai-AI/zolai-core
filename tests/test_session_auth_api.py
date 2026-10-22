@@ -483,23 +483,21 @@ class TestLoginEndpoint:
         assert detail["retry_after_s"] >= 1
         assert int(blocked.headers["retry-after"]) >= 1
 
-    def test_login_429_per_username_even_across_ips(
-        self, client, founder, monkeypatch
-    ) -> None:
+    def test_login_429_per_username_even_across_ips(self, founder, monkeypatch) -> None:
         """The username bucket holds even when the IP bucket is wide open."""
         monkeypatch.setenv("ZOLAI_LOGIN_RATE_LIMIT_RPM", "100")
         monkeypatch.setenv("ZOLAI_LOGIN_RATE_LIMIT_USER_RPM", "2")
+        client_one = TestClient(create_app(), client=("10.0.0.1", 1234))
+        client_two = TestClient(create_app(), client=("10.0.0.2", 1234))
 
         for _ in range(2):
-            client.post(
+            client_one.post(
                 "/api/v1/auth/login",
                 json=_login_body(password="the wrong passphrase"),
-                headers={"X-Forwarded-For": "10.0.0.1"},
             )
-        blocked = client.post(
+        blocked = client_two.post(
             "/api/v1/auth/login",
             json=_login_body(password="the wrong passphrase"),
-            headers={"X-Forwarded-For": "10.0.0.2"},
         )
         assert blocked.status_code == 429
         assert blocked.json()["detail"]["limit_rpm"] == 2
