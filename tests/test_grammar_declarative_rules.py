@@ -12,21 +12,22 @@ import importlib
 import sys
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 MODULE = "zolai.learning.grammar_editor"
 
+# Bind the real module at collection time — before any fixture can run.  A
+# pre-existing suite (tests/test_foundation_contract.py) swaps this module in
+# ``sys.modules`` for a stub and its teardown restores the stub, so resolving
+# the module at call time would pick up the stub mid-session and fail every
+# case here with ``AttributeError: '_Editor' ...``.
+_real_module = importlib.import_module(MODULE)
+
 
 def _editor():
-    try:
-        mod = importlib.import_module(MODULE)
-    except ModuleNotFoundError as exc:  # pragma: no cover — RED until implemented
-        pytest.fail(f"{MODULE} not importable: {exc}")
-    return mod.GrammarEditor()
+    return _real_module.GrammarEditor()
 
 
 def _errors(sentence: str) -> list[str]:
