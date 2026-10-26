@@ -463,3 +463,76 @@ files remain the source of truth.
 - `docs/planning/MCP_LAYER_PLAN.md` still references `docker-compose.prod.yml` —
   owned by another session, deliberately untouched.
 - `docs/archive/**` keeps its dated Docker structure snapshots as history.
+
+---
+
+## 2026-10-27 (Session — Bible word/grammar learning run + 4 defect fixes)
+
+Implemented `plan-bible-learning.md` against the live 2.4 GB
+`data/zolai.db` (local-only, re-runnable). Six new scripts, six new test
+suites, one clean validator edit. Commits `8be9659` → `ecb3874` (code) plus
+this docs entry.
+
+### Defects fixed
+- **G1 word_usage corruption/under-coverage** (`8be9659`):
+  `scripts/learning/repair_and_learn_bible_word_usage.py`. 7,384 dict-string
+  rows in `book` (and the ZOMIDAILY / phrase:bigram / phrase:trigram
+  sentinels) replaced by a real per-(ref, word) doc-frequency rebuild across
+  all 5 ZO columns; book codes derived from `bible_verses` DISTINCT book.
+- **G2 bible_verses_import 7.41× duplication** (`53b06cb`):
+  `scripts/maintenance/dedupe_bible_verses_import.py`. One best row per ref
+  (score over SCORE_COLUMNS ∩ live columns, tie → earliest imported_at →
+  lowest rowid) + unique index `ux_bible_verses_import_ref`.
+- **G3 vocabulary↔evidence split** (`aa4c125`):
+  `scripts/learning/wire_vocabulary_evidence.py`. `confidence` /
+  `review_status` / corrupt `english` glosses wired to `attestation_index` +
+  `word_observation_stats`; reviewed rows never touched; gloss candidates =
+  word_alignments → `dictionary.english_clean` → curated `vocabulary.english`.
+- **G4 grammar-validator blind spots** (`8e0cfec`): `zolai/learning/
+  grammar_editor.py`. ERROR "missing final punctuation"; ERROR "declarative
+  sentence requires sentence-final particle (hi/hen/un/in/vo)" (only when
+  final `.`); `hiam` exempt; `ka` WARNING only in subject slot.
+- **G5 grammar patterns from Bible** (`6b77d79`):
+  `scripts/learning/learn_grammar_from_bible.py`. `pattern_id = BIBLE_<type>`
+  (NOT NULL + two unique indexes made the NULL sentinel impossible);
+  `book = 'BIBLE'`.
+- **Orchestrator** (`ecb3874`): `scripts/learning/bible_learning_run.py` —
+  preflight (≥1 GB, ≥6 GB free) → verified `.backup` (min_ratio 0.8) → G1 →
+  attestation → G3 → G2 → G5, per-step transactions, dry-run, rollback on
+  failure, report JSON.
+
+### Live run (2026-10-27 01:20, EXIT=0, ~2 min)
+Before → after on `/home/peter/Documents/Projects/zolai-ai/data/zolai.db`:
+
+| table / metric | before | after |
+| --- | --- | --- |
+| `word_usage` total | 269,903 | 485,360 |
+| `word_usage` corrupt `book` | 7,384 | **0** |
+| `word_usage` distinct Bible books | 60 | **66** |
+| `word_usage` ZOMIDAILY / bigram / trigram | 209,538 / 29,757 / 15,840 | unchanged (sentinels preserved) |
+| `bible_verses_import` rows | 226,626 | **30,569** (= distinct refs) |
+| `ux_bible_verses_import_ref` | absent | **present** |
+| `vocabulary` NULL `confidence` | 104,906 | **0** |
+| `vocabulary` `review_status='verified'` | 0 | **28,478** |
+| `vocabulary` reviewed (other) | 0 | 0 (never touched) |
+| `sanga` gloss | `'31'` (corrupt) | **`'thou'`** |
+| `grammar_patterns` `book='BIBLE'` | 0 | **7** |
+
+Books that were zero coverage (JUD/OBA/PHM/PHP/TIT/ZEP) now 869 / 654 / 573 /
+1,862 / 1,185 / 1,358 rows.
+
+- Backup: `data/backups/zolai.db.bak-20261027T012021` (2,396,983,296 B,
+  verified via min_ratio 0.8 stop-gate).
+- `PRAGMA quick_check` = ok; WAL checkpoint ok; idempotent rerun (dry-run)
+  count-stable on every table.
+- Gloss disagreements (e.g. `livo` 'lived' vs alignment 'live') written to
+  `data/reports/vocab_gloss_disagreements_*.jsonl` for owner review; run
+  report at `data/reports/bible_learning_20261027T012021.json`.
+
+### Gates
+- 6 new suites = 73 tests, all GREEN; `test_grammar_declarative_rules.py`
+  made immune to the pre-existing `test_foundation_contract.py` stub-leak
+  (binds the real module at collection time).
+- Full suite after-change = 58 failures = baseline (all pre-existing
+  pollution/foreign class); repo-wide ruff: 40 errors in 16 files, none in
+  this round's touched files.
