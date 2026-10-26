@@ -24,7 +24,7 @@ class TestGrammarValidation:
     def test_validate_sov_correct(self) -> None:
         """Test validation of correct SOV sentence."""
         editor = self._get_editor()
-        result = editor.validate_sentence_structure("Pasian in gam a piangsak hi")
+        result = editor.validate_sentence_structure("Pasian in gam a piangsak hi.")
         assert result["valid"] is True
         assert len(result["errors"]) == 0
         assert result["tokens"] == ["Pasian", "in", "gam", "a", "piangsak", "hi"]
@@ -32,7 +32,7 @@ class TestGrammarValidation:
     def test_validate_ergative_in(self) -> None:
         """Test ergative 'in' detection after agent."""
         editor = self._get_editor()
-        result = editor.validate_sentence_structure("Mi in ne hi")
+        result = editor.validate_sentence_structure("Mi in ne hi.")
         assert result["valid"] is True
         # 'in' after 'Mi' (noun) should be detected as ergative
         assert "in" in result["tokens"]
@@ -50,7 +50,7 @@ class TestGrammarValidation:
     def test_validate_question_hiam_end(self) -> None:
         """Test question marker 'hiam' at sentence end."""
         editor = self._get_editor()
-        result = editor.validate_sentence_structure("Na pai hiam")
+        result = editor.validate_sentence_structure("Na pai hiam?")
         assert result["valid"] is True
 
     def test_validate_empty_sentence(self) -> None:

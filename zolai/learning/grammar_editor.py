@@ -350,6 +350,11 @@ class GrammarEditor:
         - Negation markers (kei/lo) before verb
         - Question marker (hiam) at sentence end
         - ZVS 2018 compliance
+        - Final punctuation: sentence ends in ``.`` ``!`` ``?`` (ERROR)
+        - Declarative sentence-final particle hi/hen/un/in/vo (ERROR;
+          questions marked with ``hiam`` are exempt from both punctuation
+          and particle errors)
+        - 1st-person ``ka`` in the subject slot (WARNING only)
 
         Args:
             sentence: Zolai sentence to validate.
@@ -419,6 +424,34 @@ class GrammarEditor:
                         f"is not sentence-final"
                     )
 
+        # ── 6. Final punctuation + declarative sentence-final particle ───
+        # Curriculum rule: a declarative sentence ends in '.' and carries a
+        # sentence-final particle (hi/hen/un/in/vo).  Questions marked with
+        # 'hiam' are exempt from both checks; a missing final punctuation mark
+        # is an ERROR (it is the shape every consumer validates against).
+        is_question = _QUESTION_MARKER in {t.lower() for t in tokens}
+        stripped = sentence.strip()
+        if not is_question:
+            if not stripped.endswith((".", "!", "?")):
+                errors.append("missing final punctuation")
+            elif stripped.endswith(".") and not any(
+                t.lower() in _DECLARATIVE_PARTICLES for t in tokens
+            ):
+                errors.append(
+                    "declarative sentence requires sentence-final particle "
+                    "(hi/hen/un/in/vo)"
+                )
+
+        # ── 7. 1st-person 'ka' subject position (WARNING only) ──────────
+        # 'ka' agrees with the subject in the subject slot: index 0, or index 1
+        # when the sentence opens with a topic/declarative particle.
+        ka_positions = [i for i, t in enumerate(tokens) if t.lower() == "ka"]
+        if ka_positions and not any(
+            pos == 0 or (pos == 1 and tokens[0].lower() in _DECLARATIVE_PARTICLES)
+            for pos in ka_positions
+        ):
+            warnings.append("1st-person 'ka' not in subject position")
+
         return {
             "valid": len(errors) == 0,
             "errors": errors,
@@ -431,7 +464,8 @@ class GrammarEditor:
     def validate_text(self, text: str) -> dict[str, Any]:
         """Validate sentence structure for all sentences in a text.
 
-        Splits text by sentence delimiters (. ! ?) and validates each.
+        Splits text by sentence delimiters (. ! ?), keeping each delimiter
+        attached to its sentence, and validates each.
 
         Args:
             text: Multi-sentence Zolai text.
@@ -447,9 +481,18 @@ class GrammarEditor:
                 "error_count": 0,
             }
 
-        # Split on sentence-ending punctuation
-        sentences = re.split(r"[.!?]+", text)
-        sentences = [s.strip() for s in sentences if s.strip()]
+        # Split on sentence-ending punctuation but keep each terminator with its
+        # sentence — otherwise every sentence handed to the validator would be
+        # missing final punctuation and clean text could never validate.
+        parts = re.split(r"([.!?]+)", text)
+        sentences: list[str] = []
+        for index in range(0, len(parts) - 1, 2):
+            chunk = (parts[index] + parts[index + 1]).strip()
+            if chunk.rstrip(".!? \t\n"):
+                sentences.append(chunk)
+        tail = parts[-1].strip()
+        if tail:
+            sentences.append(tail)
 
         results = []
         total_errors = 0
