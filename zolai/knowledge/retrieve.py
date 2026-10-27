@@ -56,6 +56,21 @@ def _index_cache_key() -> tuple[Any, ...]:
     return (str(engine.url), int(row[0]), row[1]) if row else ("", 0, None)
 
 
+def _vector_table_exists() -> bool:
+    """True when ``knowledge_vectors`` exists in the canonical DB.
+
+    A database that never ran the RAG build (fresh checkout, test fixture,
+    partially migrated deployment) has no such table at all. Reading it then
+    raised ``OperationalError: no such table: knowledge_vectors`` straight out
+    of ``load_index`` — a 500 on ``POST /knowledge/search`` (core#21). The
+    caller only needs to know there is no index, so the absence is checked
+    explicitly instead of surfacing as a driver error.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    return sa_inspect(get_engine()).has_table("knowledge_vectors")
+
+
 def _ingest_jsonl_to_db(path: Path) -> int:
     """One-time ingest of a knowledge_vectors.jsonl file into the table."""
     repo = KnowledgeVectorRepository(get_engine())
@@ -114,6 +129,13 @@ def load_index(path: Path = DEFAULT_INDEX) -> Index:
     turned each retrieval into a minute of parsing.
     """
     global _INDEX_CACHE
+
+    if not _vector_table_exists():
+        # No table -> no index. Deliberately *before* the JSONL/HF path: that
+        # path ingests into ``knowledge_vectors``, so it cannot succeed either,
+        # and it would spend the request on a network download first.
+        print("retrieve: no knowledge_vectors table in this DB — knowledge index unavailable")
+        return Index()
 
     repo = KnowledgeVectorRepository(get_engine())
     key = _index_cache_key()
@@ -193,13 +215,18 @@ def retrieve(
         source_type: Filter results by metadata.source_type (e.g. "wiki", "pdf").
         source: Filter results by metadata.source (exact match).
     """
-    from sentence_transformers import SentenceTransformer
-
+    # Index first, model second: an empty index is the common case on a
+    # deployment that has not built the knowledge layer, and answering it must
+    # not depend on the ``ml`` extra being installed — importing the embedder
+    # up front turned "no index" into ``ModuleNotFoundError`` (500) on a
+    # base-only install (core#21).
     if index is None:
         index = load_index()
     if index.vectors is None or len(index.vectors) == 0:
         print("retrieve: no vector index found (run zolai.knowledge.ingest first)")
         return []
+
+    from sentence_transformers import SentenceTransformer
 
     model = SentenceTransformer(model_name)
     q = _embed_query(model, query)
