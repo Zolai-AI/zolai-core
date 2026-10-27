@@ -33,6 +33,19 @@ if _POS_MISSING:
     )
 # -------------------------------------------------------------------------
 
+# Bound only when the guard above passes: if the legacy names are missing,
+# `pytest.skip(allow_module_level=True)` already raised, so this import is
+# never reached at collection time. When the names exist, this binds them for
+# the test bodies below (the tests call them directly).
+from zolai.pos_tagger.annotate import (  # noqa: E402, I001
+    _load_annotations,
+    _save_annotation,
+    _write_all_annotations,
+    cmd_export,
+    cmd_list,
+    cmd_stats,
+)
+
 
 
 
