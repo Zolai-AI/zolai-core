@@ -420,15 +420,15 @@ class TestRefreshModels:
         assert json.loads(row["models"]) == ["auto", "opencode/space-bunny-free"]
 
     @pytest.mark.parametrize("cid", ["google-gemini"])
-    def test_gemini_still_degrades_to_catalog(
+    def test_gemini_now_uses_remote_fetch(
         self, client, provider_db, admin_key, monkeypatch, cid
     ) -> None:
-        """Gemini's OpenAI-compatibility layer has no usable listing shape."""
+        """Gemini now uses OpenAI-compatible /models endpoint (removed from catalog-only)."""
         calls: list[str] = []
 
         def _recorder(row, timeout_s: float = 15.0) -> list[str]:
             calls.append(str(row.get("catalog_id")))
-            return ["x"]
+            return ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"]
 
         monkeypatch.setattr(ai_providers_router, "_fetch_remote_models", _recorder)
         resp = client.post(
@@ -436,9 +436,9 @@ class TestRefreshModels:
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["source"] == "catalog"
-        assert body["models"] == list(catalog.find_catalog(cid).models)
-        assert calls == []  # never attempted: gemini's payload shape differs
+        assert body["source"] == "remote"
+        assert body["models"] == ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"]
+        assert calls == [cid]  # remote fetch was attempted
 
     def test_brain_base_url_resolves_from_config(self, monkeypatch) -> None:
         """A blank ``base_url`` on the Brain row resolves to the Brain endpoint."""
