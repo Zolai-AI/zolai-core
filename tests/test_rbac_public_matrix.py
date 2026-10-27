@@ -188,7 +188,6 @@ class TestRouteCompleteness:
             ("POST", "/api/v1/analyze/sentence"),
             ("POST", "/api/v1/analyze/paragraph"),
             ("POST", "/api/v1/rag"),
-            ("GET", "/api/v1/foundation/stats"),
             ("GET", "/api/v1/knowledge/version"),
             ("GET", "/api/v1/knowledge/statistics"),
             ("GET", "/api/v1/lexicon/pasian"),
@@ -209,6 +208,7 @@ class TestRouteCompleteness:
             ("PUT", "/api/v1/admin/ai-providers/openai"),
             ("POST", "/api/v1/agent/runs"),
             ("GET", "/api/v1/records"),
+            ("GET", "/api/v1/foundation/stats"),  # core#18: was public
             ("GET", "/api/v1/linguistics/pos"),
             ("GET", "/api/v1/definitely-missing"),
             ("GET", "/api/v1/foundation/review/queue"),
@@ -269,6 +269,8 @@ class TestPublicUnderEnforce:
         monkeypatch.setenv("ZOLAI_API_AUTH", "enforce")
         assert client.get("/api/v1/records").status_code == 401
         assert client.get("/api/v1/definitely-missing").status_code == 401
+        # core#18: ops counters are not an anonymous read.
+        assert client.get("/api/v1/foundation/stats").status_code == 401
 
     def test_admin_surface_401s_under_enforce(self, client, auth_db, monkeypatch) -> None:
         monkeypatch.setenv("ZOLAI_API_AUTH", "enforce")

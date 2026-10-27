@@ -23,6 +23,8 @@ from zolai.api import auth
 from zolai.api.security import (
     DEFAULT_CORS_ORIGINS,
     SECURITY_HEADERS,
+    SecurityHeadersMiddleware,
+    SecurityMiddleware,
     cors_kwargs,
     get_cors_origins,
 )
@@ -170,6 +172,8 @@ def test_security_headers_are_conservative() -> None:
         "Referrer-Policy": "strict-origin-when-cross-origin",
         "X-XSS-Protection": "1; mode=block",
         "Content-Security-Policy": "default-src 'self'",
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
     }
 
 
@@ -192,3 +196,23 @@ def test_metrics_still_responds_with_security_headers(
 def test_metrics_requires_admin_key(client: TestClient) -> None:
     """``/metrics`` is admin-gated: anonymous reads 401 (core#3)."""
     assert client.get("/metrics").status_code == 401
+
+
+def test_both_header_paths_emit_one_authoritative_set() -> None:
+    """core#17: no second, disagreeing header policy anywhere in the app.
+
+    ``SecurityMiddleware`` (request filtering + headers) and
+    ``SecurityHeadersMiddleware`` (headers only, the wired one) historically
+    disagreed on CSP.  Both must now emit exactly ``SECURITY_HEADERS``,
+    proven on real responses — whichever runs, the set is identical.
+    """
+
+    async def inner(scope, receive, send) -> None:
+        from starlette.responses import JSONResponse
+
+        await JSONResponse({"ok": True})(scope, receive, send)
+
+    for app in (SecurityMiddleware(inner), SecurityHeadersMiddleware(inner)):
+        response = TestClient(app).get("/")
+        assert response.status_code == 200
+        _assert_security_headers(response.headers)

@@ -114,7 +114,14 @@ PUBLIC_ROUTES: tuple[tuple[str | None, str], ...] = (
     ("GET", "/api/v1/search"),
     ("POST", "/api/v1/search"),
     ("POST", "/api/v1/rag"),
-    ("GET", "/api/v1/foundation/stats"),
+    # `GET /api/v1/foundation/stats` was removed from this table (core#18):
+    # it dumps raw/staging/canonical counts, review pending/resolved and
+    # `cost_summary` — ops telemetry, not a Studio read.  `classify_route`
+    # consults PUBLIC_ROUTES *before* MEMBER_PREFIXES, so this one exact
+    # entry (not the `/api/v1/foundation` prefix below) was the whole hole:
+    # it served anonymous in every mode.  Falling through to the prefix makes
+    # it member-class — 401 anonymous under `enforce`, dual-accept in
+    # `warn`.  `VALID_ACTIONS` untouched; `role_for` unchanged.
     ("GET", "/api/v1/knowledge/version"),
     ("GET", "/api/v1/knowledge/statistics"),
     # Public provider catalog (Phase B) — enabled rows, zero secrets, so a

@@ -101,19 +101,16 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         # Process request
         response = await call_next(request)
 
-        # Add security headers
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            "script-src 'self'; "
-            "style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data:; "
-            "font-src 'self'; "
-            "connect-src 'self'"
-        )
+        # One authoritative header set (core#17).  This block used to carry
+        # its own CSP (style-src 'self' 'unsafe-inline') that disagreed
+        # with SECURITY_HEADERS (default-src 'self'), so the policy would
+        # have differed by code path and been untestable.  Both
+        # implementations now read the same dict.  Only
+        # SecurityHeadersMiddleware is wired today (zolai/api/server.py),
+        # but this path must never reintroduce a second policy if it is
+        # ever wired.
+        for name, value in SECURITY_HEADERS.items():
+            response.headers[name] = value
 
         return response
 
@@ -253,12 +250,19 @@ def cors_kwargs(origins: list[str] | None = None) -> dict:
 
 
 #: Hardening response headers applied to every API response.
+#:
+#: The **single** source for both header code paths in this module
+#: (SecurityMiddleware and SecurityHeadersMiddleware) — never inline
+#: literals.  core#17 also asked for HSTS and a deny-all
+#: Permissions-Policy, not only the four classic flags.
 SECURITY_HEADERS: dict[str, str] = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "X-XSS-Protection": "1; mode=block",
     "Content-Security-Policy": "default-src 'self'",
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
 }
 
 

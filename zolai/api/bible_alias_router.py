@@ -26,9 +26,10 @@ endpoint *identity* (not just paths) so this cannot quietly rot into a
 copy-paste reimplementation.
 
 Deliberately **not** declared: a ``/api/v1/bible`` -> ``/api/v1/stats``
-alias. ``/api/v1/foundation/stats`` is PUBLIC, so aliasing a member route onto
-it would have widened a guarded read to anonymous. ``/desktop/stats`` keeps
-its single home until that is designed on purpose.
+alias. ``/api/v1/foundation/stats`` was PUBLIC when this was written, so
+aliasing a member route onto it would have widened a guarded read to
+anonymous (core#18 has since made it member-class). ``/desktop/stats`` keeps
+its single home until an alias is designed on purpose.
 """
 
 from __future__ import annotations
