@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -15,6 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from zolai.rag.evidence import EvidencePack, build_word_evidence_items, evidence_to_pack
+from zolai.rag.vectors import decode_embedding
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +34,17 @@ MAX_SEARCH_TOKENS = 6
 
 #: Per-table LIMIT for every lexical pass (one LIMIT per table, not per token).
 SEARCH_PASS_LIMIT = 10
+
+#: Vector fallback: minimum cosine for a hit, and the process-level cache.
+#: The matrix is ~380 MB over the full corpus, so it is loaded lazily and only
+#: when lexical results are thin; ``ZOLAI_VECTOR_SEARCH=0`` disables it.
+VECTOR_MIN_SCORE = 0.35
+_VECTOR_CACHE: dict[str, Any] | None = None
+_VECTOR_CACHE_KEY: tuple[Any, ...] | None = None
+
+
+def _vector_search_enabled() -> bool:
+    return os.environ.get("ZOLAI_VECTOR_SEARCH", "1").lower() not in {"0", "false", "no"}
 
 #: (table, id_col, primary_col, matchable_cols, context_cols)
 #:
@@ -459,44 +472,39 @@ class UnifiedRetriever:
                         score=0.6,
                     )
 
-            # 6. FTS5 enhanced search for dictionary and phrases (if FTS5 tables exist)
-            fts_tables = [
-                ("dictionary_fts", "zolai", "rowid", [("english_clean", "definition")]),
-                ("phrases_fts", "zolai", "rowid", [("english", "definition")]),
-            ]
-            for table, text_col, id_col, extra_cols in fts_tables:
-                if source_filter and table not in source_filter:
-                    continue
+            # 6. FTS5 enhanced search over the wiki content index.
+            #    ``wiki_content_fts`` is the only FTS5 table present in the
+            #    shipped database; the old ``dictionary_fts``/``phrases_fts``
+            #    targets were never created, so this pass silently did nothing.
+            #    Its schema is (title, content) over ``content=wiki_content``.
+            if not source_filter or "wiki" in source_filter:
                 try:
-                    extra_select = ", ".join([f"{col}" for col, _ in extra_cols])
-                    select_clause = f"{id_col}, {text_col}"
-                    if extra_select:
-                        select_clause += f", {extra_select}"
-
-                    # FTS5 MATCH query
-                    fts_sql = (
-                        f"SELECT {select_clause} FROM {table} "
-                        f"WHERE {text_col} MATCH :q LIMIT {SEARCH_PASS_LIMIT}"
-                    )
-                    rows = conn.execute(text(fts_sql), {"q": query}).fetchall()
+                    rows = conn.execute(
+                        text(
+                            "SELECT rowid, title, content FROM wiki_content_fts "
+                            f"WHERE wiki_content_fts MATCH :q LIMIT {SEARCH_PASS_LIMIT}"
+                        ),
+                        {"q": query},
+                    ).fetchall()
                     for r in rows:
-                        if not any(res.text == r[1] and res.source == table for res in results):
-                            meta = {"match_type": "fts5"}
-                            for idx, (_, field_name) in enumerate(extra_cols):
-                                meta[field_name] = r[2 + idx] if 2 + idx < len(r) else None
+                        if not any(res.id == f"wiki:{r[0]}" for res in results):
                             results.append(SearchResult(
-                                id=f"{table}:{r[0]}",
-                                text=r[1],
+                                id=f"wiki:{r[0]}",
+                                text=r[1] or "",
                                 score=0.95,  # FTS5 = very high relevance
-                                source=table,
-                                metadata=meta,
+                                source="wiki",
+                                metadata={"match_type": "fts5", "content": r[2]},
                             ))
                 except Exception:
-                    pass  # FTS5 tables may not exist, that's OK
+                    pass  # FTS5 table may not exist, that's OK
 
-        # 7. Vector search fallback (if embedder available)
-        embedder = self._get_embedder()
-        if embedder is not None:
+        # 7. Vector fallback — when lexical evidence is weak (no exact/prefix/
+        #    FTS hit) or the query is sentence-like, where per-token matches
+        #    fill the list without answering the question. Single-word lookups
+        #    that lexically hit never pay for loading the embedding matrix.
+        best_lexical = max((r.score for r in results), default=0.0)
+        sentence_like = len(tokens) >= 2
+        if len(results) < limit and (best_lexical < 0.9 or sentence_like):
             try:
                 vector_results = self._vector_search(query, limit, source_filter)
                 for vr in vector_results:
@@ -551,20 +559,123 @@ class UnifiedRetriever:
                 metadata=meta,
             ))
 
+    def _load_vector_index(self) -> dict[str, Any] | None:
+        """Load ``knowledge_vectors`` into a normalized float32 matrix, cached.
+
+        The cache key is ``(db_url, row_count, last_import)``, so a rebuild —
+        or a different database in the same process — is picked up on the next
+        call without reloading on every search.
+        """
+        global _VECTOR_CACHE, _VECTOR_CACHE_KEY
+
+        import numpy as np
+
+        with self.engine.connect() as conn:
+            key_row = conn.execute(
+                text("SELECT COUNT(*), MAX(imported_at) FROM knowledge_vectors")
+            ).first()
+            # The DB URL is part of the key: tests use several databases and a
+            # count-only key would hand one process another database's matrix.
+            key = (str(self.engine.url), key_row[0], key_row[1]) if key_row else ("", 0, None)
+            if not key[1]:
+                return None
+            if _VECTOR_CACHE is not None and _VECTOR_CACHE_KEY == key:
+                return _VECTOR_CACHE
+
+            rows = conn.execute(
+                text(
+                    "SELECT id, text, metadata, embedding, source "
+                    "FROM knowledge_vectors WHERE embedding IS NOT NULL"
+                )
+            ).fetchall()
+
+        ids: list[str] = []
+        texts: list[str] = []
+        sources: list[str] = []
+        metas: list[dict[str, Any]] = []
+        vectors: list[Any] = []
+        for vid, txt, meta_json, emb_json, src in rows:
+            emb = decode_embedding(emb_json)
+            if emb is None or not emb.size:
+                continue
+            ids.append(vid)
+            texts.append(txt or "")
+            sources.append(src or "")
+            try:
+                metas.append(json.loads(meta_json or "{}"))
+            except (TypeError, ValueError):
+                metas.append({})
+            vectors.append(emb)
+
+        if not vectors:
+            return None
+        matrix = np.vstack(vectors).astype(np.float32, copy=False)
+        _VECTOR_CACHE = {
+            "ids": ids,
+            "texts": texts,
+            "sources": sources,
+            "metas": metas,
+            "matrix": matrix,
+        }
+        _VECTOR_CACHE_KEY = key
+        log.info("vector index loaded: %d rows", len(ids))
+        return _VECTOR_CACHE
+
     def _vector_search(self, query: str, limit: int, source_filter: list[str] | None = None) -> list[SearchResult]:
-        """Vector similarity search using sentence-transformers."""
+        """Semantic search over ``knowledge_vectors`` (normalized cosine)."""
+        if not _vector_search_enabled():
+            return []
         embedder = self._get_embedder()
         if embedder is None:
             return []
 
-        # Encode query for future use when vector index is available
-        _ = embedder.encode(query, normalize_embeddings=True)
+        index = self._load_vector_index()
+        if not index:
+            return []
 
-        # Tables with vector embeddings (if available)
-        # Note: This requires a vectors table or embeddings stored in the DB
-        # For now, we use the embedder to re-rank lexical results semantically
-        # A full vector search would need a dedicated vector index (FAISS, pgvector, etc.)
-        return []
+        import numpy as np
+
+        query_vec = np.asarray(
+            embedder.encode(query, normalize_embeddings=True), dtype=np.float32
+        )
+        matrix = index["matrix"]
+        if matrix.shape[1] != query_vec.shape[0]:
+            log.warning(
+                "vector dimension mismatch: index=%d query=%d",
+                matrix.shape[1],
+                query_vec.shape[0],
+            )
+            return []
+
+        scores = matrix @ query_vec
+        allowed = set(source_filter) if source_filter else None
+        if allowed is not None:
+            mask = np.fromiter(
+                (s in allowed for s in index["sources"]), dtype=bool, count=len(scores)
+            )
+            scores = np.where(mask, scores, -1.0)
+
+        take = min(len(scores), max(limit * 5, limit))
+        top = np.argpartition(-scores, take - 1)[:take]
+        top = top[np.argsort(-scores[top])]
+
+        results: list[SearchResult] = []
+        for pos in top:
+            score = float(scores[pos])
+            if score < VECTOR_MIN_SCORE:
+                break
+            results.append(
+                SearchResult(
+                    id=str(index["ids"][pos]),
+                    text=index["texts"][pos],
+                    score=round(score, 4),
+                    source=index["sources"][pos],
+                    metadata={**index["metas"][pos], "match_type": "vector"},
+                )
+            )
+            if len(results) >= limit:
+                break
+        return results
 
     # --- Related words (ranked) ---
     def related_words(self, word: str, limit: int = 12) -> list[dict[str, Any]]:

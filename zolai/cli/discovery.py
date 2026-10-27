@@ -123,7 +123,11 @@ def discovery_build(
         ) or cap_summary.get("collocations_written") or cap_summary.get(
             "patterns_written"
         ) or 0
-        rprint(f"  [cyan]{cap_name}:[/cyan] {written} written")
+        new = cap_summary.get("hypotheses_new") or cap_summary.get(
+            "relations_new"
+        ) or cap_summary.get("collocations_new") or 0
+        detail = f"{written} written" + (f" · {new} new" if written and new != written else "")
+        rprint(f"  [cyan]{cap_name}:[/cyan] {detail}")
 
     if summary.get("status_counts"):
         rprint(f"  [dim]Status:[/dim] {summary['status_counts']}")

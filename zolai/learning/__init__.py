@@ -4,14 +4,27 @@ Learning Package for Zolai Language.
 Multi-agent learning system with Bible-first approach.
 """
 
-from .bible_pattern_learner import get_bible_learner, BiblePatternLearner, SentencePattern
-from .feedback_store import (
-    get_feedback_store,
-    FeedbackStore,
-    FeedbackType,
-    FeedbackStatus,
-    LearningSignal,
+from .agents import (
+    AgentConfig,
+    AgentMessage,
+    AgentRole,
+    AgentSkill,
+    AgentTeam,
+    AgentTeamManager,
+    BaseAgent,
+    BibleLearnerAgent,
+    DiscussionContext,
+    DiscussionFacilitator,
+    GrammarAgent,
+    LearningOrchestrator,
+    LearningTask,
+    TranslationAgent,
+    VocabularyAgent,
+    create_standard_learning_team,
+    get_learning_orchestrator,
 )
+from .bible_pattern_learner import BiblePatternLearner, SentencePattern, get_bible_learner
+
 # Restored: the multi-agent work below rewrote this module and dropped 12 of
 # the 14 names the package had always exported, which broke
 # tests/test_bible_learning.py and any consumer importing them from here.
@@ -19,6 +32,13 @@ from .feedback_store import (
 from .context_validator import ContextValidator, get_context_validator
 from .data_manager import DataManager
 from .dictionary_manager import DictionaryManager
+from .feedback_store import (
+    FeedbackStatus,
+    FeedbackStore,
+    FeedbackType,
+    LearningSignal,
+    get_feedback_store,
+)
 from .grammar_editor import GrammarEditor
 from .online_search import OnlineSearch, get_online_search
 from .progress import ProgressTracker
@@ -26,39 +46,19 @@ from .sentence_builder import SentenceBuilder, get_sentence_builder
 from .trainer import CorrectionTrainer
 from .translation import TranslationEngine
 
-from .agents import (
-    BaseAgent,
-    AgentSkill,
-    AgentRole,
-    AgentMessage,
-    DiscussionContext,
-    AgentConfig,
-    BibleLearnerAgent,
-    TranslationAgent,
-    GrammarAgent,
-    VocabularyAgent,
-    AgentTeamManager,
-    DiscussionFacilitator,
-    AgentTeam,
-    create_standard_learning_team,
-    LearningOrchestrator,
-    LearningTask,
-    get_learning_orchestrator,
-)
-
 __all__ = [
     # Bible patterns
     "get_bible_learner",
     "BiblePatternLearner",
     "SentencePattern",
-    
+
     # Feedback
     "get_feedback_store",
     "FeedbackStore",
     "FeedbackType",
     "FeedbackStatus",
     "LearningSignal",
-    
+
     # Agents
     "BaseAgent",
     "AgentSkill",
@@ -71,13 +71,13 @@ __all__ = [
     "TranslationAgent",
     "GrammarAgent",
     "VocabularyAgent",
-    
+
     # Teams & Discussion
     "AgentTeamManager",
     "DiscussionFacilitator",
     "AgentTeam",
     "create_standard_learning_team",
-    
+
     # Orchestrator
     "LearningOrchestrator",
     "LearningTask",

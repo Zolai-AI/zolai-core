@@ -1,3 +1,13 @@
+"""Prototype API app — NOT mounted by ``zolai.api.server.create_app``.
+
+Kept because ``prediction_router`` is exercised through it
+(``tests/test_prediction_api.py``). Its ``/verify-grammar`` rule list and its
+``entries``/``translations`` schema are pre-canonical: the served grammar
+routes live in ``server.py`` and the lexicon lives in ``dictionary`` /
+``dictionary_en_zo``, read through ``DatabaseManager``. Nothing here is a
+source of truth.
+"""
+
 import json
 import os
 import sqlite3
@@ -7,11 +17,14 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from zolai.api.prediction_api import router as prediction_router  # noqa: E402
+from zolai.config import config
 
 app = FastAPI(title="Zolai Tool API")
 
-# Update this path if the API is moved
-DB_PATH = 'data/master_unified_dictionary.db'
+#: Legacy scratch store, anchored to the data root instead of the cwd — a
+#: relative path here used to silently create an empty second database in
+#: whichever directory the process happened to start in.
+DB_PATH = str(config.paths.data / "master_unified_dictionary.db")
 
 class SearchResult(BaseModel):
     headword: str

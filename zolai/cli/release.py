@@ -13,6 +13,7 @@ import sys
 import typer
 from sqlalchemy.engine import Engine
 
+from zolai.config import config
 from zolai.data.repositories import get_engine
 from zolai.publishing.release import release_knowledge
 
@@ -49,7 +50,7 @@ def prepare(
             subprocess.run(
                 ["git", "tag", "-a", rc_tag, "-m", f"Release candidate {version}"],
                 check=True,
-                cwd="/home/peter/Documents/Projects/zolai-ai/zolai-core",
+                cwd=str(config.paths.root),
             )
             log.info("Created RC tag: %s", rc_tag)
             result.git_tag = rc_tag
@@ -111,7 +112,7 @@ def promote(
             subprocess.run(
                 ["git", "tag", "-d", rc_tag],
                 check=True,
-                cwd="/home/peter/Documents/Projects/zolai-ai/zolai-core",
+                cwd=str(config.paths.root),
             )
             log.info("Deleted RC tag: %s", rc_tag)
         except subprocess.CalledProcessError:
@@ -183,12 +184,12 @@ def rollback(
     # 4. Delete git tags
     try:
         subprocess.run(
-            ["git", "tag", "-d", f"v{version}"], check=True, cwd="/home/peter/Documents/Projects/zolai-ai/zolai-core"
+            ["git", "tag", "-d", f"v{version}"], check=True, cwd=str(config.paths.root)
         )
         subprocess.run(
             ["git", "tag", "-d", f"v{version}-rc"],
             check=False,
-            cwd="/home/peter/Documents/Projects/zolai-ai/zolai-core",
+            cwd=str(config.paths.root),
         )
         log.info("Deleted git tags for %s", version)
     except subprocess.CalledProcessError as e:
@@ -229,7 +230,7 @@ def status() -> None:
         tags_output = subprocess.run(
             ["git", "tag", "-l", "v*", "--sort=-creatordate"],
             capture_output=True, text=True, check=True,
-            cwd="/home/peter/Documents/Projects/zolai-ai/zolai-core",
+            cwd=str(config.paths.root),
         ).stdout
         git_tags = tags_output.strip().split("\n") if tags_output.strip() else []
     except subprocess.CalledProcessError:

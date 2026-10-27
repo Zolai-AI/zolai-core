@@ -278,14 +278,32 @@ async def analyze_word(
     request: AnalyzeWordRequest,
     retriever: UnifiedRetriever = Depends(get_retriever),
 ) -> AnalyzeWordResponse:
-    """Analyze a single word (POS, morphology, attestation)."""
-    result = retriever.analyze_sentence(request.word)  # Reuse sentence analyzer for single word
+    """Analyze a single word (POS, morphology, attestation).
+
+    POS, morphology and the attestation list come from **the same evidence
+    source as ``GET /api/v1/word/{word}``** (``query_word`` → dictionary POS
+    columns, Bible attestations, observation stats, claims, KG — core#23), so
+    the two routes can never disagree.  ``analyze_sentence`` stays what it is —
+    a sentence-level tokenizer — and only supplies the token split.
+    """
+    tokens = retriever.analyze_sentence(request.word).get("tokens", [])
+    pack = retriever.query_word(request.word)
     return AnalyzeWordResponse(
         word=request.word,
-        tokens=result.get("tokens", []),
-        pos=result.get("pos", []),
-        morphology=result.get("morphology", {}),
-        attestation=result.get("attestation", []),
+        tokens=tokens or [request.word],
+        pos=list(pack.pos),
+        morphology=dict(pack.morphology),
+        attestation=[
+            {
+                "source_type": item.source_type,
+                "source": item.source,
+                "tier": item.tier,
+                "confidence": item.confidence,
+                "text": item.text,
+                "metadata": item.metadata,
+            }
+            for item in pack.evidence_items
+        ],
     )
 
 

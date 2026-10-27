@@ -11,7 +11,12 @@ from zolai.data.repositories.extended import KGRepository
 from .consensus import compute_claim_consensus
 from .promotion import promote_hypotheses_to_claims
 from .review import ReviewQueue
-from .versioning import create_knowledge_version, get_knowledge_version, list_knowledge_versions
+from .versioning import (
+    create_knowledge_version,
+    get_knowledge_version,
+    list_knowledge_versions,
+    verify_knowledge_version,
+)
 
 __all__ = [
     "promote_hypotheses_to_claims",
@@ -21,4 +26,5 @@ __all__ = [
     "list_knowledge_versions",
     "KGRepository",
     "get_knowledge_version",
+    "verify_knowledge_version",
 ]

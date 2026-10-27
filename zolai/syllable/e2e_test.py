@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..config import config
 from ..mt import ZolaiMT
 from ..pos_tagger import ZolaiPOSTagger
 from ..zvs import validate as zvs_validate
@@ -969,7 +970,7 @@ def main(argv: list[str] | None = None) -> int:
         print("RUNNING STRESS TEST")
         print("=" * 60)
         stress_results = tester.stress_test(
-            args.stress or "/home/peter/Documents/Projects/zolai-ai/data/bible/parallel_corpus_v1.jsonl",
+            args.stress or str(config.paths.data / "bible/parallel_corpus_v1.jsonl"),
             max_words=args.max_words,
         )
         all_results["stress"] = stress_results
@@ -1014,7 +1015,7 @@ def main(argv: list[str] | None = None) -> int:
         print("RUNNING ZVS 2018 COMPLIANCE CHECK")
         print("=" * 60)
         zvs_results = tester.verify_zvs_compliance(
-            args.zvs or "/home/peter/Documents/Projects/zolai-ai/data/bible/parallel_corpus_v1.jsonl",
+            args.zvs or str(config.paths.data / "bible/parallel_corpus_v1.jsonl"),
             max_words=args.max_zvs_words,
         )
         all_results["zvs"] = zvs_results

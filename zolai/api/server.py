@@ -13,9 +13,11 @@ from typing import Any, Optional
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
+from starlette.routing import Match
 
+from .. import __version__
 from ..analyzer.corpus import CorpusAnalyzer
 from ..api import auth
 from ..api.admin_api_keys_router import router as admin_api_keys_router
@@ -27,10 +29,13 @@ from ..api.assistant_router import public_router as assistant_router
 from ..api.auth_middleware import ApiKeyMiddleware
 from ..api.auth_session_router import router as auth_session_router
 from ..api.bible_alias_router import router as bible_alias_router
+from ..api.contributions_router import router as contributions_router
 from ..api.desktop_router import router as desktop_router
 from ..api.errors import internal_http_error
 from ..api.foundation_router import router as foundation_router
 from ..api.jsonl_router import router as jsonl_router
+from ..api.learning_agents_router import admin_router as learning_agents_router
+from ..api.learning_tools_router import router as learning_tools_router
 from ..api.lexicon_router import router as lexicon_router
 from ..api.linguistics_router import router as linguistics_router
 from ..api.mcp_router import root_router as mcp_root_router
@@ -44,9 +49,6 @@ from ..api.record_review_router import router as record_review_router
 from ..api.records_router import router as records_router
 from ..api.security import SecurityHeadersMiddleware, cors_kwargs, get_cors_origins
 from ..api.word_engine_router import router as word_engine_router
-from ..api.contributions_router import router as contributions_router
-from ..api.learning_agents_router import admin_router as learning_agents_router
-from ..api.learning_tools_router import router as learning_tools_router
 from ..cleaner.pipeline import CleanPipeline
 from ..config import config
 from ..crawler.engine import CrawlEngine
@@ -173,7 +175,10 @@ class HealthResponse(BaseModel):
     """
 
     status: str = "ok"
-    version: str = "1.0.0"
+    #: Single source of truth: ``zolai.__version__`` (== ``project.version``).
+    #: The endpoint used to report a third literal (core#13: 0.3.0 vs 1.0.0
+    #: vs 2.0.0) — every surface now derives from the package version.
+    version: str = __version__
     uptime_s: float | None = None
     engine_mode: str | None = None
     llm_allowed: bool | None = None
@@ -475,7 +480,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Zolai Toolkit API",
         description="REST API for Zolai language data pipeline",
-        version="1.0.0",
+        version=__version__,
         lifespan=lifespan,
     )
 
@@ -562,7 +567,7 @@ def create_app() -> FastAPI:
         html_path = _FRONTEND_DIR / "index.html"
         if html_path.exists():
             return FileResponse(str(html_path))
-        return {"status": "ok", "version": "0.3.0", "api": "running"}
+        return {"status": "ok", "version": __version__, "api": "running"}
 
     # CORS: explicit allowlist only (core#1). A wildcard + allow_credentials
     # makes Starlette reflect any ``Origin`` (incl. ``null``) with credentials;
@@ -649,8 +654,8 @@ def create_app() -> FastAPI:
 
     @app.get("/health", response_model=HealthResponse)
     async def health():
-        from ..monitoring.store import PROCESS_STARTED_AT
         from ..engines import engine_mode, llm_allowed
+        from ..monitoring.store import PROCESS_STARTED_AT
 
         # No data_root: public health must not leak the data path (core#16).
         return HealthResponse(
@@ -662,8 +667,8 @@ def create_app() -> FastAPI:
 
     @app.get("/api/v1/health", response_model=HealthResponse)
     async def api_v1_health():
-        from ..monitoring.store import PROCESS_STARTED_AT
         from ..engines import engine_mode, llm_allowed
+        from ..monitoring.store import PROCESS_STARTED_AT
 
         # No data_root: public health must not leak the data path (core#16).
         return HealthResponse(
@@ -886,10 +891,29 @@ def create_app() -> FastAPI:
 
     @app.get("/bible/status")
     async def bible_status():
-        """Check Bible data availability."""
+        """Check Bible data availability.
+
+        DB-first (core#22): the corpus lives in ``bible_verses``, so ``verses``
+        is the real availability signal.  ``bible_files`` only counts on-disk
+        XML bundles, which are 0 on a database-backed deployment even though
+        every verse is served.
+        """
         bibles_dir = config.paths.data_knowledge / "bibles"
         files = list(bibles_dir.glob("**/*.xml")) if bibles_dir.exists() else []
-        return {"status": "ok", "bible_files": len(files), "path": str(bibles_dir)}
+        verses = 0
+        try:
+            from ..data.database import get_manager
+
+            verses = get_manager().count("bible_verses")
+        except Exception:  # a DB hiccup must never 500 a status endpoint
+            verses = 0
+        return {
+            "status": "ok",
+            "bible_files": len(files),
+            "verses": verses,
+            "available": bool(files or verses),
+            "path": str(bibles_dir),
+        }
 
     @app.get("/bible/search")
     async def bible_search(q: str = "", version: str = "tdb77", limit: int = 10):
@@ -1165,12 +1189,24 @@ def create_app() -> FastAPI:
     @app.get("/knowledge/status")
     async def knowledge_status():
         """Check knowledge index status."""
-        from ..knowledge.retrieve import load_index
+        from sqlalchemy import text as sql_text
 
-        idx = load_index()
+        from ..data.repositories import get_engine
+
+        with get_engine().connect() as conn:
+            row = conn.execute(
+                sql_text(
+                    "SELECT COUNT(*), "
+                    "COALESCE(SUM(CASE WHEN embedding IS NOT NULL AND embedding <> '' "
+                    "THEN 1 ELSE 0 END), 0) "
+                    "FROM knowledge_vectors"
+                )
+            ).first()
         return {
-            "indexed_chunks": len(idx.ids),
-            "has_vectors": idx.vectors is not None,
+            "indexed_chunks": int(row[0] or 0),
+            # A row count, not a hydrated matrix: /status must not pull the
+            # ~380 MB vector index into memory just to answer this.
+            "has_vectors": int(row[1] or 0) > 0,
             "index_path": str(config.paths.data_knowledge / "knowledge_vectors.jsonl"),
         }
 
@@ -1706,14 +1742,32 @@ def create_app() -> FastAPI:
 
     # === Static File Serving (last route - catch-all) ===
     @app.get("/{path:path}", include_in_schema=False)
-    async def serve_static(path: str):
+    async def serve_static(path: str, request: Request):
         """Serve static files (CSS/JS/images only).
 
         Last route. Anything that is not a real file is a genuine 404 -- it must
         NOT return 200 with an {"error": ...} body, because clients branch on
         the status code and would treat the error payload as a success.
+
+        The catch-all also swallows Starlette's trailing-slash redirect, which
+        only fires when *no* route matches: ``GET /api/v1/lexicon/`` matched
+        here and 404'd while ``GET /api/v1/lexicon`` answered. Clients append
+        the slash freely, so replay the redirect by hand -- but only when the
+        stripped path is a real route, so a genuinely unknown path still 404s
+        instead of bouncing forever.
         """
         if ".." in path or path.startswith("/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        if path.endswith("/"):
+            candidate = "/" + path.rstrip("/")
+            scope = dict(request.scope, path=candidate, raw_path=candidate.encode())
+            for route in app.routes:
+                if not hasattr(route, "matches"):
+                    continue
+                if getattr(route, "path", None) == "/{path:path}":
+                    continue
+                if route.matches(scope)[0] is Match.FULL:
+                    return RedirectResponse(candidate, status_code=307)
             raise HTTPException(status_code=404, detail="Not found")
         file_path = (_FRONTEND_DIR / path).resolve()
         try:

@@ -9,10 +9,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-import subprocess
 import time
-from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -46,7 +44,7 @@ class Issue:
 
 class LogParser:
     """Parses server logs into structured entries."""
-    
+
     # Common log patterns
     PATTERNS = {
         "python_traceback": re.compile(r"Traceback \(most recent call last\):.*?(?=\n\S|\Z)", re.DOTALL),
@@ -55,7 +53,7 @@ class LogParser:
         "critical": re.compile(r"CRITICAL|Critical|critical|FATAL|Fatal|fatal"),
         "timestamp": re.compile(r"(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2})"),
     }
-    
+
     @classmethod
     def parse_log_line(cls, line: str) -> Optional[LogEntry]:
         """Parse a single log line."""
@@ -68,7 +66,7 @@ class LogParser:
                 timestamp = datetime.fromisoformat(ts_str)
             except ValueError:
                 pass
-        
+
         # Determine level
         level = "info"
         if cls.PATTERNS["critical"].search(line):
@@ -77,13 +75,13 @@ class LogParser:
             level = "error"
         elif cls.PATTERNS["warning"].search(line):
             level = "warning"
-            
+
         return LogEntry(
             timestamp=timestamp,
             level=level,
             message=line.strip(),
         )
-    
+
     @classmethod
     def parse_log_file(cls, filepath: Path, since: Optional[datetime] = None) -> list[LogEntry]:
         """Parse a log file."""
@@ -103,7 +101,7 @@ class LogParser:
 
 class IssueDetector:
     """Detects issues from log entries."""
-    
+
     # Known issue patterns
     ISSUE_PATTERNS = {
         "database_locked": {
@@ -167,22 +165,21 @@ class IssueDetector:
             "auto_fix": "check_provider_config",
         },
     }
-    
+
     @classmethod
     def detect_issues(cls, entries: list[LogEntry]) -> list[Issue]:
         """Detect issues from log entries."""
-        issues = []
         issue_map = {}  # Deduplication
-        
+
         for entry in entries:
             if entry.level not in ("error", "critical", "warning"):
                 continue
-                
+
             for issue_type, config in cls.ISSUE_PATTERNS.items():
                 if config["pattern"].search(entry.message):
                     # Create deduplication key
                     key = f"{issue_type}:{entry.message[:100]}"
-                    
+
                     if key in issue_map:
                         issue = issue_map[key]
                         issue.count += 1
@@ -198,28 +195,28 @@ class IssueDetector:
                             count=1,
                         )
                         issue_map[key] = issue
-                        
+
         return list(issue_map.values())
 
 
 class AutoFixer:
     """Automatically fixes detected issues."""
-    
+
     def __init__(self, engine=None):
         self.engine = engine
         self.fix_history: list[dict] = []
-        
+
     async def apply_fix(self, issue: Issue) -> bool:
         """Apply an automatic fix for an issue."""
         fix_method = getattr(self, f"_fix_{issue.category}", None)
         if not fix_method:
             logger.warning(f"No auto-fix available for category: {issue.category}")
             return False
-            
+
         try:
             logger.info(f"Applying auto-fix for {issue.issue_id}: {issue.category}")
             result = await fix_method(issue)
-            
+
             if result:
                 issue.status = "fixed"
                 issue.fix_applied = fix_method.__name__
@@ -233,13 +230,13 @@ class AutoFixer:
             else:
                 issue.status = "investigating"
                 logger.warning(f"Fix failed for {issue.issue_id}")
-                
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Auto-fix failed for {issue.issue_id}: {e}")
             return False
-    
+
     async def _fix_database(self, issue: Issue) -> bool:
         """Fix database issues."""
         try:
@@ -253,14 +250,14 @@ class AutoFixer:
         except Exception as e:
             logger.error(f"Database fix failed: {e}")
             return False
-    
+
     async def _fix_memory(self, issue: Issue) -> bool:
         """Fix memory issues by clearing caches."""
         try:
             # Clear Python garbage
             import gc
             gc.collect()
-            
+
             # Clear any global caches
             import sys
             for module in list(sys.modules.values()):
@@ -270,28 +267,28 @@ class AutoFixer:
         except Exception as e:
             logger.error(f"Memory fix failed: {e}")
             return False
-    
+
     async def _fix_network(self, issue: Issue) -> bool:
         """Fix network connectivity issues."""
         # Would implement service health checks
         logger.warning("Network fix not implemented")
         return False
-    
+
     async def _fix_performance(self, issue: Issue) -> bool:
         """Fix timeout/performance issues."""
         logger.warning("Performance fix not implemented")
         return False
-    
+
     async def _fix_dependency(self, issue: Issue) -> bool:
         """Fix missing dependencies."""
         logger.warning("Dependency fix not implemented")
         return False
-    
+
     async def _fix_permission(self, issue: Issue) -> bool:
         """Fix permission issues."""
         logger.warning("Permission fix not implemented")
         return False
-    
+
     async def _fix_disk(self, issue: Issue) -> bool:
         """Fix disk space issues."""
         try:
@@ -308,7 +305,7 @@ class AutoFixer:
         except Exception as e:
             logger.error(f"Disk cleanup failed: {e}")
             return False
-    
+
     async def _fix_database(self, issue: Issue) -> bool:
         """Fix database integrity issues."""
         try:
@@ -321,12 +318,12 @@ class AutoFixer:
         except Exception as e:
             logger.error(f"Database integrity fix failed: {e}")
             return False
-    
+
     async def _fix_configuration(self, issue: Issue) -> bool:
         """Fix configuration issues."""
         logger.warning("Configuration fix not implemented")
         return False
-    
+
     async def _fix_provider(self, issue: Issue) -> bool:
         """Fix provider issues."""
         logger.warning("Provider fix not implemented")
@@ -335,7 +332,7 @@ class AutoFixer:
 
 class ServerMonitor:
     """Main server monitoring class."""
-    
+
     def __init__(self, engine=None, log_paths: list[str] = None):
         self.engine = engine
         self.log_paths = log_paths or [
@@ -349,21 +346,21 @@ class ServerMonitor:
         self.fixer = AutoFixer(engine)
         self.issues: dict[str, Issue] = {}
         self.running = False
-        
+
         logger.info("ServerMonitor initialized")
-    
+
     async def scan_logs(self, since: Optional[datetime] = None) -> list[Issue]:
         """Scan all log files for issues."""
         all_entries = []
-        
+
         for log_path in self.log_paths:
             path = Path(log_path)
             if path.exists():
                 entries = self.parser.parse_log_file(path, since)
                 all_entries.extend(entries)
-        
+
         issues = self.detector.detect_issues(all_entries)
-        
+
         # Update issue tracking
         for issue in issues:
             if issue.issue_id in self.issues:
@@ -372,21 +369,21 @@ class ServerMonitor:
                 existing.last_seen = issue.last_seen
             else:
                 self.issues[issue.issue_id] = issue
-                
+
         return list(self.issues.values())
-    
+
     async def run_monitoring_cycle(self) -> dict[str, Any]:
         """Run a complete monitoring cycle: scan, detect, fix."""
         # Scan logs
         issues = await self.scan_logs(since=datetime.utcnow() - timedelta(hours=1))
-        
+
         # Auto-fix issues
         fixed = 0
         for issue in issues:
             if issue.status == "open" and issue.severity in ("critical", "high"):
                 if await self.fixer.apply_fix(issue):
                     fixed += 1
-        
+
         return {
             "timestamp": datetime.utcnow().isoformat(),
             "issues_found": len(issues),
@@ -399,11 +396,11 @@ class ServerMonitor:
                 "low": len([i for i in self.issues.values() if i.severity == "low"]),
             },
         }
-    
+
     async def start_monitoring(self, interval: int = 300):
         """Start continuous monitoring."""
         logger.info(f"Starting server monitoring with {interval}s interval")
-        
+
         while True:
             try:
                 result = await self.run_monitoring_cycle()
@@ -411,7 +408,7 @@ class ServerMonitor:
             except Exception as e:
                 logger.error(f"Monitoring cycle error: {e}")
             await asyncio.sleep(interval)
-    
+
     def get_issue_summary(self) -> dict[str, Any]:
         """Get summary of all tracked issues."""
         return {
@@ -442,4 +439,3 @@ async def run_health_check(engine=None) -> dict[str, Any]:
 
 
 # Import time at module level
-import time

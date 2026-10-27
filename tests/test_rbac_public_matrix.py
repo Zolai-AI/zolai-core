@@ -192,6 +192,7 @@ class TestRouteCompleteness:
             ("GET", "/api/v1/knowledge/version"),
             ("GET", "/api/v1/knowledge/statistics"),
             ("GET", "/api/v1/lexicon/pasian"),
+            ("GET", "/api/v1/lexicon"),
             ("GET", "/api/v1/auth/me"),
             ("POST", "/api/v1/assistant/chat"),
             # Username sign-in/out — public or sign-in is impossible under enforce.

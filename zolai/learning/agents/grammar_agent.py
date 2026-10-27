@@ -13,10 +13,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from .agent_registry import resolve_agent_config
-from .base_agent import BaseAgent, AgentMessage, DiscussionMixin, FeedbackType
-from ..bible_pattern_learner import get_bible_learner
 from ...zvs import validate as zvs_validate
+from ..bible_pattern_learner import get_bible_learner
+from .agent_registry import resolve_agent_config
+from .base_agent import AgentMessage, BaseAgent, DiscussionMixin, FeedbackType
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # ZVS 2018 forbidden forms
 ZVS_FORBIDDEN = {
     "pathian": "pasian",
-    "ram": "gam", 
+    "ram": "gam",
     "fapa": "tapa",
     "bawipa": "topa",
     "siangpahrang": "kumpipa",
@@ -45,17 +45,17 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
     def __init__(self, engine=None):
         # Identity, skills and tuning live in the registry (SQLite).
         super().__init__(resolve_agent_config("grammar_expert_001", engine), engine)
-        
+
         self.bible_learner = get_bible_learner()
         self.grammar_rules: dict = {}
         self.violation_cache: dict = {}
-        
+
         logger.info("GrammarExpert initialized")
 
     async def process_task(self, task: dict[str, Any]) -> dict[str, Any]:
         """Process a grammar validation task."""
         task_type = task.get("type", "validate")
-        
+
         if task_type == "validate":
             return await self._validate_grammar(task)
         elif task_type == "correct":
@@ -77,16 +77,16 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
             return await self._answer_question(message)
         elif message.message_type == "consensus":
             return await self._handle_consensus(message)
-        
+
         return None
 
     async def _validate_grammar(self, task: dict[str, Any]) -> dict[str, Any]:
         """Validate Zolai grammar against ZVS 2018."""
         text = task.get("text", "")
-        
+
         if not text:
             return {"error": "No text provided"}
-            
+
         # Run ZVS validation
         report = zvs_validate(text)
         corrected = report.text  # The corrected text
@@ -95,10 +95,10 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
             "violations_before": len(report.violations),  # Approximate
             "violations_after": 0 if report.is_valid else len(report.violations),
         }
-        
+
         # Additional Bible-based checks
         bible_checks = await self._check_bible_patterns(text)
-        
+
         result = {
             "original": text,
             "corrected": corrected,
@@ -108,7 +108,7 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
             "bible_checks": bible_checks,
             "confidence": 0.95 if report.is_valid else 0.5,
         }
-        
+
         # Emit learning signal
         await self.emit_learning_signal(
             query=f"Validate grammar: {text[:50]}",
@@ -117,36 +117,36 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
             confidence=result["confidence"],
             metadata={"original": text, "corrected": corrected}
         )
-        
+
         self.update_metrics("tasks_completed")
         return result
 
     async def _check_bible_patterns(self, text: str) -> dict[str, Any]:
         """Check text against Bible-learned patterns."""
         from ..bible_pattern_learner import get_bible_learner
-        
+
         learner = get_bible_learner()
         issues = []
         suggestions = []
-        
+
         # Check SOV pattern
         patterns = learner.get_patterns_for_type("sov", limit=3)
         for pattern in patterns:
             # Simple check - would need proper parsing
             pass
-            
+
         # Check for forbidden forms
         text_lower = text.lower()
         for forbidden, preferred in ZVS_FORBIDDEN.items():
             if forbidden in text_lower:
                 issues.append(f"Forbidden form '{forbidden}' found, use '{preferred}'")
                 suggestions.append(f"Replace '{forbidden}' with '{preferred}'")
-                
+
         # Check negation
         if "lo" in text_lower.split():
             issues.append("Negation uses 'lo' instead of 'kei'")
             suggestions.append("Replace 'lo' with 'kei'")
-            
+
         return {
             "issues": issues,
             "suggestions": suggestions,
@@ -158,7 +158,7 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
         text = task.get("text", "")
         if not text:
             return {"error": "No text provided"}
-            
+
         report = zvs_validate(text)
         corrected = report.text
         return {
@@ -171,17 +171,17 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
     async def _learn_grammar_patterns(self, task: dict[str, Any]) -> dict[str, Any]:
         """Learn grammar patterns from Bible."""
         limit = task.get("limit", 10)
-        
+
         from ..bible_pattern_learner import get_bible_learner
         learner = get_bible_learner()
-        
+
         # Get patterns from Bible
         pattern_types = ["sov", "question", "negation", "quotative", "ergative"]
-        
+
         for ptype in pattern_types:
             patterns = learner.get_patterns_for_type(ptype, limit=limit)
             self.grammar_rules[ptype] = patterns
-            
+
         return {
             "pattern_types_learned": len(self.grammar_rules),
             "total_patterns": sum(len(p) for p in self.grammar_rules.values()),
@@ -192,7 +192,7 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
         text = task.get("text", "")
         if not text:
             return {"error": "No text provided"}
-            
+
         report = zvs_validate(text)
         corrected = report.text
         return {
@@ -217,9 +217,9 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
                 message_type="error",
                 content="No text provided for grammar check"
             )
-            
+
         result = await self._validate_grammar({"text": text})
-        
+
         return AgentMessage(
             from_agent=self.agent_id,
             to_agent=message.from_agent,
@@ -238,9 +238,9 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
                 message_type="error",
                 content="No text provided for correction"
             )
-            
+
         result = await self._correct_grammar({"text": text})
-        
+
         return AgentMessage(
             from_agent=self.agent_id,
             to_agent=message.from_agent,
@@ -252,12 +252,12 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
     async def _answer_question(self, message: AgentMessage) -> Optional[AgentMessage]:
         """Answer grammar question."""
         question = message.content
-        
+
         # Provide grammar guidance
         answer = "I can help with Zolai grammar (ZVS 2018). " \
                  "Key rules: SOV word order, ergative 'in', negation 'kei', " \
                  "forbidden forms: pathian→pasian, ram→gam, fapa→tapa, etc."
-        
+
         return AgentMessage(
             from_agent=self.agent_id,
             to_agent=message.from_agent,
@@ -270,11 +270,11 @@ class GrammarAgent(BaseAgent, DiscussionMixin):
         """Handle consensus request."""
         topic = message.metadata.get("topic", "")
         proposal = message.content.replace("CONSENSUS PROPOSAL: ", "")
-        
+
         # Grammar expert's consensus: check grammar compliance
         consensus = f"GrammarExpert on '{topic}': {proposal[:100]}... " \
                    f"(Will validate ZVS 2018 compliance)"
-        
+
         return AgentMessage(
             from_agent=self.agent_id,
             to_agent=message.from_agent,

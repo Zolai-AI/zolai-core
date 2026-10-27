@@ -22,6 +22,8 @@ import unicodedata
 from pathlib import Path
 from typing import Final, Protocol, runtime_checkable
 
+from ..config import config
+
 
 @runtime_checkable
 class SyllableSegmenterProtocol(Protocol):
@@ -1122,7 +1124,7 @@ def _build_cli() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--corpus", "-c", type=str,
-        default="/home/peter/Documents/Projects/zolai-ai/data/syllable/gold.jsonl",
+        default=str(config.paths.data / "syllable/gold.jsonl"),
         help="Path to corpus/gold JSONL (default: data/syllable/gold.jsonl)"
     )
     parser.add_argument(

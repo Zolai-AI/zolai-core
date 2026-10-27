@@ -9,30 +9,7 @@ Bible-first, database-driven, multi-agent system that:
 - Auto-improvement without external code
 """
 
-from .base_agent import (
-    BaseAgent, 
-    AgentSkill, 
-    AgentRole, 
-    AgentMessage,
-    DiscussionContext,
-    AgentConfig,
-)
-
-from .bible_learner_agent import BibleLearnerAgent
-from .translation_agent import TranslationAgent
-from .grammar_agent import GrammarAgent
-from .vocabulary_agent import VocabularyAgent
-from .agent_team import (
-    AgentTeamManager, 
-    DiscussionFacilitator, 
-    AgentTeam,
-    create_standard_learning_team,
-)
-from .learning_orchestrator import (
-    LearningOrchestrator,
-    LearningTask,
-    get_learning_orchestrator,
-)
+from . import agent_management
 from .agent_registry import (
     AgentRecord,
     AgentRegistry,
@@ -41,29 +18,51 @@ from .agent_registry import (
     reset_agent_registry,
     resolve_agent_config,
 )
-from . import agent_management
+from .agent_team import (
+    AgentTeam,
+    AgentTeamManager,
+    DiscussionFacilitator,
+    create_standard_learning_team,
+)
+from .base_agent import (
+    AgentConfig,
+    AgentMessage,
+    AgentRole,
+    AgentSkill,
+    BaseAgent,
+    DiscussionContext,
+)
+from .bible_learner_agent import BibleLearnerAgent
+from .grammar_agent import GrammarAgent
+from .learning_orchestrator import (
+    LearningOrchestrator,
+    LearningTask,
+    get_learning_orchestrator,
+)
+from .translation_agent import TranslationAgent
+from .vocabulary_agent import VocabularyAgent
 
 __all__ = [
     # Base
     "BaseAgent",
-    "AgentSkill", 
+    "AgentSkill",
     "AgentRole",
     "AgentMessage",
     "DiscussionContext",
     "AgentConfig",
-    
+
     # Agents
     "BibleLearnerAgent",
-    "TranslationAgent", 
+    "TranslationAgent",
     "GrammarAgent",
     "VocabularyAgent",
-    
+
     # Team & Discussion
     "AgentTeamManager",
     "DiscussionFacilitator",
     "AgentTeam",
     "create_standard_learning_team",
-    
+
     # Orchestrator
     "LearningOrchestrator",
     "LearningTask",

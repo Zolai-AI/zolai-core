@@ -43,6 +43,7 @@ import json
 from collections.abc import Callable, Iterable
 from typing import Any
 
+from .. import __version__
 from ..agent.tools.errors import safe_message
 from ..agent.tools.registry import get_tool, mcp_tools, ordered_names
 from ..agent.tools.types import ToolErrorCode, ToolResult
@@ -80,7 +81,9 @@ SUPPORTED_PROTOCOL_VERSIONS: tuple[str, ...] = (
 )
 
 SERVER_NAME = "zolai-core"
-SERVER_VERSION = "1.0.0"
+#: Implementation version — one value for the whole product (core#13): the
+#: package ``zolai.__version__``, never a second literal.
+SERVER_VERSION = __version__
 
 #: A self-contained ``server/discover`` blurb an LLM client can act on (kept
 #: under ChatGPT's 512-character guidance). Names the corpus, the grammar

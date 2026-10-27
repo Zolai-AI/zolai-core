@@ -15,9 +15,9 @@ import logging
 from datetime import datetime
 from typing import Any, Optional
 
-from .agent_registry import resolve_agent_config
-from .base_agent import BaseAgent, AgentMessage, FeedbackType
 from ..bible_pattern_learner import get_bible_learner
+from .agent_registry import resolve_agent_config
+from .base_agent import AgentMessage, BaseAgent, FeedbackType
 
 logger = logging.getLogger(__name__)
 
@@ -28,18 +28,18 @@ class BibleLearnerAgent(BaseAgent):
     def __init__(self, engine=None):
         # Identity, skills and tuning live in the registry (SQLite).
         super().__init__(resolve_agent_config("bible_learner_001", engine), engine)
-        
+
         self.bible_learner = get_bible_learner()
         self.extracted_patterns: dict = {}
         self.learned_vocabulary: dict = {}
         self.pattern_frequency: dict = {}
-        
+
         logger.info("BibleLearnerAgent initialized - Primary learning agent")
 
     async def process_task(self, task: dict[str, Any]) -> dict[str, Any]:
         """Process a learning task."""
         task_type = task.get("type", "learn_pattern")
-        
+
         if task_type == "learn_pattern":
             return await self._learn_pattern(task)
         elif task_type == "extract_vocabulary":
@@ -63,16 +63,16 @@ class BibleLearnerAgent(BaseAgent):
             return await self._validate_for_agent(message)
         elif message.message_type == "consensus":
             return await self._handle_consensus(message)
-        
+
         return None
 
     async def _learn_pattern(self, task: dict[str, Any]) -> dict[str, Any]:
         """Learn a specific pattern from Bible."""
         pattern_type = task.get("pattern_type", "sov")
         limit = task.get("limit", 10)
-        
+
         patterns = self.bible_learner.get_patterns_for_type(pattern_type, limit=limit)
-        
+
         result = {
             "pattern_type": pattern_type,
             "patterns_found": len(patterns),
@@ -88,11 +88,11 @@ class BibleLearnerAgent(BaseAgent):
             ],
             "learned_at": datetime.utcnow().isoformat(),
         }
-        
+
         # Store in knowledge cache
         self.extracted_patterns[pattern_type] = result
         self.update_metrics("knowledge_items_learned", len(patterns))
-        
+
         # Emit learning signal
         await self.emit_learning_signal(
             query=f"Learn {pattern_type} patterns",
@@ -101,20 +101,20 @@ class BibleLearnerAgent(BaseAgent):
             confidence=0.95,
             metadata={"pattern_type": pattern_type, "count": len(patterns)}
         )
-        
+
         return result
 
     async def _extract_vocabulary(self, task: dict[str, Any]) -> dict[str, Any]:
         """Extract vocabulary from Bible verses."""
         limit = task.get("limit", 50)
         min_frequency = task.get("min_frequency", 2)
-        
+
         learner = self.bible_learner
         vocab = learner.word_freq.most_common(limit)
-        
+
         # Filter by frequency
         vocab = [(w, c) for w, c in vocab if c >= min_frequency]
-        
+
         # Build vocabulary entries with Bible context
         vocab_entries = []
         for word, freq in vocab:
@@ -131,13 +131,13 @@ class BibleLearnerAgent(BaseAgent):
                     "frequency": freq,
                     "context": context[:500],
                 })
-        
+
         result = {
             "vocabulary_size": len(vocab_entries),
             "min_frequency": min_frequency,
             "entries": vocab_entries[:20],  # Return top 20
         }
-        
+
         self.update_metrics("knowledge_items_learned", len(vocab_entries))
         return result
 
@@ -145,12 +145,12 @@ class BibleLearnerAgent(BaseAgent):
         """Build Bible context for a word or phrase."""
         word = task.get("word", "")
         limit = task.get("limit", 3)
-        
+
         if not word:
             return {"error": "No word provided"}
-            
+
         context = self.bible_learner.build_context_for_word(task["word"], limit=limit)
-        
+
         return {
             "word": word,
             "bible_context": context,
@@ -161,20 +161,20 @@ class BibleLearnerAgent(BaseAgent):
         """Validate a translation against Bible patterns."""
         source = task.get("source_text", "")
         translation = task.get("translation", "")
-        
+
         if not source or not translation:
             return {"error": "Missing source_text or translation"}
-            
+
         validation = await self.validate_with_bible(translation, source)
         return validation
 
     async def _extract_all_patterns(self, task: dict[str, Any]) -> dict[str, Any]:
         """Extract all pattern types from Bible."""
         pattern_types = ["sov", "question", "negation", "quotative", "future", "past_completed", "ergative"]
-        
+
         all_patterns = {}
         total = 0
-        
+
         for ptype in pattern_types:
             patterns = self.bible_learner.get_patterns_for_type(ptype, limit=5)
             all_patterns[ptype] = [
@@ -187,7 +187,7 @@ class BibleLearnerAgent(BaseAgent):
                 for p in patterns
             ]
             total += len(patterns)
-        
+
         return {
             "pattern_types": list(all_patterns.keys()),
             "total_patterns": total,
@@ -197,25 +197,25 @@ class BibleLearnerAgent(BaseAgent):
     async def _answer_question(self, message: AgentMessage) -> Optional[AgentMessage]:
         """Answer a question from another agent using Bible knowledge."""
         question = message.content
-        
+
         # Try to answer from Bible knowledge
         # For now, provide Bible context for key terms
         words = question.lower().split()
         contexts = {}
-        
+
         for word in words[:3]:
             if len(word) > 2:
                 context = self.bible_learner.build_context_for_word(word, limit=1)
                 if "No Bible sentences" not in context:
                     contexts[word] = context
-        
+
         answer = "Based on Bible corpus: "
         if contexts:
             for word, ctx in contexts.items():
                 answer += f"\n- {word}: {ctx[:200]}"
         else:
             answer += "No specific Bible context found for this question."
-            
+
         return AgentMessage(
             from_agent=self.agent_id,
             to_agent=message.from_agent,
@@ -235,7 +235,7 @@ class BibleLearnerAgent(BaseAgent):
                 if len(w) > 2:
                     word = w
                     break
-        
+
         if not word:
             return AgentMessage(
                 from_agent=self.agent_id,
@@ -243,9 +243,9 @@ class BibleLearnerAgent(BaseAgent):
                 message_type="error",
                 content="No word found in request"
             )
-            
+
         context = self.bible_learner.build_context_for_word(word, limit=3)
-        
+
         return AgentMessage(
             from_agent=self.agent_id,
             to_agent=message.from_agent,
@@ -258,7 +258,7 @@ class BibleLearnerAgent(BaseAgent):
         """Validate a translation for another agent."""
         translation = message.metadata.get("translation", "")
         source = message.metadata.get("source_text", "")
-        
+
         if not translation or not source:
             return AgentMessage(
                 from_agent=self.agent_id,
@@ -266,14 +266,17 @@ class BibleLearnerAgent(BaseAgent):
                 message_type="error",
                 content="Missing translation or source_text in metadata"
             )
-            
+
         validation = await self.validate_with_bible(translation, source)
-        
+
         return AgentMessage(
             from_agent=self.agent_id,
             to_agent=message.from_agent,
             message_type="validation_result",
-            content=f"Validation: {'PASS' if validation.get('is_valid') else 'FAIL'} - Confidence: {validation.get('confidence', 0):.2f}",
+            content=(
+                "Validation: " + ("PASS" if validation.get("is_valid") else "FAIL")
+                + " - Confidence: " + f"{validation.get('confidence', 0):.2f}"
+            ),
             metadata={"validation": validation}
         )
 
@@ -281,12 +284,12 @@ class BibleLearnerAgent(BaseAgent):
         """Handle consensus building message."""
         topic = message.metadata.get("topic", "")
         proposal = message.content.replace("CONSENSUS PROPOSAL: ", "")
-        
+
         # Bible learner's consensus: check against Bible patterns
         # For now, simple agreement if it aligns with Bible patterns
         consensus = f"BibleLearner agrees with proposal on '{topic}': {proposal[:100]}... " \
                    f"(Validated against Bible patterns)"
-        
+
         return AgentMessage(
             from_agent=self.agent_id,
             to_agent=message.from_agent,
@@ -337,13 +340,13 @@ class BibleLearnerAgent(BaseAgent):
             except Exception as e:
                 logger.error(f"BibleLearner continuous learning error: {e}")
                 self.update_metrics("errors", 1)
-                
+
             await asyncio.sleep(interval)
 
     async def get_learning_report(self) -> dict[str, Any]:
         """Get comprehensive learning report."""
         stats = self.bible_learner.get_pattern_stats()
-        
+
         return {
             "agent": self.name,
             "role": self.role.value,

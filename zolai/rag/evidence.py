@@ -88,6 +88,10 @@ def evidence_to_pack(word: str, evidence_items: list[EvidenceItem]) -> EvidenceP
 
     # Aggregate
     pack = EvidencePack(word=word)
+    # Keep the exact items the pack was aggregated from: the evidence chain
+    # stays available in one pass (wire models deliberately drop this field —
+    # see ``agent.tools.language._word_detail``).
+    pack.evidence_items = list(evidence_items)
     seen_sources = set()
     tier_weights = []
 
@@ -184,13 +188,19 @@ def build_word_evidence_items(engine: Engine, word: str, limit: int = 50) -> lis
     items = []
 
     # 1. Dictionary
+    #
+    # ``confidence`` is a 0..1 lexicon score, NOT a count. It used to be
+    # aliased ``frequency`` here, so every dictionary row added its confidence
+    # to the pack's corpus frequency: ``word_observation_stats`` said 5223 and
+    # the API answered 5223.9 (a float in an int field, which the wire model
+    # rightly rejects). Frequencies come from the observation stats only.
     with engine.connect() as conn:
         rows = conn.execute(
             text("""
-                SELECT zolai, english as definition, pos_canonical, pos_evidence, confidence as frequency
+                SELECT zolai, english as definition, pos_canonical, pos_evidence, confidence
                 FROM dictionary WHERE zolai = :word
                 UNION ALL
-                SELECT headword, translations_clean as definition, pos, NULL as pos_evidence, 0 as frequency
+                SELECT headword, translations_clean as definition, pos, NULL as pos_evidence, NULL
                 FROM dictionary_en_zo WHERE headword = :word
             """),
             {"word": word},
@@ -202,13 +212,12 @@ def build_word_evidence_items(engine: Engine, word: str, limit: int = 50) -> lis
                 source="dictionary",
                 fact_key=f"word:{word}",
                 tier=2,
-                confidence=0.9,
+                confidence=row[4] if row[4] is not None else 0.9,
                 text=row[1] if row[1] else "",
                 metadata={
                     "word": row[0],
                     "definition": row[1],
                     "pos": row[2] if row[2] else None,
-                    "frequency": row[4] if row[4] is not None else 0,
                 },
             ))
 

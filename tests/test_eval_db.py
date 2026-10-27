@@ -2,8 +2,8 @@
 
 Covers schema creation, JSONL import/export round-trips, kind inference,
 DB parity with the bundled JSONL fixtures, and the CLI ``--import`` /
-``--export`` short-circuits. Every test runs against a throwaway SQLite file
-via the ``ZOLAI_DB_PATH`` environment variable.
+``--export`` short-circuits. Every test runs against a throwaway database
+supplied by the ``scratch_db`` fixture, so nothing here touches the corpus.
 """
 
 from __future__ import annotations
@@ -13,33 +13,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-
-# --- collection guard ---------------------------------------------------
-# These modules were written against an evaluation API that was never
-# implemented: `metrics.py` provides `compute_*_metrics`, while `cli.py`
-# imports `zvs_compliance_rate` / `translation_bleu` / `translation_chrf` /
-# `qa_term_recall`. Inventing those would mean fabricating numbers that
-# `below_floor()` then gates releases on - a wrong metric that looks real is
-# worse than a missing one. So the gap is declared rather than papered over,
-# and these tests resume automatically once the API lands.
-#
-# This check must come BEFORE any `zolai.eval` import: `cli.py` fails at import
-# time, so a guard placed after the imports never runs.
-import pytest as _pytest
-
-import zolai.eval.metrics as _metrics
-
-_EVAL_MISSING = [
-    n for n in ("zvs_compliance_rate", "translation_bleu", "translation_chrf", "qa_term_recall")
-    if not hasattr(_metrics, n)
-]
-if _EVAL_MISSING:
-    _pytest.skip(
-        "zolai.eval.metrics does not implement: " + ", ".join(_EVAL_MISSING),
-        allow_module_level=True,
-    )
-# -------------------------------------------------------------------------
-
 
 from zolai.eval import evaluate, load_dataset, resolve_set
 from zolai.eval.cli import main as cli_main
@@ -79,11 +52,9 @@ _FLOORS = {
 
 
 @pytest.fixture(autouse=True)
-def _eval_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Point the store at a throwaway SQLite file for every test."""
-    db = tmp_path / "eval.db"
-    monkeypatch.setenv("ZOLAI_DB_PATH", str(db))
-    return db
+def _eval_db(scratch_db: Path) -> Path:
+    """Point the store *and* the CLI's run history at a throwaway database."""
+    return scratch_db
 
 
 def _table_names(db: Path) -> set[str]:

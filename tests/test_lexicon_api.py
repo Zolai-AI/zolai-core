@@ -185,6 +185,35 @@ def _walk(client: TestClient, params: dict, max_pages: int = 20) -> list[tuple[i
 
 
 # ---------------------------------------------------------------------------
+# GET /api/v1/lexicon  — bare-prefix index (core#11)
+# ---------------------------------------------------------------------------
+
+
+class TestLexiconIndex:
+    def test_bare_prefix_answers_instead_of_404(self, client: TestClient) -> None:
+        """The router's own discovery document (no DB read)."""
+        resp = client.get("/api/v1/lexicon")
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["name"] == "lexicon"
+        assert data["read_only"] is True
+        paths = {route["path"] for route in data["routes"]}
+        assert paths == {"/api/v1/lexicon/search", "/api/v1/lexicon/{word}"}
+        assert data["tables"] == ["dictionary", "dictionary_en_zo"]
+        assert resp.headers["cache-control"].startswith("public, max-age=")
+
+    def test_trailing_slash_is_the_same_document(self, client: TestClient) -> None:
+        assert client.get("/api/v1/lexicon/").json()["name"] == "lexicon"
+
+    def test_index_never_shadows_the_real_routes(self, client: TestClient, api_db) -> None:
+        """Static index first, then the two lookups — registration order held."""
+        search = client.get("/api/v1/lexicon/search", params={"q": "pasian"})
+        assert search.status_code == 200, search.text
+        assert search.json()["items"], "search must still return rows"
+        assert client.get("/api/v1/lexicon/pasian").json()["found"] is True
+
+
+# ---------------------------------------------------------------------------
 # GET /api/v1/lexicon/{word}
 # ---------------------------------------------------------------------------
 

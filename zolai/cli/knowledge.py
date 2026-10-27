@@ -15,6 +15,7 @@ from zolai.knowledge import (
     create_knowledge_version,
     list_knowledge_versions,
     promote_hypotheses_to_claims,
+    verify_knowledge_version,
 )
 
 log = logging.getLogger(__name__)
@@ -103,6 +104,11 @@ def version_create(
     manifest_hash: str = typer.Option(None, "--manifest-hash"),
     status: str = typer.Option("OBSERVED", "--status"),
     user: str = typer.Option("system", "--user"),
+    content_manifest: bool = typer.Option(
+        True,
+        "--content/--no-content",
+        help="Hash table content (default) instead of only row counts",
+    ),
 ) -> None:
     """Create a knowledge version snapshot."""
     _engine = get_engine()
@@ -118,8 +124,21 @@ def version_create(
         manifest_hash=manifest_hash,
         status=status,
         user=user,
+        content_manifest=content_manifest,
     )
     print(f"Created knowledge version {version_id}")
+
+
+@app.command("verify-version")
+def verify_version(
+    tag: str = typer.Argument(..., help="Version tag to verify against the live DB"),
+) -> None:
+    """Compare a recorded snapshot's fingerprints with the live database."""
+    engine = get_engine()
+    report = verify_knowledge_version(engine, tag)
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    if not report.get("ok"):
+        raise typer.Exit(code=1)
 
 
 @app.command("list-versions")

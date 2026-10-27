@@ -20,7 +20,7 @@ import logging
 from collections import Counter
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
 from zolai.data.pos_normalize import UPOS_ALLOWLIST, to_upos
@@ -34,14 +34,37 @@ log = logging.getLogger(__name__)
 POS_CAP = 5000
 
 
-def _get_dictionary_pos(engine: Engine, limit: int | None = None) -> list[dict[str, Any]]:
-    """Get words with POS from dictionary tables."""
+def _pos_source(
+    engine: Engine, table: str, word_column: str, limit: int | None
+) -> list[dict[str, Any]]:
+    """Read the POS columns from one lexicon table, tolerating both schemas.
+
+    The corpus database carries a legacy ``pos`` column that ``models.py``
+    deliberately does not declare, so a database created by ``init_db()`` has
+    no ``pos`` at all -- and ``zolai_vocabulary`` exists only in the corpus.
+    Both used to raise, which aborted the whole POS capability on a fresh
+    database; each source is now read for what it actually has.
+    """
+    try:
+        columns = {c["name"] for c in inspect(engine).get_columns(table)}
+    except Exception:  # NoSuchTableError and dialect equivalents
+        log.debug("discovery source table missing: %s", table)
+        return []
+    if not {"pos_canonical", word_column} <= columns:
+        log.debug("discovery source %s lacks pos_canonical/%s", table, word_column)
+        return []
+
+    legacy = "pos" if "pos" in columns else "NULL"
+    optional = lambda name: name if name in columns else "NULL"  # noqa: E731
     lim = f"LIMIT {limit}" if limit else ""
     with engine.connect() as conn:
         rows = conn.execute(
             text(
-                f"SELECT zolai AS word, pos_canonical, pos, pos_candidates, pos_evidence "
-                f"FROM dictionary WHERE pos_canonical IS NOT NULL AND TRIM(pos_canonical) != '' {lim}"
+                f"SELECT {word_column} AS word, pos_canonical, {legacy} AS pos, "
+                f"{optional('pos_candidates')} AS pos_candidates, "
+                f"{optional('pos_evidence')} AS pos_evidence "
+                f"FROM {table} WHERE pos_canonical IS NOT NULL "
+                f"AND TRIM(pos_canonical) != '' {lim}"
             )
         ).fetchall()
     return [
@@ -54,50 +77,21 @@ def _get_dictionary_pos(engine: Engine, limit: int | None = None) -> list[dict[s
         }
         for r in rows
     ]
+
+
+def _get_dictionary_pos(engine: Engine, limit: int | None = None) -> list[dict[str, Any]]:
+    """Get words with POS from dictionary tables."""
+    return _pos_source(engine, "dictionary", "zolai", limit)
 
 
 def _get_vocabulary_pos(engine: Engine, limit: int | None = None) -> list[dict[str, Any]]:
     """Get words with POS from vocabulary tables."""
-    lim = f"LIMIT {limit}" if limit else ""
-    with engine.connect() as conn:
-        rows = conn.execute(
-            text(
-                f"SELECT headword AS word, pos_canonical, pos, pos_candidates, pos_evidence "
-                f"FROM vocabulary WHERE pos_canonical IS NOT NULL AND TRIM(pos_canonical) != '' {lim}"
-            )
-        ).fetchall()
-    return [
-        {
-            "word": r[0],
-            "pos_canonical": r[1],
-            "pos_legacy": r[2],
-            "pos_candidates": r[3],
-            "pos_evidence": r[4],
-        }
-        for r in rows
-    ]
+    return _pos_source(engine, "vocabulary", "headword", limit)
 
 
 def _get_zolai_vocabulary_pos(engine: Engine, limit: int | None = None) -> list[dict[str, Any]]:
     """Get words with POS from zolai_vocabulary table."""
-    lim = f"LIMIT {limit}" if limit else ""
-    with engine.connect() as conn:
-        rows = conn.execute(
-            text(
-                f"SELECT zolai AS word, pos_canonical, pos, pos_candidates, pos_evidence "
-                f"FROM zolai_vocabulary WHERE pos_canonical IS NOT NULL AND TRIM(pos_canonical) != '' {lim}"
-            )
-        ).fetchall()
-    return [
-        {
-            "word": r[0],
-            "pos_canonical": r[1],
-            "pos_legacy": r[2],
-            "pos_candidates": r[3],
-            "pos_evidence": r[4],
-        }
-        for r in rows
-    ]
+    return _pos_source(engine, "zolai_vocabulary", "zolai", limit)
 
 
 def _get_word_usage_distribution(engine: Engine, limit: int | None = None) -> dict[str, Counter]:
@@ -294,6 +288,7 @@ def build_pos_hypotheses(
     morph_features = _get_morphology_features(engine, list(all_words))
 
     hypotheses_written = 0
+    hypotheses_new = 0
     status_counts: Counter = Counter()
     evidence_rows: list[dict[str, Any]] = []
     skipped_unmapped = 0
@@ -436,23 +431,24 @@ def build_pos_hypotheses(
 
         status = require_discovery_status(_decide_pos_status(sources_used)).value
 
-        if not dry_run:
-            # Upsert evidence
-            upsert_evidence_bulk(engine, evidence_rows)
+        hypo = POSHypothesis(
+            word=word,
+            pos=best_upos,
+            confidence=confidence,
+            status=status,
+            evidence_ids=[],  # Will be filled by evidence upsert but we don't have IDs back easily
+            extras=extras,
+        )
 
-            # Create hypothesis
-            hypo = POSHypothesis(
-                word=word,
-                pos=best_upos,
-                confidence=confidence,
-                status=status,
-                evidence_ids=[],  # Will be filled by evidence upsert but we don't have IDs back easily
-                extras=extras,
-            )
-            repo.create(hypo.model_dump())
-            hypotheses_written += 1
+        if dry_run:
+            # Still distinguish a new claim from a refresh — read-only.
+            created = repo.existing_id(hypo.model_dump()) is None
         else:
-            hypotheses_written += 1
+            upsert_evidence_bulk(engine, evidence_rows)
+            _, created = repo.upsert(hypo.model_dump())
+
+        hypotheses_written += 1
+        hypotheses_new += int(created)
 
         status_counts[status] += 1
         evidence_rows.clear()
@@ -460,10 +456,13 @@ def build_pos_hypotheses(
     return {
         "capability": "pos",
         "hypotheses_written": hypotheses_written,
+        "hypotheses_new": hypotheses_new,
         "status_counts": dict(status_counts),
         "skipped_unmapped": skipped_unmapped,
         "words_processed": len(all_words),
     }
+
+
 class POSDiscovery:
     """Wrapper class for POS hypothesis discovery matching test expectations."""
 

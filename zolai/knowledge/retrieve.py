@@ -14,12 +14,14 @@ import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 from ..config import config
 from ..data.repositories import get_engine
 from ..data.repositories.extended import KnowledgeVectorRepository
+from ..rag.vectors import decode_embedding
 
 DEFAULT_INDEX = config.paths.data_knowledge / "knowledge_vectors.jsonl"
 
@@ -35,6 +37,23 @@ class Index:
     metas: list[dict] = field(default_factory=list)
     ids: list[str] = field(default_factory=list)
     vectors: np.ndarray | None = None
+
+
+#: Process-level cache: hydrating the full table costs ~1 min and ~380 MB.
+#: The key is ``(db_url, row_count, last_import)`` so a rebuild or a different
+#: database invalidates it.
+_INDEX_CACHE: tuple[tuple[Any, ...], "Index"] | None = None
+
+
+def _index_cache_key() -> tuple[Any, ...]:
+    from sqlalchemy import text as sql_text
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        row = conn.execute(
+            sql_text("SELECT COUNT(*), MAX(imported_at) FROM knowledge_vectors")
+        ).first()
+    return (str(engine.url), int(row[0]), row[1]) if row else ("", 0, None)
 
 
 def _ingest_jsonl_to_db(path: Path) -> int:
@@ -89,10 +108,19 @@ def load_index(path: Path = DEFAULT_INDEX) -> Index:
     If the table is empty and a local ``knowledge_vectors.jsonl`` exists (or can
     be downloaded), it is first ingested into the table (build step). Missing or
     empty data returns an empty :class:`Index`.
-    """
-    idx = Index()
-    repo = KnowledgeVectorRepository(get_engine())
 
+    The hydrated index is cached per process: once the corpus is populated the
+    table holds hundreds of thousands of rows, and re-reading it on every call
+    turned each retrieval into a minute of parsing.
+    """
+    global _INDEX_CACHE
+
+    repo = KnowledgeVectorRepository(get_engine())
+    key = _index_cache_key()
+    if key[1] and _INDEX_CACHE is not None and _INDEX_CACHE[0] == key:
+        return _INDEX_CACHE[1]
+
+    idx = Index()
     records = repo.all_rows()
     if not records:
         # One-time ingest from a local/downloaded JSONL bundle, if present.
@@ -101,25 +129,31 @@ def load_index(path: Path = DEFAULT_INDEX) -> Index:
             n = _ingest_jsonl_to_db(path)
             if n:
                 records = repo.all_rows()
+                key = _index_cache_key()
 
     if not records:
         return idx
+
+    # Decode alongside the text/metadata so a row with an unreadable embedding
+    # is dropped from all four lists together. Two separate passes would leave
+    # ids/texts longer than the matrix and shift every later hit.
+    parsed = []
     for r in records:
-        idx.ids.append(r.get("id", "") or "")
-        idx.texts.append(r.get("text", "") or "")
+        emb = decode_embedding(r.get("embedding"))
+        if emb is None or not emb.size:
+            continue
         try:
             meta = json.loads(r.get("metadata") or "{}")
         except json.JSONDecodeError:
             meta = {}
+        idx.ids.append(r.get("id", "") or "")
+        idx.texts.append(r.get("text", "") or "")
         idx.metas.append(meta)
-    parsed = []
-    for r in records:
-        try:
-            parsed.append(json.loads(r.get("embedding") or "[]"))
-        except json.JSONDecodeError:
-            parsed.append([])
-    if parsed and all(isinstance(v, list) and v for v in parsed):
-        idx.vectors = np.asarray(parsed, dtype=np.float32)
+        parsed.append(emb)
+    if parsed and len({v.shape[0] for v in parsed}) == 1:
+        idx.vectors = np.vstack(parsed).astype(np.float32, copy=False)
+    if key[1]:
+        _INDEX_CACHE = (key, idx)
     return idx
 
 

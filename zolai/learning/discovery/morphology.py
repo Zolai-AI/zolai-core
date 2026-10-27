@@ -109,6 +109,7 @@ def build_morphology_hypotheses(
 
     words = _get_top_words(engine, limit)
     relations_written = 0
+    relations_new = 0
     status_counts: dict[str, int] = {"OBSERVED": 0, "CANDIDATE": 0}
     skipped = 0
 
@@ -219,27 +220,31 @@ def build_morphology_hypotheses(
 
             confidence = EVIDENCE_TIER_MAP.get(tier, (None, 0.0, ""))[1]
 
-            if not dry_run:
-                hypo = MorphologicalRelation(
-                    surface=word,
-                    root=root,
-                    relation_type=relation_type,
-                    function=function,
-                    confidence=confidence,
-                    status=status,
-                    evidence_ids=[],
-                    extras={"analysis_tier": tier, "is_valid": analysis.is_valid},
-                )
-                repo.create(hypo.model_dump())
-                relations_written += 1
+            hypo = MorphologicalRelation(
+                surface=word,
+                root=root,
+                relation_type=relation_type,
+                function=function,
+                confidence=confidence,
+                status=status,
+                evidence_ids=[],
+                extras={"analysis_tier": tier, "is_valid": analysis.is_valid},
+            )
+
+            if dry_run:
+                created = repo.existing_id(hypo.model_dump()) is None
             else:
-                relations_written += 1
+                _, created = repo.upsert(hypo.model_dump())
+
+            relations_written += 1
+            relations_new += int(created)
 
             status_counts[status] = status_counts.get(status, 0) + 1
 
     return {
         "capability": "morphology",
         "relations_written": relations_written,
+        "relations_new": relations_new,
         "status_counts": status_counts,
         "skipped": skipped,
         "words_processed": len(words),

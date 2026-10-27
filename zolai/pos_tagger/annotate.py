@@ -12,11 +12,14 @@ from rich.console import Console
 from rich.prompt import Confirm, Prompt
 from rich.table import Table
 
+from ..config import config
+
 app = typer.Typer(help="POS Annotation Tool for Zolai")
 console = Console()
 
-# Gold set file
-GOLD_FILE = Path("data/eval/pos_gold_v0.jsonl")
+# Gold set file — anchored to the repo, not the cwd, so the annotator reads the
+# same gold set whichever directory it is launched from.
+GOLD_FILE = config.paths.root / "data" / "eval" / "pos_gold_v0.jsonl"
 
 # Zomi POS tagset (simplified UD + Zomi-specific)
 POS_TAGS = {
@@ -51,9 +54,8 @@ MORPH_FEATURES = {
 
 
 def get_db_connection():
-    """Get SQLite connection to the live database."""
-    db_path = "/home/peter/Documents/Projects/zolai-ai/data/zolai.db"
-    return sqlite3.connect(db_path)
+    """Get SQLite connection to the canonical database (``ZOLAI_DB_PATH``-aware)."""
+    return sqlite3.connect(str(config.paths.db))
 
 
 def load_sentences(limit: int = 1000) -> list[dict[str, Any]]:

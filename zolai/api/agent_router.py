@@ -19,11 +19,10 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import auth
-
 # The documented per-run wall-clock budget. Imported at module scope (not inside
 # the health handler) because the run route now actually enforces it.
 from ..agent.loop import AGENT_TIMEOUT_S
+from . import auth
 
 router = APIRouter(prefix="/api/v1/agent", tags=["agent"])
 

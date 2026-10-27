@@ -6,8 +6,14 @@ import requests
 from rdflib import Namespace
 from transformers import pipeline
 
+from zolai.config import config
+
 # Configuration
-DB_PATH = "zolai.db"
+# Scratch KG store (``kg_node``/``kg_edge``), NOT the canonical DB, whose graph
+# table is ``kg_nodes``. It used to be the relative ``"zolai.db"``, so running
+# the script from the repo root opened -- and sqlite3 silently created -- a
+# second partial database beside the real one.
+DB_PATH = str(config.paths.data / "kg.db")
 GEMINI_SERVER_URL = "http://localhost:8080/v1/chat/completions"
 NER_MODEL = "Davlan/xlm-roberta-base-ner-hrl"
 ZK = Namespace("zolai-kg:")

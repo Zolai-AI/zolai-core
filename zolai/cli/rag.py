@@ -25,6 +25,10 @@ def build(
     sources: list[str] = typer.Option(None, "--source", "-s", help="Sources to embed"),
     limit: int = typer.Option(None, "--limit", help="Max rows per source"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Report without writing"),
+    batch_size: int = typer.Option(256, "--batch-size", help="Rows per embedding batch"),
+    force: bool = typer.Option(
+        False, "--force", help="Re-embed rows that already exist (default: resume)"
+    ),
 ) -> None:
     """Build knowledge vectors from canonical sources."""
     engine = _get_db_engine()
@@ -33,6 +37,8 @@ def build(
         sources=sources if sources else None,
         limit=limit,
         dry_run=dry_run,
+        batch_size=batch_size,
+        force=force,
     )
     print(json.dumps(result, indent=2, ensure_ascii=False))
 

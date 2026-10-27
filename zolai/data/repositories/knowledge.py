@@ -18,7 +18,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.engine import Engine
 
 from zolai.shared.contracts import (
@@ -293,6 +293,78 @@ class HypothesisRepository(BaseRepository):
     def create(self, data: dict[str, Any], user: str = "system") -> int:
         """Insert a hypothesis row (contract dicts accepted) + audit row."""
         return super().create(self._normalize(data), user=user)
+
+    #: A hypothesis is the S/P/O claim itself, so re-deriving it is a refresh,
+    #: not a new row.  There is no unique index on this triple, hence the
+    #: read-then-write below (same approach as ``upsert_evidence``).
+    NATURAL_KEY = ("kind", "subject", "predicate", "object")
+
+    def _key_criteria(self, payload: dict[str, Any]) -> list:
+        table = self.table
+        criteria = [table.c[c] == payload[c] for c in ("kind", "subject", "predicate")]
+        criteria.append(
+            table.c.object.is_(None) if payload.get("object") is None
+            else table.c.object == payload["object"]
+        )
+        return criteria
+
+    def existing_id(self, data: dict[str, Any]) -> int | None:
+        """Row id already carrying this :attr:`NATURAL_KEY`, or ``None``.
+
+        Read-only, so a dry run can distinguish a new claim from a refresh
+        without writing anything.
+        """
+        payload = self._normalize(data)
+        for column in ("kind", "subject", "predicate"):
+            if not payload.get(column):
+                raise ValueError(f"hypothesis lookup requires a non-empty {column!r}")
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                select(self.table.c.id).where(*self._key_criteria(payload)).limit(1)
+            ).first()
+        return None if row is None else row[0]
+
+    def upsert(self, data: dict[str, Any], user: str = "system") -> tuple[int, bool]:
+        """Insert, or refresh the row with the same :attr:`NATURAL_KEY`.
+
+        Returns ``(id, created)``.  Discovery used to call :meth:`create`
+        unconditionally, so every build appended a duplicate hypothesis and a
+        duplicate audit row for claims it had already recorded.
+        """
+        payload = self._normalize(data)
+        for column in ("kind", "subject", "predicate"):
+            if not payload.get(column):
+                raise ValueError(f"hypothesis upsert requires a non-empty {column!r}")
+
+        table = self.table
+        # The contract stamps created_at/updated_at with "now" at construction, so
+        # comparing them would call every rebuild a change.
+        refresh = {
+            key: value
+            for key, value in payload.items()
+            if key not in {"id", "created_at", "updated_at", "version", *self.NATURAL_KEY}
+        }
+        names = [k for k in refresh if k in table.columns]
+        with self._engine.connect() as conn:
+            existing = conn.execute(
+                select(table.c.id, *[table.c[n] for n in names])
+                .where(*self._key_criteria(payload))
+                .limit(1)
+            ).first()
+
+        if existing is None:
+            return self.create(payload, user=user), True
+
+        # Identical claim, identical evidence: leave the row (and its version) alone
+        # so a rebuild is a no-op rather than a stream of audit rows.
+        stored = dict(existing._mapping)
+        hypothesis_id = stored.pop("id")
+        if stored == {k: refresh[k] for k in names}:
+            return hypothesis_id, False
+
+        refresh["updated_at"] = self._get_timestamp()
+        self.update(hypothesis_id, refresh, user=user)
+        return hypothesis_id, False
 
     def update(
         self,

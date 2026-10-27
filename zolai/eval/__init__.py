@@ -1,13 +1,21 @@
-"""ZolaiBench v0.1 — Evaluation Framework.
+"""Offline evaluation for Zolai outputs.
 
-This package provides:
-- Metrics: tokenization, POS, morphology, grammar evaluation
-- Store: DB-first evaluation set storage (zolai_eval.db)
-- Runner: CLI for running evaluations
+Metrics are dependency-free pure Python, so this runs anywhere (including CI)
+with no model weights::
+
+    from zolai.eval import evaluate
+    scores = evaluate(sets="db:eval_v1")
+
+Sets live in the canonical database (``eval_sets`` / ``eval_cases``, see
+:mod:`zolai.eval.store`); the bundled JSONL files are import/export
+interchange. Model training is intentionally out of scope — this package only
+measures.
 """
 
+from __future__ import annotations
+
 from .baseline import below_floor, load_baseline
-from .datasets import DbRef, load_dataset, resolve_set
+from .datasets import SMOKE, DbRef, load_dataset, resolve_set
 from .metrics import (
     GrammarMetrics,
     MorphologyMetrics,
@@ -17,48 +25,100 @@ from .metrics import (
     compute_morphology_metrics,
     compute_pos_metrics,
     compute_tokenization_metrics,
+    qa_term_recall,
+    translation_bleu,
+    translation_chrf,
+    zvs_compliance_rate,
 )
 from .store import (
+    ALL_SETS,
     GOLD_SETS,
     EvalItem,
     EvalSet,
     add_eval_item,
     create_eval_set,
+    ensure_schema,
     export_eval_set_to_jsonl,
+    export_set_to_jsonl,
+    fetch_cases,
     get_eval_items,
     get_eval_set,
+    import_jsonl_to_set,
     init_eval_db,
     list_eval_sets,
+    list_kinds,
+    list_sets,
     load_gold_from_jsonl,
+    seed_sets,
 )
 
 __all__ = [
     # Baseline gating
-    "load_baseline",
+    "SMOKE",
     "below_floor",
+    "load_baseline",
     # Datasets
     "DbRef",
-    "resolve_set",
     "load_dataset",
-    # Metrics
-    "TokenizationMetrics",
-    "POSMetrics",
-    "MorphologyMetrics",
+    "resolve_set",
+    # Lane metrics
+    "qa_term_recall",
+    "translation_bleu",
+    "translation_chrf",
+    "zvs_compliance_rate",
+    "evaluate",
+    # Task metrics (ZolaiBench v0.1)
     "GrammarMetrics",
-    "compute_tokenization_metrics",
-    "compute_pos_metrics",
-    "compute_morphology_metrics",
+    "MorphologyMetrics",
+    "POSMetrics",
+    "TokenizationMetrics",
     "compute_grammar_metrics",
+    "compute_morphology_metrics",
+    "compute_pos_metrics",
+    "compute_tokenization_metrics",
     # Store
-    "EvalSet",
+    "ALL_SETS",
     "EvalItem",
-    "init_eval_db",
-    "create_eval_set",
-    "add_eval_item",
-    "get_eval_set",
-    "list_eval_sets",
-    "get_eval_items",
-    "load_gold_from_jsonl",
-    "export_eval_set_to_jsonl",
+    "EvalSet",
     "GOLD_SETS",
+    "add_eval_item",
+    "create_eval_set",
+    "ensure_schema",
+    "export_eval_set_to_jsonl",
+    "export_set_to_jsonl",
+    "fetch_cases",
+    "get_eval_items",
+    "get_eval_set",
+    "import_jsonl_to_set",
+    "init_eval_db",
+    "list_eval_sets",
+    "list_kinds",
+    "list_sets",
+    "load_gold_from_jsonl",
+    "seed_sets",
 ]
+
+def evaluate(sets: str = SMOKE, *, base_dir: str | None = None) -> dict[str, float]:
+    """Evaluate a set and return every metric whose lane has data.
+
+    Args:
+        sets: ``"smoke"``, ``"db"``, ``"db:<name>"``, or a path/base prefix for
+            :func:`load_dataset` to resolve.
+        base_dir: Optional override directory for the ``smoke`` fixtures.
+
+    Returns:
+        Mapping of metric name to score. Lanes with no records are omitted, so
+        a missing set never scores ``0.0`` and cannot trip a release gate.
+    """
+    data = load_dataset(sets, base_dir=base_dir)
+    result: dict[str, float] = {}
+    if "zvs" in data:
+        result["zvs_compliance_rate"] = zvs_compliance_rate(data["zvs"])  # type: ignore[arg-type]
+    if "translation" in data:
+        hyps, refs = data["translation"]  # type: ignore[misc]
+        result["translation_bleu"] = translation_bleu(hyps, refs)
+        result["translation_chrf"] = translation_chrf(hyps, refs)
+    if "qa" in data:
+        hyps, refs = data["qa"]  # type: ignore[misc]
+        result["qa_term_recall"] = qa_term_recall(hyps, refs)
+    return result

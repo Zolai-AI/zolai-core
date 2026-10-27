@@ -7,21 +7,27 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
+from ..config import config
+
 logger = logging.getLogger(__name__)
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-ROOT_DIR = Path.home() / "Documents" / "Projects" / "zolai-toolkit"
-DATA_DIR = Path.home() / "Documents" / "Projects" / "data"
-RAW_DIR = DATA_DIR / "raw"
-CLEANED_DIR = DATA_DIR / "cleaned"
-TRAINING_DIR = DATA_DIR / "training"
-KNOWLEDGE_DIR = DATA_DIR / "knowledge"
-ARCHIVE_DIR = DATA_DIR / "archive"
+# Every path resolves through ``zolai.config`` — the one resolver. These used to
+# be built from ``Path.home() / "Documents" / "Projects" / "data"``, which
+# pointed one directory ABOVE the repository data root and, because the module
+# mkdir'd them at import time, simply importing ``zolai`` created an empty
+# shadow tree (~/Documents/Projects/data/{raw,cleaned,training,knowledge,
+# archive}) outside the project. No consumer relied on those locations: every
+# writer creates its own output directory, so the import side effect is gone.
+ROOT_DIR = config.paths.root
+DATA_DIR = config.paths.data
+RAW_DIR = config.paths.data_raw
+CLEANED_DIR = config.paths.data_cleaned
+TRAINING_DIR = config.paths.data_training
+KNOWLEDGE_DIR = config.paths.data_knowledge
+ARCHIVE_DIR = config.paths.data_archive
+#: Crawler dedup/progress state, not corpus data — deliberately its own file.
 DB_PATH = DATA_DIR / "crawler.db"
-
-# Ensure directories exist
-for d in [RAW_DIR, CLEANED_DIR, TRAINING_DIR, KNOWLEDGE_DIR, ARCHIVE_DIR]:
-    d.mkdir(parents=True, exist_ok=True)
 
 # ── Config constants ──────────────────────────────────────────────────────────
 MIN_SENTENCE_LENGTH = 10

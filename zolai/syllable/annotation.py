@@ -58,10 +58,15 @@ class SyllableAnnotator:
         """Initialize annotator with database connection.
 
         Args:
-            db_path: Path to SQLite database. Defaults to data/zolai.db
+            db_path: Path to SQLite database. Defaults to the canonical
+                :attr:`config.paths.db` — the one resolver that honours
+                ``ZOLAI_DB_PATH``. It used to default to a hardcoded absolute
+                path to one machine's working copy, which no env var could move.
         """
         if db_path is None:
-            db_path = "/home/peter/Documents/Projects/zolai-ai/data/zolai.db"
+            from ..config import config
+
+            db_path = str(config.paths.db)
         self.db_path = db_path
         self.segmenter = RuleBasedSegmenter()
 

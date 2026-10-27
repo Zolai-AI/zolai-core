@@ -9,9 +9,11 @@ import hashlib
 import json
 import logging
 import time
-from typing import Any
+from typing import Any, NamedTuple
 
 from sqlalchemy import text
+
+from zolai.rag.vectors import encode_embedding
 
 log = logging.getLogger(__name__)
 
@@ -19,16 +21,55 @@ log = logging.getLogger(__name__)
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 VECTOR_DIM = 384
 
+
+class SourceSpec(NamedTuple):
+    """One embeddable source, in the single schema every consumer reads.
+
+    The old list mixed a 6-wide entry with 5-wide ones (the extra duplicated
+    ``source_type`` shifted every later field), so the row loop and
+    ``_build_text_for_source`` disagreed about which entry was the id column
+    and which was the text. ``dictionary_en_zo`` was queried for a
+    ``definition`` column that does not exist and was silently skipped, and
+    ``word_observation_stats`` was queried for an ``id`` column it lacks.
+
+    Named positional fields keep that drift from recurring. ``definition_col``
+    is an optional parallel/translation column folded into the embedded text
+    for dictionary sources; it stays ``None`` everywhere else.
+    """
+
+    source_type: str
+    table: str
+    text_col: str
+    id_col: str
+    label: str
+    definition_col: str | None = None
+    extra_cols: tuple[str, ...] = ()
+
+
 # Sources to embed (in priority order)
-SOURCES = [
-    ("dictionary", "dictionary", "zolai", "headword", "definition", "Zolai→English dictionary"),
-    ("dictionary", "dictionary_en_zo", "headword", "definition", "English→Zolai dictionary"),
-    ("bible", "bible_verses", "zo_tdb77", "ref", "Tedim Bible (TDB77)"),
-    ("bible", "bible_verses", "zo_tedim2010", "ref", "Tedim Bible (2010)"),
-    ("phrases", "phrases", "zolai", "id", "Zolai phrases"),
-    ("grammar_patterns", "grammar_patterns", "pattern", "pattern_id", "Grammar patterns"),
-    ("observations", "word_observation_stats", "normalized_form", "id", "Word observations"),
-    ("knowledge_claims", "knowledge_claims", "subject", "id", "Knowledge claims"),
+SOURCES: list[SourceSpec] = [
+    SourceSpec("dictionary", "dictionary", "zolai", "id", "Zolai→English dictionary", "english_clean"),
+    SourceSpec("dictionary", "dictionary_en_zo", "headword", "id", "English→Zolai dictionary", "translations_clean"),
+    SourceSpec("bible", "bible_verses", "zo_tdb77", "ref", "Tedim Bible (TDB77)"),
+    SourceSpec("bible", "bible_verses", "zo_tedim2010", "ref", "Tedim Bible (2010)"),
+    SourceSpec("phrases", "phrases", "zolai", "id", "Zolai phrases"),
+    SourceSpec("grammar_patterns", "grammar_patterns", "pattern", "pattern_id", "Grammar patterns"),
+    SourceSpec(
+        "observations",
+        "word_observation_stats",
+        "normalized_form",
+        "normalized_form",
+        "Word observations",
+        extra_cols=("frequency",),
+    ),
+    SourceSpec(
+        "knowledge_claims",
+        "knowledge_claims",
+        "subject",
+        "id",
+        "Knowledge claims",
+        extra_cols=("predicate", "object"),
+    ),
 ]
 
 
@@ -53,31 +94,30 @@ def _get_embedder():
         return None
 
 
-def _build_text_for_source(table: str, row: dict[str, Any], source_config: tuple) -> str | None:
-    """Build embeddable text from a row based on source type."""
-    source_type = source_config[0]
+def _build_text_for_source(spec: SourceSpec, row: dict[str, Any]) -> str | None:
+    """Build embeddable text from a row based on the source type."""
+    source_type = spec.source_type
 
     if source_type == "dictionary":
-        zolai = row.get(source_config[2], "")
-        definition = row.get(source_config[3], "")
-        return f"{zolai}: {definition}" if zolai and definition else zolai
+        zolai = row.get(spec.text_col) or ""
+        definition = (row.get(spec.definition_col) or "") if spec.definition_col else ""
+        return f"{zolai}: {definition}" if zolai and definition else (zolai or None)
 
     elif source_type == "bible":
-        text = row.get(source_config[2], "")
-        ref = row.get(source_config[3], "")
-        return f"{ref}: {text}" if text and ref else text
+        text = row.get(spec.text_col) or ""
+        ref = row.get(spec.id_col) or ""
+        return f"{ref}: {text}" if text and ref else (text or None)
 
     elif source_type == "phrases":
-        zolai = row.get(source_config[2], "")
-        return zolai
+        return row.get(spec.text_col) or None
 
     elif source_type == "grammar_patterns":
-        pattern = row.get(source_config[2], "")
-        pid = row.get(source_config[3], "")
-        return f"{pid}: {pattern}" if pattern and pid else pattern
+        pattern = row.get(spec.text_col) or ""
+        pid = row.get(spec.id_col) or ""
+        return f"{pid}: {pattern}" if pattern and pid else (pattern or None)
 
     elif source_type == "observations":
-        word = row.get(source_config[2], "")
+        word = row.get(spec.text_col) or ""
         freq = row.get("frequency", 0)
         return f"{word} (freq: {freq})" if word else None
 
@@ -117,7 +157,8 @@ def build_knowledge_vectors(
     sources: list[str] | None = None,
     limit: int | None = None,
     dry_run: bool = False,
-    batch_size: int = 100,
+    batch_size: int = 256,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Build knowledge_vectors from canonical sources.
 
@@ -126,7 +167,9 @@ def build_knowledge_vectors(
         sources: List of source names to process (default: all SOURCES).
         limit: Max rows per source (for testing).
         dry_run: If True, don't write to DB.
-        batch_size: Batch size for embedding.
+        batch_size: Rows per embed call (passed through to ``encode``).
+        force: Re-embed rows whose id is already present.  Without it an
+            interrupted build resumes instead of starting over.
 
     Returns:
         Summary dict with counts per source.
@@ -146,17 +189,16 @@ def build_knowledge_vectors(
     }
     start = time.time()
 
-    with engine.begin() as conn:
-        for source_config in SOURCES:
-            source_name = source_config[1]  # table name
-            if source_filter and source_name not in source_filter:
+    # A plain connection with one commit per embed batch: the whole build is
+    # tens of minutes, and a single transaction around it would hold the write
+    # lock (and lose every completed batch on failure).
+    with engine.connect() as conn:
+        for spec in SOURCES:
+            table = spec.table
+            if source_filter and table not in source_filter:
                 continue
 
-            table = source_config[1]
-            pk_col = source_config[2]  # text column to embed
-            id_col = source_config[3]  # ID column
-
-            log.info("Building vectors for %s", source_name)
+            log.info("Building vectors for %s", table)
 
             # Check if table exists
             try:
@@ -172,11 +214,20 @@ def build_knowledge_vectors(
                 log.warning("Failed to check table %s: %s", table, e)
                 continue
 
-            # Get rows to process
+            # Only the columns the text builder reads are pulled (id + text +
+            # optional parallel/definition column), so every source uses the
+            # same row shape and no nonexistent column is ever queried.
+            select_cols = [spec.id_col, spec.text_col]
+            if spec.definition_col:
+                select_cols.append(spec.definition_col)
+            select_cols.extend(spec.extra_cols)
+            # de-dup while keeping order (observations use one column for both id and text)
+            select_clause = ", ".join(dict.fromkeys(select_cols))
+
             lim = f"LIMIT {limit}" if limit else ""
             try:
                 rows = conn.execute(
-                    text(f"SELECT {id_col}, {pk_col} FROM {table} {lim}"),
+                    text(f"SELECT {select_clause} FROM {table} {lim}"),
                 ).fetchall()
             except Exception as e:
                 log.warning("Failed to query %s: %s", table, e)
@@ -189,65 +240,115 @@ def build_knowledge_vectors(
 
             built_count = 0
             skipped_count = 0
+            existing_ids: set[str] = set()
+            if not force and not dry_run:
+                existing_ids = {
+                    r[0]
+                    for r in conn.execute(
+                        text("SELECT id FROM knowledge_vectors WHERE source = :s"),
+                        {"s": table},
+                    ).fetchall()
+                }
 
             # Process in batches
             for i in range(0, len(rows), batch_size):
                 batch = rows[i:i+batch_size]
 
-                # Build texts
+                # Build texts. Rows already in the index are skipped before
+                # embedding, so an interrupted multi-hour build resumes where
+                # it stopped instead of re-encoding everything.
                 texts = []
                 ids = []
+                vec_ids = []
                 for row in batch:
-                    row_dict = dict(row._mapping) if hasattr(row, '_mapping') else dict(zip([id_col, pk_col], row))
-                    text = _build_text_for_source(table, row_dict, source_config)
-                    if text:
-                        texts.append(text)
-                        ids.append(str(row_dict.get(id_col, '')))
-                    else:
+                    row_dict = dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(select_cols, row))
+                    content = _build_text_for_source(spec, row_dict)
+                    if not content:
                         skipped_count += 1
+                        continue
+                    source_id = str(row_dict.get(spec.id_col, ''))
+                    vec_id = hashlib.sha256(
+                        f"{table}:{source_id}:{content[:50]}".encode()
+                    ).hexdigest()[:32]
+                    if vec_id in existing_ids:
+                        skipped_count += 1
+                        continue
+                    texts.append(content)
+                    ids.append(source_id)
+                    vec_ids.append(vec_id)
 
                 if not texts:
                     continue
 
-                # Embed batch
+                # Embed batch. ``batch_size`` must be passed to encode():
+                # sentence-transformers otherwise defaults to 32 no matter how
+                # many texts are handed over.
                 try:
-                    embeddings = embedder.encode(texts, show_progress_bar=False, normalize_embeddings=True)
+                    embeddings = embedder.encode(
+                        texts,
+                        batch_size=batch_size,
+                        show_progress_bar=False,
+                        normalize_embeddings=True,
+                    )
                 except Exception as e:
                     log.error("Embedding failed for batch: %s", e)
                     summary["errors"].append(f"{table} batch {i}: {e}")
                     continue
 
-                # Write to knowledge_vectors
-                for idx, (text, emb) in enumerate(zip(texts, embeddings)):
-                    vec_id = hashlib.sha256(f"{table}:{ids[idx]}:{text[:50]}".encode()).hexdigest()[:32]
-
-                    if not dry_run:
-                        try:
-                            conn.execute(
-                                text("""
-                                    INSERT OR REPLACE INTO knowledge_vectors
-                                    (id, text, metadata, embedding, source_type, source, version, imported_at)
-                                    VALUES (:id, :text, :meta, :emb, :stype, :src, 1, datetime('now'))
-                                """),
+                # Write the whole embed batch with one INSERT OR REPLACE
+                # (executemany) instead of one statement per row. Membership
+                # keys are stable sha256 ids, so re-runs stay idempotent.
+                records = []
+                for idx, (content, emb) in enumerate(zip(texts, embeddings)):
+                    records.append(
+                        {
+                            "id": vec_ids[idx],
+                            "text": content,
+                            # source_type/source sit in metadata too: the
+                            # retrieval filters read metadata, not just columns.
+                            "meta": json.dumps(
                                 {
-                                    "id": vec_id,
-                                    "text": text,
-                                    "meta": json.dumps({"source_table": table, "source_id": ids[idx]}),
-                                    "emb": json.dumps(emb.tolist()),
-                                    "stype": source_config[0],
-                                    "src": table,
-                                },
-                            )
-                        except Exception as e:
-                            log.error("Insert failed: %s", e)
-                            summary["errors"].append(f"{table} insert: {e}")
-                            continue
+                                    "source_type": spec.source_type,
+                                    "source": table,
+                                    "source_table": table,
+                                    "source_id": ids[idx],
+                                }
+                            ),
+                            # base64 float32 instead of a JSON float array:
+                            # ~2.3x smaller and decoded in milliseconds, which
+                            # is what keeps the retriever's index load short.
+                            "emb": encode_embedding(emb),
+                            "stype": spec.source_type,
+                            "src": table,
+                        }
+                    )
 
-                    built_count += 1
+                if not dry_run:
+                    try:
+                        conn.execute(
+                            text("""
+                                INSERT OR REPLACE INTO knowledge_vectors
+                                (id, text, metadata, embedding, source_type, source, version, imported_at)
+                                VALUES (:id, :text, :meta, :emb, :stype, :src, 1, datetime('now'))
+                            """),
+                            records,
+                        )
+                        conn.commit()
+                    except Exception as e:
+                        conn.rollback()
+                        log.error("Insert failed for %s batch %d: %s", table, i, e)
+                        summary["errors"].append(f"{table} insert: {e}")
+                        continue
+
+                built_count += len(records)
 
             summary["built"] += built_count
             summary["skipped"] += skipped_count
-            summary["by_source"][table] = {"built": built_count, "skipped": skipped_count}
+            # Two specs can share a table (bible_verses has a TDB77 and a 2010
+            # text column); accumulate instead of letting the second overwrite.
+            entry = summary["by_source"].setdefault(table, {"built": 0, "skipped": 0})
+            entry["built"] = entry.get("built", 0) + built_count
+            entry["skipped"] = entry.get("skipped", 0) + skipped_count
             log.info("  %s: built=%d, skipped=%d", table, built_count, skipped_count)
 
     summary["elapsed_seconds"] = round(time.time() - start, 2)
