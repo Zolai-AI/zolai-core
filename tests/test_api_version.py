@@ -71,8 +71,11 @@ def _ops_admin_key(tmp_path_factory) -> Iterator[str]:
 
 
 @pytest.fixture()
-def ops_client(_ops_admin_key: str) -> TestClient:
-    """Lifespan runs so the sampler records build info, plus the admin key."""
+def ops_client(_ops_admin_key: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """Lifespan runs so the sampler records build info, plus the admin key.
+    Points at a scratch DB so migrations don't touch the canonical store."""
+    scratch = tmp_path / "api_version_test.db"
+    monkeypatch.setattr(config.paths, "db", scratch)
     test_client = TestClient(create_app())
     with test_client:
         test_client.headers.update({"X-API-Key": _ops_admin_key})
