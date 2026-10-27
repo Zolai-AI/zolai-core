@@ -52,3 +52,10 @@ manifest version, RAG feed). See `README.md` > Connect.
 
 - Secrets come only from env/`.env`; `.env.example` has placeholders only.
 - Never hardcode API keys, HF tokens, or provider keys in code/docs/wiki/scripts.
+
+## Secret Hygiene (repo-specific)
+
+- `.env.production.template` is the **only** tracked `.env*` file; real `.env`/`.env.production` stay untracked (verify with `git ls-files | grep -iE '(^|/)\.env($|\.)'`).
+- `scripts/backup_nightly.py` JSONL backup log and any CLI/`--json` output must never include key material (sizes/hashes/row counts only).
+- The server consumer-keys path (`/home/ubuntu/.zolai/consumer-keys.txt`) and its contents stay out of code, docs, and commit messages.
+- Canonical rules: workspace-root `AGENTS.md` § Secret Hygiene. Full procedure: `../context/code-standards.md` § Secret Hygiene — Prevention. Staged-change scan gate: `secret-scan` subagent; checklist: `secret-hygiene` skill. Do not duplicate that block here.
