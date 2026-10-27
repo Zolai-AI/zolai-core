@@ -19,27 +19,23 @@ from pathlib import Path
 
 
 def get_db_path() -> Path:
-    """Resolve the database path from environment or default."""
-    # ZOLAI_DB_PATH takes precedence (full path to db file)
-    db_path_env = os.environ.get("ZOLAI_DB_PATH", "").strip()
-    if db_path_env:
-        return Path(db_path_env)
+    """The database to back up — the resolver, not a copy of its rules.
 
-    # ZOLAI_DATA_ROOT + zolai.db
-    data_root = os.environ.get("ZOLAI_DATA_ROOT", "").strip()
-    if data_root:
-        return Path(data_root) / "zolai.db"
+    This used to re-read ``ZOLAI_DB_PATH`` / ``ZOLAI_DATA_ROOT`` by hand and fall
+    back to an absolute path baked into the file, so a relocated workspace (or
+    any other machine) silently backed up nothing, and any rule the resolver
+    grows would have to be duplicated here.
+    """
+    from zolai.config import config
 
-    # Default to workspace root data/ (for cron context)
-    return Path("/home/peter/Documents/Projects/zolai-ai/data/zolai.db")
+    return Path(config.paths.db)
 
 
 def get_backup_dir() -> Path:
-    """Resolve the backup directory."""
-    data_root = os.environ.get("ZOLAI_DATA_ROOT", "").strip()
-    if data_root:
-        return Path(data_root) / "backups"
-    return Path("/home/peter/Documents/Projects/zolai-ai/data/backups")
+    """Resolve the backup directory beside the canonical database."""
+    from zolai.config import config
+
+    return Path(config.paths.data) / "backups"
 
 
 def sha256_file(path: Path) -> str:

@@ -314,7 +314,7 @@ def _probe_knowledge() -> Callable[[], Any]:
     from zolai.knowledge.promotion import promote_hypotheses_to_claims
 
     def run():
-        engine = create_engine("sqlite:////home/peter/Documents/Projects/zolai-ai/data/zolai.db")
+        engine = create_engine(f"sqlite:///{config.paths.db}")
         # Dry-run promotion with small limits
         return promote_hypotheses_to_claims(engine, kinds=["pos"], dry_run=True)
     return run
@@ -326,7 +326,7 @@ def _probe_incremental() -> Callable[[], Any]:
 
 
     def run():
-        _engine = create_engine("sqlite:////home/peter/Documents/Projects/zolai-ai/data/zolai.db")
+        _engine = create_engine(f"sqlite:///{config.paths.db}")
         # Dry-run with a test file - will fail gracefully if no test file
         # Return empty result for probe
         return {"success": True, "dry_run": True}
@@ -340,7 +340,7 @@ def _probe_rag() -> Callable[[], Any]:
     from zolai.rag.retrieve import UnifiedRetriever
 
     def run():
-        engine = create_engine("sqlite:////home/peter/Documents/Projects/zolai-ai/data/zolai.db")
+        engine = create_engine(f"sqlite:///{config.paths.db}")
         retriever = UnifiedRetriever(engine)
         # Test word query (offline, no network calls)
         pack = retriever.query_word("pasian")
@@ -354,7 +354,7 @@ def _probe_publishing() -> Callable[[], Any]:
 
 
     def run():
-        engine = create_engine("sqlite:////home/peter/Documents/Projects/zolai-ai/data/zolai.db")
+        engine = create_engine(f"sqlite:///{config.paths.db}")
         # Dry-run validation only
         from zolai.publishing.release import _validate_pre_release
         passed, errors, warnings = _validate_pre_release(engine, "2026.10.0")
@@ -369,7 +369,7 @@ def _probe_production() -> Callable[[], Any]:
     from zolai.monitoring.metrics import record_pipeline_run
 
     def run():
-        _engine = create_engine("sqlite:////home/peter/Documents/Projects/zolai-ai/data/zolai.db")
+        _engine = create_engine(f"sqlite:///{config.paths.db}")
         record_pipeline_run("test", True)
         return {"status": "ok"}
     return run

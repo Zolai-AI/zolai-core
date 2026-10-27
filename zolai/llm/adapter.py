@@ -21,6 +21,12 @@ Python port of ``pcore-assistant/server/src/services/ai.ts``:
   first-row reroute) and fails with the stable machine-readable codes
   :data:`NO_ACTIVE_PROVIDER` / :data:`MODEL_NOT_CONFIGURED` — callers never
   string-match messages and an empty model id never reaches a provider.
+- Every call travels over **one pooled keep-alive ``httpx.Client``**
+  (:func:`get_http_client`) — no per-request TLS handshake — with the
+  per-request ``timeout=`` and the circuit-breaker/error mapping unchanged,
+  and logs exactly one structured ``INFO`` line per call
+  (``llm_call provider=… model=… turns=… latency_ms=… status=…``): no keys,
+  no prompts, no completions.
 
 ``ZOLAI_ENGINE_MODE`` / ``llm_allowed()`` (founder directive D2) are checked
 by *call sites* (agent synthesis, assistant chat) before any socket is
@@ -31,6 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from typing import Any
 
@@ -53,6 +60,93 @@ PROVIDER_REQUEST_FAILED = "PROVIDER_REQUEST_FAILED"
 
 #: Provider types that speak the OpenAI ``tools`` array natively.
 NATIVE_TOOL_ADAPTERS: frozenset[str] = frozenset({"openai", "openrouter"})
+
+# ── Pooled transport ─────────────────────────────────────────────────────────
+#
+# One ``httpx.Client`` per process: every provider call reuses the
+# keep-alive connection instead of paying a fresh TLS handshake on each
+# request (``httpx.post`` built a new client per call).  ``httpx.Client`` is
+# safe for concurrent requests, so a single shared instance is thread-safe;
+# the lock only guards lazy construction and teardown.
+
+_CLIENT: httpx.Client | None = None
+_CLIENT_LOCK = threading.Lock()
+
+_CLIENT_LIMITS = httpx.Limits(
+    max_keepalive_connections=20,
+    max_connections=100,
+    keepalive_expiry=60.0,
+)
+
+
+def get_http_client() -> httpx.Client:
+    """The process-wide pooled client (built once, reused on every call)."""
+    global _CLIENT
+    if _CLIENT is None:
+        with _CLIENT_LOCK:
+            if _CLIENT is None:
+                _CLIENT = httpx.Client(
+                    limits=_CLIENT_LIMITS,
+                    # Backstop only — :func:`chat` always passes a per-request
+                    # ``timeout=`` that overrides this value.
+                    timeout=httpx.Timeout(60.0),
+                )
+    return _CLIENT
+
+
+def close_http_client() -> None:
+    """Close the pooled client (teardown/test helper; the next call rebuilds it)."""
+    global _CLIENT
+    with _CLIENT_LOCK:
+        if _CLIENT is not None:
+            _CLIENT.close()
+            _CLIENT = None
+
+
+def _post(
+    url: str,
+    *,
+    body: dict[str, Any],
+    headers: dict[str, str],
+    timeout: float,
+) -> httpx.Response:
+    """POST ``body`` over the pooled transport with a per-request ``timeout``.
+
+    Deliberately module-level: offline tests stub **this** function instead of
+    monkeypatching ``httpx.post`` (which the pooled client never calls), so the
+    default suite opens no sockets.
+    """
+    return get_http_client().post(url, json=body, headers=headers, timeout=timeout)
+
+
+def _log_call(
+    catalog_id: str,
+    model: str,
+    turns: int,
+    latency_ms: float,
+    status: str,
+) -> None:
+    """One structured INFO line per LLM call: identity + timing + outcome.
+
+    Deliberately excludes the API key, the request body and the completion —
+    prompts/completions are user content and keys are secrets, so neither
+    reaches the log.  ``status`` is the HTTP status when a response arrived,
+    else a symbolic token (``circuit_open`` / ``transport_error`` /
+    ``invalid_body``).
+    """
+    logger.info(
+        "llm_call provider=%s model=%s turns=%d latency_ms=%.1f status=%s",
+        catalog_id,
+        model,
+        turns,
+        latency_ms,
+        status,
+    )
+
+
+def _ms_since(started: float) -> float:
+    """Milliseconds elapsed since ``started`` (``time.monotonic``), 2 dp."""
+    return round((time.monotonic() - started) * 1000, 2)
 
 
 class ProviderError(Exception):
@@ -240,6 +334,12 @@ def chat(
     that the caller did not ask for).  Some OpenAI-compatible endpoints require
     it — Anthropic's compatibility layer documents ``max_tokens`` as a required
     field — so a caller targeting such a row must supply it here.
+
+    Transport is the pooled keep-alive client (:func:`get_http_client`) with
+    ``timeout`` applied per request, so calls reuse a live connection instead
+    of handshaking every time.  Exactly one structured ``INFO`` line is logged
+    per call (:func:`_log_call`): provider, model, turns, latency, status —
+    never a key, a prompt or a completion.
     """
     url = resolve_completions_url(row)
     # User-provided key takes precedence over stored key
@@ -261,25 +361,29 @@ def chat(
 
     catalog_id = str(row.get("catalog_id") or "unknown")
     cb = get_circuit_breaker(f"llm_{catalog_id}")
+    turns = len(messages)
 
     def _do_request() -> httpx.Response:
-        return httpx.post(url, json=body, headers=headers, timeout=timeout)
+        return _post(url, body=body, headers=headers, timeout=timeout)
 
     started = time.monotonic()
     try:
         response = cb.call(_do_request)
     except CircuitBreakerError as exc:
+        _log_call(catalog_id, model, turns, _ms_since(started), "circuit_open")
         raise ProviderError(
             PROVIDER_REQUEST_FAILED,
             f"{catalog_id!r} circuit breaker open: {exc}",
         ) from exc
     except httpx.HTTPError as exc:
+        _log_call(catalog_id, model, turns, _ms_since(started), "transport_error")
         raise ProviderError(
             PROVIDER_REQUEST_FAILED, f"{catalog_id!r} request failed: {exc}"
         ) from exc
-    latency_ms = round((time.monotonic() - started) * 1000, 2)
+    latency_ms = _ms_since(started)
 
     if response.status_code >= 400:
+        _log_call(catalog_id, model, turns, latency_ms, str(response.status_code))
         raise ProviderError(
             PROVIDER_REQUEST_FAILED,
             f"{catalog_id!r} returned HTTP {response.status_code}: "
@@ -289,10 +393,13 @@ def chat(
     try:
         payload = response.json()
     except ValueError as exc:
+        _log_call(catalog_id, model, turns, latency_ms, "invalid_body")
         raise ProviderError(
             PROVIDER_REQUEST_FAILED,
             f"{catalog_id!r} returned a non-JSON body",
         ) from exc
+
+    _log_call(catalog_id, model, turns, latency_ms, str(response.status_code))
 
     choice = (payload.get("choices") or [{}])[0]
     message = choice.get("message") or {}

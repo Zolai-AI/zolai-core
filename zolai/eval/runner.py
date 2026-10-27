@@ -12,6 +12,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from zolai.config import config
 from zolai.eval.metrics import (
     compute_grammar_metrics,
     compute_morphology_metrics,
@@ -258,7 +259,7 @@ def init_gold(
         console.print(f"[red]Unknown task: {task}[/red]")
         raise typer.Exit(1)
 
-    gold_file = Path("data/eval") / f"{task}_gold_v0.jsonl"
+    gold_file = config.paths.data / "eval" / f"{task}_gold_v0.jsonl"
     if not gold_file.exists():
         console.print(f"[red]Gold file not found: {gold_file}[/red]")
         raise typer.Exit(1)
@@ -281,7 +282,7 @@ def export(
         raise typer.Exit(1)
 
     eval_set, _ = GOLD_SETS[task]
-    out_file = output or (Path("data/eval") / f"{task}_gold_v0.jsonl")
+    out_file = output or (config.paths.data / "eval" / f"{task}_gold_v0.jsonl")
     count = export_eval_set_to_jsonl(eval_set, out_file)
     console.print(f"[green]Exported {count} items to {out_file}[/green]")
 

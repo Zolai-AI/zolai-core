@@ -8,14 +8,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from ..config import config
 from ..data.database import get_manager
-from ..llm import provider_settings as settings
 
 logger = logging.getLogger(__name__)
 
@@ -100,4 +97,8 @@ async def submit_contribution(payload: ContributionIn) -> ContributionOut:
 
     logger.info("Contribution received: id=%s type=%s word=%s", contribution_id, payload.type, payload.word)
 
-    return ContributionOut(id=contribution_id, status="pending", message="Contribution received and queued for editorial review.")
+    return ContributionOut(
+    id=contribution_id,
+    status="pending",
+    message="Contribution received and queued for editorial review.",
+)

@@ -140,7 +140,6 @@ def _research(goal: str, allow: frozenset[str]) -> tuple[list[dict[str, Any]], l
     Detects Bible/Scripture/verse references in the goal and adds source_filter
     to rag_search for better precision.
     """
-    import re
     calls: list[ToolCall] = []
     results: list[dict[str, Any]] = []
 
@@ -236,9 +235,9 @@ def run_agent_goal(
     try:
         # ── research ────────────────────────────────────────────────────
         t0 = time.monotonic()
-        
-        # Run research with phase-specific prompt
-        research_result = run_agent_loop(
+
+        # Run research with phase-specific prompt (result not needed here)
+        run_agent_loop(
             system_prompt=RESEARCH_PHASE_PROMPT,
             user_message=f"Research goal: {goal}",
             allow=frozenset(allow),

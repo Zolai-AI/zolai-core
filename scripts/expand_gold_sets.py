@@ -8,7 +8,11 @@ import random
 import sqlite3
 from pathlib import Path
 
-DB_PATH = "/home/peter/Documents/Projects/zolai-ai/data/zolai.db"
+from zolai.config import config
+
+#: Resolved through the one path resolver — a hardcoded machine path made this
+#: script silently operate on whichever DB the last laptop happened to have.
+DB_PATH = str(config.paths.db)
 GOLD_DIR = Path("data/eval")
 
 # POS tag mapping for common Zolai patterns
@@ -487,24 +491,24 @@ def main():
     import subprocess
     result = subprocess.run([
         ".venv/bin/python", "-m", "zolai.cli.main", "eval", "init-gold", "pos_gold_v0"
-    ], cwd="/home/peter/Documents/Projects/zolai-ai/zolai-core", capture_output=True, text=True)
+    ], cwd=str(config.paths.root), capture_output=True, text=True)
     print(result.stdout)
     
     result = subprocess.run([
         ".venv/bin/python", "-m", "zolai.cli.main", "eval", "init-gold", "morph_gold_v0"
-    ], cwd="/home/peter/Documents/Projects/zolai-ai/zolai-core", capture_output=True, text=True)
+    ], cwd=str(config.paths.root), capture_output=True, text=True)
     print(result.stdout)
     
     result = subprocess.run([
         ".venv/bin/python", "-m", "zolai.cli.main", "eval", "init-gold", "grammar_gold_v0"
-    ], cwd="/home/peter/Documents/Projects/zolai-ai/zolai-core", capture_output=True, text=True)
+    ], cwd=str(config.paths.root), capture_output=True, text=True)
     print(result.stdout)
     
     # Run evaluation
     print("\nRunning evaluation on expanded sets...")
     result = subprocess.run([
         ".venv/bin/python", "-m", "zolai.cli.main", "eval", "run", "all"
-    ], cwd="/home/peter/Documents/Projects/zolai-ai/zolai-core", capture_output=True, text=True)
+    ], cwd=str(config.paths.root), capture_output=True, text=True)
     print(result.stdout)
 
 

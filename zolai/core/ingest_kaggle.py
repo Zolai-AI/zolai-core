@@ -27,6 +27,7 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,15 +40,26 @@ from ..config import config
 
 logger = logging.getLogger(__name__)
 
-# Canonical DB (env-overridable via ZOLAI_DB_PATH / ZOLAI_DATA_ROOT).
-DB_PATH = config.paths.zolai_db
-# External Kaggle bundle root (env-overridable via ZOLAI_KAGGLE_ROOT).
-KAGGLE_ROOT = Path(
-    __import__("os").environ.get(
-        "ZOLAI_KAGGLE_ROOT", "/home/peter/Downloads/Kaggle"
-    )
-)
-DATA_ROOT = DB_PATH.parent
+def db_path() -> Path:
+    """The canonical database, read at call time.
+
+    Capturing ``config.paths.db`` at import froze the path for the life of the
+    process, so a later ``ZOLAI_DB_PATH`` change or a test that patched config
+    still imported into the database the import happened to start against.
+    """
+    return config.paths.db
+
+
+def data_root() -> Path:
+    """The shared data directory — the resolver's, not ``db_path().parent``."""
+    return config.paths.data
+
+
+def kaggle_root() -> Path:
+    """External Kaggle bundle root (env-overridable via ``ZOLAI_KAGGLE_ROOT``)."""
+    override = os.environ.get("ZOLAI_KAGGLE_ROOT", "").strip()
+    return Path(override).expanduser() if override else Path.home() / "Downloads" / "Kaggle"
+
 
 # Metadata columns every imported row carries.
 _VERSION_COLS = ("import_batch_id", "source_file", "version", "imported_at")
@@ -390,7 +402,7 @@ def run(dry_run: bool, only: str | None = None) -> list[dict[str, int]]:
 
     Returns per-source gap/inserted summaries.
     """
-    engine = create_engine(f"sqlite:///{DB_PATH}", echo=False)
+    engine = create_engine(f"sqlite:///{db_path()}", echo=False)
     # PRAGMA tuning for concurrent access parity with the rest of the stack.
     with engine.connect() as conn:
         conn.execute(text("PRAGMA busy_timeout=30000"))
@@ -399,8 +411,9 @@ def run(dry_run: bool, only: str | None = None) -> list[dict[str, int]]:
     _ensure_extra_tables(engine)
 
     mode = "DRY-RUN" if dry_run else "IMPORT"
-    print(f"[ingest_kaggle] mode={mode} db={DB_PATH}")
-    print(f"[ingest_kaggle] kaggle_root={KAGGLE_ROOT}")
+    root = kaggle_root()
+    print(f"[ingest_kaggle] mode={mode} db={db_path()}")
+    print(f"[ingest_kaggle] kaggle_root={root}")
 
     batch_id = _batch_id()
     version = 1
@@ -414,7 +427,7 @@ def run(dry_run: bool, only: str | None = None) -> list[dict[str, int]]:
                   f"(use --import --source {spec['name']} to force)")
             continue
 
-        path = KAGGLE_ROOT / spec["rel"]
+        path = root / spec["rel"]
         if not path.exists():
             print(f"[ingest_kaggle] missing source: {spec['rel']}")
             continue
@@ -447,7 +460,7 @@ def run(dry_run: bool, only: str | None = None) -> list[dict[str, int]]:
 
 
 def _report_path() -> Path:
-    return DATA_ROOT / "kaggle_gap_report.json"
+    return data_root() / "kaggle_gap_report.json"
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -6,8 +6,12 @@ from typing import Dict, List
 import requests
 from transformers import pipeline
 
+from zolai.config import config
+
 # Configuration
-DB_PATH = "kg.db"
+# Same scratch store as ``kg/extract_zsp.py`` — see the note there for why this
+# is not ``config.paths.db``.
+DB_PATH = str(config.paths.data / "kg.db")
 GEMINI_SERVER_URL = "http://localhost:8000/v1/chat/completions"
 
 # Initialize NER (mBERT or XLM-R)

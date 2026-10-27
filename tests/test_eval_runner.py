@@ -7,6 +7,10 @@ from typer.testing import CliRunner
 
 from zolai.eval.runner import app as runner_app
 
+#: Every command here initialises (and ``init-gold`` writes to) the eval store,
+#: so the suite runs against a scratch database instead of the corpus.
+pytestmark = pytest.mark.usefixtures("scratch_db")
+
 runner = CliRunner()
 
 

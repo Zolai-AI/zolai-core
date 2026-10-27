@@ -290,9 +290,9 @@ class TestRagQuery:
         assert "not a written answer" in out["answer"] or "No evidence" in out["answer"]
 
     def test_rag_query_reports_generated_when_the_model_answers(self, retriever, monkeypatch):
+        import builtins
         import sys
         import types
-        import builtins
 
         module = types.ModuleType("zolai.agent.synthesis")
 
@@ -325,7 +325,9 @@ class TestRagQuery:
 
     def test_empty_text_reply_is_flagged_not_silently_faked(self, retriever, monkeypatch):
         """An empty completion must degrade to evidence, never to a template answer."""
-        import sys, types, builtins
+        import builtins
+        import sys
+        import types
 
         module = types.ModuleType("zolai.agent.synthesis")
 

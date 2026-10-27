@@ -5,6 +5,8 @@ catch-all).  Both routes are GETs, gated by the frozen ``dataset:read`` scope
 (``zolai.api.auth``) and marked cacheable — the lexicon is public linguistic
 data that changes rarely:
 
+- ``GET /api/v1/lexicon`` — route index (discovery): the two routes below plus
+  the tables behind them, so a bare-prefix probe is content, not a 404.
 - ``GET /api/v1/lexicon/{word}`` — exact lookup over ``dictionary`` (ZO→EN)
   and ``dictionary_en_zo`` (EN→ZO).  POS/polysemy come from the L1.3 columns
   **where present** (``pos_canonical`` / ``pos_candidates`` / ``morph_features``
@@ -108,6 +110,45 @@ def _lookup(
     selected = _present(("id",) + wanted, available)
     sql = f"SELECT {', '.join(f'\"{c}\"' for c in selected)} FROM {table} WHERE {where_sql}"
     return [_row_dict(row) for row in conn.execute(sql, params)]
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/lexicon  — index/discovery for the bare prefix.
+# Declared before /{word} like /search: a client that lands on the bare
+# route gets this document instead of being read as a word named "" (core#11).
+# ---------------------------------------------------------------------------
+
+
+@router.get("", summary="Lexicon route index (discovery)")
+def lexicon_index(response: Response) -> dict[str, Any]:
+    """Describe what ``/api/v1/lexicon`` serves.
+
+    Read-only discovery: tells a client about the two real routes and the
+    tables behind them, so an index probe is a 200 with content rather than a
+    404 or an accidental ``{word}`` lookup.
+    """
+    # Immutable surface description → safe to cache briefly.
+    response.headers["Cache-Control"] = "public, max-age=60"
+    return {
+        "name": "lexicon",
+        "description": "Bilingual Zolai ↔ English lexicon read API (dataset:read).",
+        "routes": [
+            {
+                "method": "GET",
+                "path": "/api/v1/lexicon/search",
+                "summary": "Bilingual search with cursor pagination",
+                "query": {"q": "string (required)", "limit": "1-500, default 50", "cursor": "opaque '<id>:<table>'"},
+            },
+            {
+                "method": "GET",
+                "path": "/api/v1/lexicon/{word}",
+                "summary": "Exact lookup in both directions",
+                "response_flags": ["found", "zo_en", "en_zo"],
+            },
+        ],
+        "tables": list(_MERGE_TABLES),
+        "read_only": True,
+    }
 
 
 # ---------------------------------------------------------------------------

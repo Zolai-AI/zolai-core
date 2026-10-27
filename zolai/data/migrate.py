@@ -265,7 +265,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--db",
-        default=f"sqlite:///{config.paths.data / 'zolai.db'}",
+        default=f"sqlite:///{config.paths.db}",
         help="Database URL (default: <data_dir>/zolai.db)",
     )
     args = parser.parse_args()

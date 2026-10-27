@@ -18,6 +18,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .. import __version__
 from .errors import internal_error_envelope
 
 logger = logging.getLogger("zolai.desktop_app")
@@ -57,7 +58,7 @@ def create_desktop_app() -> FastAPI:
     app = FastAPI(
         title="Zolai Desktop API",
         description="Lightweight API for Tauri desktop app",
-        version="2.0.0",
+        version=__version__,
         lifespan=lifespan,
     )
 
@@ -98,7 +99,7 @@ def create_desktop_app() -> FastAPI:
         from ..config import config
         return {
             "status": "ok",
-            "version": "2.0.0",
+            "version": __version__,
             "mode": "desktop",
             "data_root": str(config.paths.data),
         }
@@ -142,7 +143,7 @@ def create_desktop_app() -> FastAPI:
 
         return {
             "status": "ok",
-            "version": "2.0.0",
+            "version": __version__,
             "mode": "desktop",
             "database": {
                 "exists": db_exists,

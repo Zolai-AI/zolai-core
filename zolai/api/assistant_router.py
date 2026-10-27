@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import time
 from typing import Any
 
@@ -35,7 +34,6 @@ from ..agent.tools.types import ToolCall
 from ..engines import engine_mode, llm_allowed
 from . import auth, rbac
 from .errors import api_error
-
 
 # ── Role-specific system prompts ──────────────────────────────────────────────
 
@@ -189,7 +187,6 @@ def _content_tokens(text: str) -> list[str]:
 
 def _retrieval_only(message: str, allow: frozenset[str]) -> dict[str, Any]:
     """Deterministic retrieval answer — zero sockets, honest labelling."""
-    import re
     started = time.monotonic()
     trace: list[dict[str, Any]] = []
 
@@ -346,7 +343,13 @@ def run_assistant(
         )
 
     try:
-        chat, meta = make_chat_fn(assistant=assistant, provider=provider, model=model, user_api_key=api_key, user_provider=user_provider)
+        chat, meta = make_chat_fn(
+    assistant=assistant,
+    provider=provider,
+    model=model,
+    user_api_key=api_key,
+    user_provider=user_provider,
+)
     except Exception as exc:  # ProviderError (stable codes) → honest fallback
         # Stable code only: ProviderError's str() embeds its message, which
         # can carry upstream request/response text (adapter.py wraps httpx
@@ -575,7 +578,12 @@ def _check_feedback_rate(request: Request) -> None:
         retry_after = max(1, int(FEEDBACK_WINDOW_S - (now - hits[0])))
         raise HTTPException(
             status_code=429,
-            detail={"error": "rate_limited", "scope": "assistant_feedback", "limit": FEEDBACK_LIMIT, "retry_after": retry_after},
+            detail={
+                "error": "rate_limited",
+                "scope": "assistant_feedback",
+                "limit": FEEDBACK_LIMIT,
+                "retry_after": retry_after,
+            },
             headers={"Retry-After": str(retry_after)},
         )
     hits.append(now)
@@ -590,8 +598,9 @@ def assistant_feedback(body: ChatFeedbackIn, request: Request) -> dict[str, Any]
     the message/response pair for later analysis.
     Rate limited to 10 requests/minute/IP.
     """
-    from ..data.repositories import get_engine
     from sqlalchemy import text as sa_text
+
+    from ..data.repositories import get_engine
 
     _check_feedback_rate(request)
 
@@ -653,8 +662,9 @@ def admin_feedback_stats(
     - since: ISO datetime string (e.g. '2026-01-01')
     - limit: max rows to return for recent feedback list
     """
-    from ..data.repositories import get_engine
     from sqlalchemy import text as sa_text
+
+    from ..data.repositories import get_engine
 
     engine = get_engine()
     with engine.connect() as conn:

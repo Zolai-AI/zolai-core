@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from zolai.config import config
 from zolai.data.schemas import (
     BibleVerse,
     DictionaryEntry,
@@ -371,10 +372,7 @@ class TestValidateFile:
 class TestValidateRealFile:
     def test_parallel_corpus(self) -> None:
         """Validate first 100 rows of the real parallel corpus."""
-        real_path = (
-            Path("/home/peter/Documents/Projects/zolai-ai")
-            / "data/bible/parallel_corpus_v1.jsonl"
-        )
+        real_path = config.paths.data / "bible/parallel_corpus_v1.jsonl"
         if not real_path.exists():
             pytest.skip("Real data file not present")
 
@@ -399,10 +397,7 @@ class TestValidateRealFile:
 
     def test_grammar_patterns(self) -> None:
         """Validate first 50 rows of real grammar patterns."""
-        real_path = (
-            Path("/home/peter/Documents/Projects/zolai-ai")
-            / "data/bible/grammar_patterns_v2.jsonl"
-        )
+        real_path = config.paths.data / "bible/grammar_patterns_v2.jsonl"
         if not real_path.exists():
             pytest.skip("Real data file not present")
 

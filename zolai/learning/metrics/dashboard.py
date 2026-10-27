@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Callable
@@ -255,7 +257,13 @@ class MetricsDashboard:
         return metrics
 
     async def _collect_system_metrics(self) -> dict:
-        """Collect system-level metrics."""
+        """Collect system-level metrics.
+
+        psutil is preferred (it samples a real CPU percentage) but is not a
+        dependency of the toolkit, so every ``/proc``-hosting machine still
+        gets numbers. Returning ``{}`` when psutil is missing made the
+        dashboard look identical to an idle box.
+        """
         try:
             import psutil
 
@@ -271,9 +279,42 @@ class MetricsDashboard:
                 "disk_free_gb": disk.free / (1024**3),
                 "process_count": len(psutil.pids()),
             }
+        except ImportError:
+            return self._system_metrics_from_proc()
         except Exception as e:
-            logger.warning(f"Failed to collect system metrics: {e}")
-            return {}
+            logger.warning("psutil metrics failed, falling back to /proc: %s", e)
+            return self._system_metrics_from_proc()
+
+    @staticmethod
+    def _system_metrics_from_proc() -> dict:
+        """Load average, ``/proc/meminfo`` and ``shutil.disk_usage`` — stdlib only."""
+        metrics: dict[str, float] = {}
+        try:
+            cores = os.cpu_count() or 1
+            metrics["cpu_percent"] = round(100.0 * os.getloadavg()[0] / cores, 2)
+        except (OSError, AttributeError):
+            logger.debug("load average unavailable on this platform")
+        try:
+            total = available = 0
+            with open("/proc/meminfo", encoding="ascii") as handle:
+                for line in handle:
+                    if line.startswith("MemTotal:"):
+                        total = int(line.split()[1])
+                    elif line.startswith("MemAvailable:"):
+                        available = int(line.split()[1])
+            if total:
+                metrics["memory_percent"] = round(100.0 * (total - available) / total, 2)
+                # /proc reports kB.
+                metrics["memory_available_gb"] = round(available / (1024**2), 3)
+        except OSError:
+            logger.debug("/proc/meminfo unavailable")
+        try:
+            usage = shutil.disk_usage("/")
+            metrics["disk_percent"] = round(100.0 * usage.used / usage.total, 2)
+            metrics["disk_free_gb"] = round(usage.free / (1024**3), 3)
+        except OSError:
+            logger.debug("disk usage unavailable")
+        return metrics
 
     async def _collect_agent_metrics(self) -> dict:
         """Collect metrics from all agents."""

@@ -136,17 +136,14 @@ def _run_export(args: argparse.Namespace) -> int:
 def _run_identity(spec: str) -> tuple[str, str] | None:
     """Resolve ``(set_name, source)`` for a ``--set`` specifier.
 
-    Returns ``None`` when the run cannot be attributed to a single eval set
-    (``db`` merges every active set; arbitrary JSONL paths have no stable
-    identity in ``eval_sets``).
+    Returns ``None`` unless the run scored cases that live in ``eval_cases``.
+    ``db`` merges every active set so no single row owns the score, and a JSONL
+    or ``smoke`` run reads interchange files — recording those would add an
+    ``eval_sets`` row with no cases behind it to the source of truth.
     """
-    if spec == DB_SPEC:
-        return None
     if spec.startswith(f"{DB_SPEC}:"):
         name = spec.split(":", 1)[1]
         return (name, "db") if name else None
-    if spec == SMOKE:
-        return (SMOKE, "jsonl")
     return None
 
 

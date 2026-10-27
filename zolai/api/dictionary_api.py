@@ -24,6 +24,7 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from zolai import __version__
 from zolai.data.database import get_manager
 
 # ── Database manager ────────────────────────────────────────────────────────
@@ -42,7 +43,7 @@ app = FastAPI(
         "Tedim Zolai ↔ English dictionary backed by SQLAlchemy database. "
         "93K ZO→EN entries + 112K EN→ZO entries + 31K Bible verses."
     ),
-    version="2.0.0",
+    version=__version__,
 )
 
 app.add_middleware(

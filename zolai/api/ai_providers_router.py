@@ -358,7 +358,11 @@ def test_ai_provider(catalog_id: str) -> ProviderTestOut:
     )
 
 
-@router.post("/api/v1/admin/ai-providers/{catalog_id}/refresh-models", response_model=RefreshModelsOut, dependencies=[WRITE_DEP])
+@router.post(
+    "/api/v1/admin/ai-providers/{catalog_id}/refresh-models",
+    response_model=RefreshModelsOut,
+    dependencies=[WRITE_DEP],
+)
 def refresh_models(catalog_id: str) -> RefreshModelsOut:
     """Refresh the row's ``models`` list from the provider (button).
 

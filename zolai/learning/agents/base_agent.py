@@ -23,8 +23,8 @@ from sqlalchemy.engine import Engine
 
 from ...data.repositories import get_engine, get_repositories
 from ...rag.retrieve import UnifiedRetriever
-from ..feedback_store import FeedbackType, LearningSignal, get_feedback_store
 from ..bible_pattern_learner import get_bible_learner
+from ..feedback_store import FeedbackType, LearningSignal, get_feedback_store
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +110,7 @@ class BaseAgent(ABC):
         self.feedback_store = get_feedback_store()
 
         self._bind_config(config)
-        
+
         # State
         self.active_tasks: dict[str, asyncio.Task] = {}
         self.message_queue: asyncio.Queue = asyncio.Queue()
@@ -124,7 +124,7 @@ class BaseAgent(ABC):
             "knowledge_items_learned": 0,
             "errors": 0,
         }
-        
+
         # Learning state
         self.learning_signals_buffer: list = []
         self.discussion_history: list[DiscussionContext] = []
@@ -211,7 +211,7 @@ class BaseAgent(ABC):
             confidence=confidence,
             metadata=metadata or {}
         )
-        
+
         self.feedback_store.store_signal(signal)
         self.learning_signals_buffer.append(signal)
         self.learning_metrics["feedback_given"] += 1
@@ -220,11 +220,11 @@ class BaseAgent(ABC):
         """Learn from Bible patterns for a given topic."""
         if not self.bible_priority:
             return {}
-            
+
         # Get Bible context for topic
         bible_context = self.bible_learner.build_context_for_word(topic, limit=5)
         pattern_context = self.bible_learner.build_pattern_context("sov", limit=3)
-        
+
         # Store as knowledge
         knowledge = {
             "topic": topic,
@@ -233,10 +233,10 @@ class BaseAgent(ABC):
             "learned_at": datetime.utcnow().isoformat(),
             "source": "bible",
         }
-        
+
         self.knowledge_cache[topic] = knowledge
         self.learning_metrics["knowledge_items_learned"] += 1
-        
+
         return knowledge
 
     async def get_bible_context_for_translation(self, text: str) -> dict[str, Any]:
@@ -244,12 +244,12 @@ class BaseAgent(ABC):
         # Extract key words from text
         words = text.lower().split()
         contexts = {}
-        
+
         for word in words[:5]:  # Limit to 5 words
             context = self.bible_learner.build_context_for_word(word, limit=2)
             if "No Bible sentences" not in context:
                 contexts[word] = context
-                
+
         return {
             "source_text": text,
             "bible_contexts": contexts,
@@ -260,10 +260,10 @@ class BaseAgent(ABC):
         """Validate a translation against Bible patterns."""
         # Get Bible context for key terms
         bible_context = await self.get_bible_context_for_translation(source_text)
-        
+
         # Check against learned patterns
         patterns = self.bible_learner.get_patterns_for_type("sov", limit=5)
-        
+
         validation = {
             "translation": translation,
             "source": source_text,
@@ -274,7 +274,7 @@ class BaseAgent(ABC):
             "issues": [],
             "suggestions": [],
         }
-        
+
         return validation
 
     def get_learning_metrics(self) -> dict[str, Any]:
@@ -336,14 +336,14 @@ class DiscussionMixin:
         """Build consensus from discussion messages."""
         if topic not in self.discussion_contexts:
             return ""
-            
+
         ctx = self.discussion_contexts[topic]
         # Simple consensus building - in reality would be more sophisticated
         messages = [m.content for m in ctx.messages if m.from_agent != self.agent_id]
-        
+
         if not messages:
             return "No consensus reached - no other participant messages"
-            
+
         # For now, return summary
         return f"Consensus on '{topic}': {len(messages)} participant messages reviewed. " \
                f"Key points: {'; '.join(m[:100] for m in messages[:3])}"

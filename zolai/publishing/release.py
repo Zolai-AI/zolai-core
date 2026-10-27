@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from zolai.config import config
 from zolai.learning.incremental.regression import run_regression_checks
 from zolai.publishing.artifact import ArtifactManifest, build_knowledge_artifact
 from zolai.publishing.sync import SyncResult, sync_to_d1, sync_to_r2
@@ -140,7 +141,7 @@ def _create_git_tag(version: str, message: str) -> str:
         subprocess.run(
             ["git", "tag", "-a", tag, "-m", message],
             check=True,
-            cwd="/home/peter/Documents/Projects/zolai-ai/zolai-core",
+            cwd=str(config.paths.root),
         )
         return tag
     except subprocess.CalledProcessError as e:

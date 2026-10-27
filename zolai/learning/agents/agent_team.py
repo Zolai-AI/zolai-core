@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-from .base_agent import BaseAgent, AgentMessage, AgentRole, AgentSkill, DiscussionContext
+from .base_agent import AgentMessage, AgentRole, AgentSkill, BaseAgent, DiscussionContext
 
 logger = logging.getLogger(__name__)
 
@@ -38,14 +38,14 @@ class AgentTeam:
 
 class AgentTeamManager:
     """Manages teams of agents."""
-    
+
     def __init__(self, engine=None):
         self.engine = engine
         self.agents: dict[str, BaseAgent] = {}
         self.teams: dict[str, AgentTeam] = {}
         self.message_bus: asyncio.Queue = asyncio.Queue()
         self.agent_to_team: dict[str, str] = {}
-        
+
         logger.info("AgentTeamManager initialized")
 
     def register_agent(self, agent: BaseAgent):
@@ -71,13 +71,13 @@ class AgentTeamManager:
             description=description,
             members=member_ids or [],
         )
-        
+
         for agent_id in member_ids or []:
             if agent_id in self.agents:
                 self.agent_to_team[agent_id] = team.team_id
                 self.agents[agent_id].team_id = team.team_id
                 self.agents[agent_id].config.team_id = team.team_id
-                
+
         self.teams[team.team_id] = team
         logger.info(f"Created team: {name} ({team.team_id}) with {len(team.members)} members")
         return team
@@ -110,7 +110,7 @@ class AgentTeamManager:
                 if agent.agent_id != message.from_agent:
                     await agent.message_queue.put(message)
 
-    async def send_to_agent(self, from_agent: str, to_agent: str, 
+    async def send_to_agent(self, from_agent: str, to_agent: str,
                            message_type: str, content: str, metadata: dict = None):
         """Convenience method to send a message between agents."""
         message = AgentMessage(
@@ -139,7 +139,7 @@ class AgentTeamManager:
         team = self.teams.get(team_id)
         if not team:
             return []
-            
+
         skills = set()
         for agent_id in team.members:
             if agent_id in self.agents:
@@ -160,27 +160,27 @@ class AgentTeamManager:
 
 class DiscussionFacilitator:
     """Facilitates discussions between agents."""
-    
+
     def __init__(self, team_manager: AgentTeamManager):
         self.team_manager = team_manager
         self.active_discussions: dict[str, DiscussionContext] = {}
-        
+
         logger.info("DiscussionFacilitator initialized")
 
-    async def start_discussion(self, team_id: str, topic: str, 
+    async def start_discussion(self, team_id: str, topic: str,
                               initiator_id: str, initial_message: str = "") -> DiscussionContext:
         """Start a new discussion in a team."""
         team = self.team_manager.get_team(team_id)
         if not team:
             raise ValueError(f"Team {team_id} not found")
-            
+
         context = DiscussionContext(
             topic=topic,
             participants=team.members.copy(),
         )
-        
+
         self.active_discussions[topic] = context
-        
+
         # Notify all participants
         if initial_message:
             await self.team_manager.broadcast_to_team(
@@ -189,7 +189,7 @@ class DiscussionFacilitator:
                 "discussion",
                 f"DISCUSSION STARTED: {topic}\n\n{initial_message}",
             )
-        
+
         logger.info(f"Started discussion '{topic}' in team {team_id} by {initiator_id}")
         return context
 
@@ -197,7 +197,7 @@ class DiscussionFacilitator:
         """Add a message to a discussion."""
         if topic in self.active_discussions:
             self.active_discussions[topic].messages.append(message)
-            
+
             # Broadcast to participants
             team_id = message.team_id
             if team_id:
@@ -208,16 +208,16 @@ class DiscussionFacilitator:
                             if member_id in self.team_manager.agents:
                                 await self.team_manager.agents[member_id].message_queue.put(message)
 
-    async def conclude_discussion(self, topic: str, facilitator_id: str, 
+    async def conclude_discussion(self, topic: str, facilitator_id: str,
                                  consensus: str = "") -> Optional[DiscussionContext]:
         """Conclude a discussion with optional consensus."""
         if topic not in self.active_discussions:
             return None
-            
+
         context = self.active_discussions[topic]
         context.consensus = consensus
         context.status = "concluded"
-        
+
         # Notify participants of conclusion
         if context.messages:
             await self.team_manager.broadcast_to_team(
@@ -226,7 +226,7 @@ class DiscussionFacilitator:
                 "discussion_concluded",
                 f"DISCUSSION CONCLUDED: {topic}\n\nConsensus: {consensus or 'No consensus reached'}",
             )
-        
+
         # Archive and remove from active
         del self.active_discussions[topic]
         logger.info(f"Concluded discussion '{topic}' with consensus: {bool(consensus)}")
@@ -236,36 +236,36 @@ class DiscussionFacilitator:
         """Build consensus from discussion messages."""
         if topic not in self.active_discussions:
             return "No active discussion on this topic"
-            
+
         context = self.active_discussions[topic]
         messages = context.messages
-        
+
         if not messages:
             return "No messages in discussion"
-            
+
         # Simple consensus building - summarize all positions
         positions = defaultdict(list)
         for msg in messages:
             if msg.message_type in ("discussion", "consensus", "position"):
                 positions[msg.from_agent].append(msg.content)
-        
+
         if not positions:
             return "No clear positions expressed"
-            
+
         # Build consensus summary
         summary = f"CONSENSUS SUMMARY for '{topic}':\n\n"
         for agent, points in positions.items():
             summary += f"\n{agent}:\n"
             for point in points:
                 summary += f"  - {point[:200]}\n"
-                
+
         return summary
 
     def get_discussion_status(self, topic: str) -> Optional[dict]:
         """Get status of a discussion."""
         if topic not in self.active_discussions:
             return None
-            
+
         ctx = self.active_discussions[topic]
         return {
             "topic": ctx.topic,
@@ -278,32 +278,32 @@ class DiscussionFacilitator:
 
 
 # Convenience function to create a standard learning team
-def create_standard_learning_team(team_manager: AgentTeamManager, 
+def create_standard_learning_team(team_manager: AgentTeamManager,
                                   engine=None) -> AgentTeam:
     """Create a standard learning team with all core agents."""
     from .bible_learner_agent import BibleLearnerAgent
-    from .translation_agent import TranslationAgent
     from .grammar_agent import GrammarAgent
+    from .translation_agent import TranslationAgent
     from .vocabulary_agent import VocabularyAgent
-    
+
     # Create agents
     bible_learner = BibleLearnerAgent(engine)
     translator = TranslationAgent(engine)
     grammar_expert = GrammarAgent(engine)
     vocab_builder = VocabularyAgent(engine)
-    
+
     # Register all agents
     for agent in [bible_learner, translator, grammar_expert, vocab_builder]:
         team_manager.register_agent(agent)
-    
+
     # Create team
-    member_ids = [bible_learner.agent_id, translator.agent_id, 
+    member_ids = [bible_learner.agent_id, translator.agent_id,
                   grammar_expert.agent_id, vocab_builder.agent_id]
-    
+
     team = team_manager.create_team(
         name="Zolai Learning Team",
         description="Standard learning team with Bible learner, translator, grammar expert, and vocabulary builder",
         member_ids=member_ids
     )
-    
+
     return team

@@ -17,6 +17,8 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from zolai.config import config
+
 log = logging.getLogger(__name__)
 
 
@@ -47,7 +49,7 @@ def _get_git_commit() -> str:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, cwd="/home/peter/Documents/Projects/zolai-ai/zolai-core",
+            capture_output=True, text=True, cwd=str(config.paths.root),
         )
         return result.stdout.strip()[:12]
     except Exception:

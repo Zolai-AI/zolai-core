@@ -11,6 +11,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
+from .. import __version__
 from ..agent.cli import agent_app
 from ..config import config
 from ..dictionary.manager import DictionaryManager
@@ -1070,7 +1071,7 @@ def info():
     config.paths.ensure_dirs()
 
     panel = Panel.fit(
-        f"""[bold]Zolai Toolkit v1.0.0[/bold]
+        f"""[bold]Zolai Toolkit v{__version__}[/bold]
 
 [cyan]Data Root:[/cyan]  {config.paths.data}
 [cyan]Raw:[/cyan]        {config.paths.data_raw}

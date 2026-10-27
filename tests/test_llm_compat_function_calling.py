@@ -11,8 +11,9 @@ exactly two provable things, both asserted here with no socket:
 2. a captured OpenAI-wire ``tool_calls`` response parses into
    ``{"id", "name", "input", "arguments"}`` through ``chat()``.
 
-Everything is offline: ``httpx.post`` is replaced by a recorder, so the test
-proves what would be *sent* and reads what would be *parsed*.
+Everything is offline: the pooled transport call (:func:`zolai.llm.adapter._post`)
+is replaced by a recorder, so the test proves what would be *sent* and reads
+what would be *parsed* — no socket is ever opened.
 """
 
 from __future__ import annotations
@@ -55,11 +56,13 @@ class _Captured:
         self.url: str | None = None
         self.body: dict | None = None
         self.headers: dict | None = None
+        self.timeout: float | None = None
 
-    def __call__(self, url, *, json=None, headers=None, timeout=None):  # noqa: ANN001, A002
+    def __call__(self, url, *, body=None, headers=None, timeout=None):  # noqa: ANN001
         self.url = url
-        self.body = json
+        self.body = body
         self.headers = headers
+        self.timeout = timeout
         return _FakeResponse(self.status, self.payload)
 
 
@@ -90,7 +93,10 @@ def captured(monkeypatch) -> _Captured:
     ):
         monkeypatch.delenv(name, raising=False)
     cap = _Captured()
-    monkeypatch.setattr(adapter_mod.httpx, "post", cap)
+    # Stub the module-level pooled transport — not ``httpx.post``: the pooled
+    # client never calls that function, and the default suite must open no
+    # sockets.
+    monkeypatch.setattr(adapter_mod, "_post", cap)
     return cap
 
 

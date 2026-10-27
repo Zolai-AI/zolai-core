@@ -576,6 +576,22 @@ class TestHealthCheck:
         assert info["total_rows"] >= 1
         assert info["query_latency_ms"] >= 0
 
+    def test_health_check_redacts_the_database_path(self, tmp_db):
+        """``/monitor/health`` is public — the data directory must not travel
+        with it (core#16 / core#24): only scheme + file name survive."""
+        info = tmp_db.health_check()
+        directory = tmp_db._db_url.rsplit("/", 1)[0].removeprefix("sqlite:///")
+        assert directory, "the fixture DB lives in a directory worth hiding"
+        # Compare against ``directory + "/"``, not the bare directory: the
+        # fixture lives in /tmp and a tempfile name starts with "tmp", so the
+        # redacted ``sqlite:///tmpXXXX.db`` contains "/tmp" through the scheme
+        # separator without leaking anything.
+        assert f"{directory}/" not in info["db_url"], info["db_url"]
+        tail = info["db_url"].split(":///", 1)[-1]
+        assert tail == Path(tmp_db._db_url).name, info["db_url"]
+        assert "/" not in tail and "\\" not in tail, info["db_url"]
+        assert tail.endswith(".db"), info["db_url"]
+
 
 class TestAuditLog:
     def test_audit_log_table_exists(self, tmp_db):

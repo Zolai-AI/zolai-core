@@ -114,6 +114,13 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 _CASES = [
     # core#16: public health must not leak ``data_root`` (the data path).
     pytest.param("/health", {}, {"status", "version", "uptime_s"}, id="health"),
+    # core#22: the Bible probe reports the rows it can actually serve.
+    pytest.param(
+        "/bible/status",
+        {},
+        {"status", "bible_files", "verses", "available", "path"},
+        id="bible-status",
+    ),
     pytest.param(
         "/api/v1/lexicon/pasian",
         {},
@@ -165,6 +172,21 @@ def test_public_get_smoke(
 
 
 # ── Deeper shape assertions ─────────────────────────────────────────────────
+
+
+def test_monitor_health_never_leaks_the_data_path(client: TestClient, seed_db: Path) -> None:
+    """core#24: ``/monitor/health`` used to answer ``sqlite:////home/…/zolai.db``.
+
+    The route is public, so the full path *is* ``data_root`` by another name.
+    """
+    resp = client.get("/monitor/health")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "data_root" not in body
+    assert "db_path" not in body
+    tail = body["db_url"].split(":///", 1)[-1]
+    assert "/" not in tail and "\\" not in tail, body["db_url"]
+    assert str(seed_db.parent) not in body["db_url"]
 
 
 def test_lexicon_hit_and_miss_contract(client: TestClient, seed_db: Path) -> None:

@@ -9,8 +9,9 @@ Every table carries the unified build metadata columns
 participate in the same versioning scheme as the pre-existing build tables
 (see ``core/jsonl_pipeline_v3.py``).
 
-Safe to call repeatedly — ``CREATE TABLE IF NOT EXISTS`` + ``ALTER ... ADD
-COLUMN`` guarded by column presence checks.
+Safe to call repeatedly: the schema is inspected first and a write transaction is
+opened only when something is actually missing, so an up-to-date database is never
+locked by a probe.
 """
 
 from __future__ import annotations
@@ -30,6 +31,15 @@ _META_COLS = (
     "version INTEGER DEFAULT 1",
     "imported_at TEXT",
 )
+
+#: The same columns as ALTER-ready DDL, keyed by column name. Quoted so a name
+#: that collides with a keyword still adds cleanly.
+_META_COL_DDL = {
+    "import_batch_id": '"import_batch_id" TEXT',
+    "source_file": '"source_file" TEXT',
+    "version": '"version" INTEGER DEFAULT 1',
+    "imported_at": '"imported_at" TEXT',
+}
 
 # DDL for the tables introduced by this migration. Order matters only for FK
 # references (none here). Expressed as (table, [column DDL, ...]).
@@ -131,45 +141,43 @@ _EXTRA_TABLES: dict[str, list[str]] = {
 }
 
 
+def _schema_plan(engine: Engine) -> tuple[list[str], list[tuple[str, str]]]:
+    """``(tables to create, (table, column) pairs to add)`` — reads only."""
+    inspector = sa_inspect(engine)
+    existing = set(inspector.get_table_names())
+    missing_tables = [table for table in _EXTRA_TABLES if table not in existing]
+
+    missing_cols: list[tuple[str, str]] = []
+    for table in existing & set(_EXTRA_TABLES):
+        cols = {c["name"] for c in inspector.get_columns(table)}
+        missing_cols += [(table, col) for col in _META_COL_DDL if col not in cols]
+    return missing_tables, missing_cols
+
+
 def ensure_schema_v2(engine: Engine) -> list[str]:
     """Create the migration tables (+ metadata columns), idempotently.
 
+    The plan is computed before anything is written, so a database that already
+    matches this schema is never opened for a write transaction. Used to be a
+    ``BEGIN`/``COMMIT`` on every call, which made a read-only probe a writer
+    against the live corpus.
+
     Returns the names of tables that were created (empty if none were new).
     """
-    inspector = sa_inspect(engine)
-    existing = set(inspector.get_table_names())
-    created: list[str] = []
+    missing_tables, missing_cols = _schema_plan(engine)
+    if not missing_tables and not missing_cols:
+        return []
 
     with engine.begin() as conn:
-        for table, col_ddls in _EXTRA_TABLES.items():
-            if table in existing:
-                continue
-            ddl = ",\n    ".join([*col_ddls, *_META_COLS])
+        for table in missing_tables:
+            ddl = ",\n    ".join([*_EXTRA_TABLES[table], *_META_COLS])
             conn.execute(text(f"CREATE TABLE {table} (\n    {ddl}\n)"))
             logger.info("  created table: %s", table)
-            created.append(table)
-
-        # Ensure unified metadata columns on all non-new tables too.
-        for table in existing:
-            if table in _EXTRA_TABLES:
-                _ensure_meta_cols(conn, table)
-
-    return created
-
-
-def _ensure_meta_cols(conn, table: str) -> None:
-    """Add unified build-metadata columns if missing (idempotent)."""
-    cols = {c["name"] for c in sa_inspect(conn).get_columns(table)}
-    defaults = {
-        "import_batch_id": '"import_batch_id" TEXT',
-        "source_file": '"source_file" TEXT',
-        "version": '"version" INTEGER DEFAULT 1',
-        "imported_at": '"imported_at" TEXT',
-    }
-    for col, ddl in defaults.items():
-        if col not in cols:
-            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {ddl}"))
+        for table, col in missing_cols:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {_META_COL_DDL[col]}"))
             logger.info("  added column: %s.%s", table, col)
+
+    return missing_tables
 
 
 def get_engine(db_path=None):
@@ -177,6 +185,9 @@ def get_engine(db_path=None):
 
     Uses the canonical DB path from ``config.paths.zolai_db`` unless overridden,
     with the same busy_timeout/WAL settings used across the stack.
+
+    Building an engine does not migrate anything — a caller that needs the v2
+    tables calls :func:`ensure_schema_v2` (or :func:`migrate`) itself.
     """
     from sqlalchemy import create_engine
 
@@ -189,7 +200,6 @@ def get_engine(db_path=None):
     with engine.connect() as conn:
         conn.execute(text("PRAGMA busy_timeout=30000"))
         conn.execute(text("PRAGMA synchronous=NORMAL"))
-    ensure_schema_v2(engine)
     return engine
 
 

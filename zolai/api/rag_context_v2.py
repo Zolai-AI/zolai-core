@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from ..config import config
 from ..data.database import get_manager
 from ..data.repositories import get_repositories
 
@@ -18,7 +17,9 @@ class ZolaiRAGContextV2:
     """Comprehensive RAG context using all data sources (DB-first)."""
 
     def __init__(self):
-        self._db = get_manager(f"sqlite:///{config.paths.zolai_db}")
+        # No URL — see AccuracyScorer: an explicit URL disposes and replaces the
+        # shared singleton instead of reusing it.
+        self._db = get_manager()
         self._repos = get_repositories()
 
     def extract_zolai_words(self, text: str) -> list[str]:

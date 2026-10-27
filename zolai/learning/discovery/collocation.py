@@ -122,6 +122,7 @@ def build_collocation_hypotheses(
         merged = merged[:limit]
 
     collocations_written = 0
+    collocations_new = 0
     status_counts: dict[str, int] = {"OBSERVED": 0, "CANDIDATE": 0}
 
     for colloc in merged:
@@ -177,30 +178,33 @@ def build_collocation_hypotheses(
 
         confidence = EVIDENCE_TIER_MAP[4][1]  # 0.7
 
-        if not dry_run:
-            upsert_evidence_bulk(engine, evidence_rows)
+        hypo = CollocationHypothesis(
+            word1=word1,
+            word2=word2,
+            pmi=pmi,
+            count=count,
+            window=window,
+            confidence=confidence,
+            status=status,
+            evidence_ids=[],
+            extras={"source": "corpus", "promotion_policy": "R8"},
+        )
 
-            hypo = CollocationHypothesis(
-                word1=word1,
-                word2=word2,
-                pmi=pmi,
-                count=count,
-                window=window,
-                confidence=confidence,
-                status=status,
-                evidence_ids=[],
-                extras={"source": "corpus", "promotion_policy": "R8"},
-            )
-            repo.create(hypo.model_dump())
-            collocations_written += 1
+        if dry_run:
+            created = repo.existing_id(hypo.model_dump()) is None
         else:
-            collocations_written += 1
+            upsert_evidence_bulk(engine, evidence_rows)
+            _, created = repo.upsert(hypo.model_dump())
+
+        collocations_written += 1
+        collocations_new += int(created)
 
         status_counts[status] += 1
 
     return {
         "capability": "collocation",
         "collocations_written": collocations_written,
+        "collocations_new": collocations_new,
         "status_counts": status_counts,
         "candidates_considered": len(merged),
     }

@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..config import config
+
 # Re-use existing metrics from eval.py
 from .eval import (
     EvalReport,
@@ -756,7 +758,7 @@ def _build_cli() -> argparse.ArgumentParser:
         "--test",
         "-t",
         type=str,
-        default="/home/peter/Documents/Projects/zolai-ai/data/syllable/splits/gold_test.jsonl",
+        default=str(config.paths.data / "syllable/splits/gold_test.jsonl"),
         help="Path to test data JSONL",
     )
     parser.add_argument(

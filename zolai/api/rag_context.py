@@ -8,7 +8,6 @@ canonical DB (DatabaseManager) — no runtime JSONL.
 from pathlib import Path
 from typing import Optional
 
-from ..config import config
 from ..data.database import get_manager
 
 DATA_DIR = Path(__file__).parent.parent.parent.parent.parent / "data"
@@ -18,9 +17,10 @@ class ZolaiRAGContext:
     """Lightweight RAG context injector for Zolai conversations."""
 
     def __init__(self):
-        # Database-backed access (canonical data store).
-        db_path = config.paths.data / "zolai.db"
-        self._db = get_manager(f"sqlite:///{db_path}")
+        # Database-backed access (canonical data store). No URL — get_manager()
+        # resolves config.paths.db, and passing one here would dispose and
+        # replace the singleton every other module shares.
+        self._db = get_manager()
 
     def extract_zolai_words(self, text: str) -> list[str]:
         """Extract potential Zolai words from user input."""

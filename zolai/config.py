@@ -87,8 +87,16 @@ class Paths:
 
     @property
     def zolai_db(self) -> Path:
-        """Canonical DB path — data/zolai.db (env-overridable)."""
-        return self.data / "zolai.db"
+        """Alias of :attr:`db` — the one canonical DB path.
+
+        This used to return ``self.data / "zolai.db"``, which silently ignored
+        ``ZOLAI_DB_PATH``. Because 28 call sites read ``zolai_db`` and 17 read
+        ``db``, a deployment that set ``ZOLAI_DB_PATH`` wrote through one path
+        and read through another — two databases, each holding part of the data.
+        ``db`` is the single resolver; this property exists so the older name
+        cannot reintroduce the split.
+        """
+        return self.db
 
     @property
     def frontend(self) -> Path:

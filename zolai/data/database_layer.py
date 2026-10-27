@@ -24,8 +24,16 @@ class DatabaseConfig:
     """Database configuration from environment."""
 
     def __init__(self):
-        self.sqlite_path = os.getenv("ZOLAI_SQLITE_PATH", "/home/peter/Documents/Projects/zolai-ai/data/zolai.db")
-        self.postgres_url = os.getenv("ZOLAI_POSTGRES_URL", "")
+        # The default used to be a hardcoded absolute path to one developer's
+        # working copy, and the SQLite/Postgres variables here
+        # (ZOLAI_SQLITE_PATH / ZOLAI_POSTGRES_URL) were a second, parallel set to
+        # the rest of the app's (ZOLAI_DB_PATH / ZOLAI_PG_URL) — so two halves of
+        # one process could resolve two different databases. Both now fall back
+        # to the single resolver in zolai.config / zolai.data.database.
+        from ..config import config as _config
+
+        self.sqlite_path = os.getenv("ZOLAI_SQLITE_PATH") or str(_config.paths.db)
+        self.postgres_url = os.getenv("ZOLAI_POSTGRES_URL") or os.getenv("ZOLAI_PG_URL", "")
         self.postgres_async_url = os.getenv("ZOLAI_POSTGRES_ASYNC_URL", "")
         self.use_postgres = bool(self.postgres_url)
         self.echo = os.getenv("ZOLAI_DB_ECHO", "false").lower() == "true"

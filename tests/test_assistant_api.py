@@ -295,7 +295,11 @@ class TestUngroundedAnswerIsGrounded:
             return {"text": "nang = weak, bang = what [dictionary]."}
 
         monkeypatch.setattr(ar, "llm_allowed", lambda: True)
-        monkeypatch.setattr(ar, "make_chat_fn", lambda **kw: (memory_only_chat, {"catalog_id": "stub", "model": "stub"}))
+        monkeypatch.setattr(
+    ar,
+    "make_chat_fn",
+    lambda **kw: (memory_only_chat, {"catalog_id": "stub", "model": "stub"}),
+)
 
         result = ar.run_assistant("nang bang hih thei", persist=False)
 

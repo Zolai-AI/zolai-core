@@ -20,6 +20,14 @@ import pytest
 import pytest as _pytest
 
 import zolai.pos_tagger.annotate as _annotate
+from zolai.pos_tagger.annotate import (
+    _load_annotations,
+    _save_annotation,
+    _write_all_annotations,
+    cmd_export,
+    cmd_list,
+    cmd_stats,
+)
 
 _POS_MISSING = [
     n for n in ("_load_annotations", "_save_annotation", "_write_all_annotations",
@@ -34,14 +42,6 @@ if _POS_MISSING:
 # -------------------------------------------------------------------------
 
 
-from zolai.pos_tagger.annotate import (
-    _load_annotations,
-    _save_annotation,
-    _write_all_annotations,
-    cmd_export,
-    cmd_list,
-    cmd_stats,
-)
 
 
 class TestAnnotationStorage:

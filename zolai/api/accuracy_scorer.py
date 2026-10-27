@@ -5,7 +5,6 @@ Scores words/phrases by confidence based on dictionary + Bible + grammar,
 all read from the canonical DB (no runtime JSONL).
 """
 
-from ..config import config
 from ..data.database import get_manager
 
 
@@ -13,7 +12,10 @@ class AccuracyScorer:
     """Cross-reference accuracy scoring for Zolai words/phrases."""
 
     def __init__(self):
-        self._db = get_manager(f"sqlite:///{config.paths.zolai_db}")
+        # No URL: get_manager() resolves config.paths.db. Passing an explicit
+        # URL here disposed and replaced the process-global singleton every
+        # time this object was built.
+        self._db = get_manager()
 
     def score_word(self, word: str) -> dict:
         """Score a single word's accuracy/confidence."""

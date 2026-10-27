@@ -16,12 +16,12 @@ import pytest
 from fastapi.testclient import TestClient
 from prometheus_client.parser import Sample, text_string_to_metric_families
 
-from zolai.api.server import create_app
-from zolai.monitoring import record_operation, track_operation
-from zolai.monitoring.metrics import metric_value
 from zolai.api import auth as api_auth
+from zolai.api.server import create_app
 from zolai.data.database import DatabaseManager as _AuthDatabaseManager
 from zolai.data.migrations import create_api_keys_table as _create_api_keys_table
+from zolai.monitoring import record_operation, track_operation
+from zolai.monitoring.metrics import metric_value
 
 # ---------------------------------------------------------------------------
 # Helpers

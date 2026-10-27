@@ -132,8 +132,11 @@ class ZolaiRAG:
 
         # Detect database (mandatory serving path)
         if self._db is None:
-            db_path = config.paths.data / "zolai.db"
-            self._db = get_manager(f"sqlite:///{db_path}")
+            # No URL: get_manager() resolves config.paths.db itself. Passing a
+            # hand-built URL replaces and disposes the process-global singleton
+            # on every construction, so two of these objects would fight over
+            # the manager other modules are already using.
+            self._db = get_manager()
 
     def retrieve(self, query: str, top_k: int = 10) -> EvidencePack:
         """Retrieve structured evidence for a query.

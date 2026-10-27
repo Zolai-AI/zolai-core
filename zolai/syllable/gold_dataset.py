@@ -27,6 +27,8 @@ from collections import Counter
 from pathlib import Path
 from typing import TextIO
 
+from ..config import config
+
 # --- BIO encoding/decoding ---------------------------------------------------
 
 
@@ -287,10 +289,10 @@ class GoldDatasetBuilder:
 
     def __init__(
         self,
-        data_dir: str = "/home/peter/Documents/Projects/zolai-ai/data",
+        data_dir: str | None = None,
         segmenter=None,
     ) -> None:
-        self.data_dir = Path(data_dir)
+        self.data_dir = Path(data_dir) if data_dir else config.paths.data
         self.segmenter = segmenter
         self._segmenter_cache = None
 
@@ -731,7 +733,7 @@ def _build_cli() -> argparse.ArgumentParser:
     parser.add_argument(
         "--data-dir",
         type=str,
-        default="/home/peter/Documents/Projects/zolai-ai/data",
+        default=str(config.paths.data),
         help="Root data directory",
     )
     return parser

@@ -6,10 +6,10 @@ the single source of truth and the executor enforces the caller's allow-list.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import lru_cache
-import re
 from typing import Any
 
 #: The grammar every **published** tool name must satisfy.

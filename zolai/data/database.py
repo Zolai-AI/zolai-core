@@ -126,11 +126,24 @@ _JSON_COLS: dict[str, set[str]] = {
 }
 
 
+def default_db_url() -> str:
+    """The database this process uses when no URL is given.
+
+    PostgreSQL when ``ZOLAI_PG_URL`` is set, otherwise SQLite at
+    :attr:`config.paths.db` — the resolver that honours ``ZOLAI_DB_PATH``.  The
+    default used to be the *relative* ``"sqlite:///zolai.db"``, so a bare
+    ``DatabaseManager()`` created an empty shadow database in whatever directory
+    the process started from.  :func:`get_manager` derives from here too, so
+    there is one answer to "which database?".
+    """
+    return os.environ.get("ZOLAI_PG_URL") or f"sqlite:///{config.paths.db}"
+
+
 class DatabaseManager:
     """Unified database access with lazy connection."""
 
     def __init__(self, db_url: str | None = None) -> None:
-        self._db_url = db_url or "sqlite:///zolai.db"
+        self._db_url = db_url or default_db_url()
         self._engine: Engine | None = None
         self._metadata: MetaData | None = None
         self._pool_config: dict[str, Any] = {}
@@ -796,7 +809,15 @@ class DatabaseManager:
 
         This is used by the ZVS validator to check if historical forms
         actually appear in the Bible database.
+
+        A store without the table (a fresh or scratch database) yields an empty
+        set — "nothing attested" — rather than failing reflection, because the
+        validator degrades to flagging rather than crashing.
         """
+        from sqlalchemy import inspect as sa_inspect
+
+        if not sa_inspect(self.engine).has_table("bible_verses"):
+            return set()
         table = Table("bible_verses", self.metadata, autoload_with=self.engine)
         words: set[str] = set()
         # Use a simple regex to extract words
@@ -1045,8 +1066,35 @@ class DatabaseManager:
             return result.scalar_one()
 
     def counts(self) -> dict[str, int]:
-        """Return row counts for all tables."""
-        return {name: self.count(name) for name in self.table_names()}
+        """Row counts for every table that exists, in a single round trip.
+
+        This used to issue one ``SELECT COUNT(*)`` per model table — ~150
+        statements for a public health endpoint — and it raised on a
+        partially-migrated database (a table in the models but not yet in
+        SQLite). One ``UNION ALL`` statement costs one query, and absent
+        tables are reported by omission rather than a 500.
+        """
+        names = self._existing_table_names()
+        if not names:
+            return {}
+        union = " UNION ALL ".join(
+            f"SELECT '{name}' AS tbl, COUNT(*) AS n FROM \"{name}\"" for name in names
+        )
+        with self.engine.connect() as conn:
+            rows = conn.execute(text(union)).fetchall()
+        return {row[0]: int(row[1]) for row in rows}
+
+    def _existing_table_names(self) -> list[str]:
+        """Model tables that actually exist in the connected database."""
+        names = self.table_names()
+        if not self._db_url.startswith("sqlite"):
+            return names
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type = 'table'")
+            ).fetchall()
+        present = {row[0] for row in rows}
+        return [name for name in names if name in present]
 
     # ------------------------------------------------------------------
     # Bulk insert
@@ -1949,7 +1997,10 @@ class DatabaseManager:
         """Return database health metrics.
 
         Returns dict with:
-            db_url: Database URL (masked)
+            db_url: Database URL, **path-redacted** — sqlite directories are
+                dropped to the file name (and any userinfo stripped), so a
+                public ``/monitor/health`` never discloses ``data_root``
+                (core#16 / core#24)
             backend: "sqlite" or "postgresql"
             table_counts: {table_name: row_count}
             total_rows: sum of all counts
@@ -1977,10 +2028,14 @@ class DatabaseManager:
             pass
         latency_ms = (time.monotonic() - t0) * 1000
 
-        # Mask URL
+        # Mask URL: strip userinfo first, then never expose the filesystem
+        # location — ``/monitor/health`` is public and must not leak data_root
+        # (core#16 / core#24).  Only the scheme and the file name survive.
         masked_url = self._db_url
         if "@" in masked_url:
             masked_url = masked_url.split("@")[-1]
+        if masked_url.startswith("sqlite"):
+            masked_url = "sqlite:///" + masked_url.rsplit("/", 1)[-1]
 
         return {
             "db_url": masked_url,
@@ -2043,19 +2098,39 @@ def get_manager(db_url: str | None = None) -> DatabaseManager:
 
     If db_url is provided, creates a new manager (replaces any existing).
     If not provided and no singleton exists, checks ZOLAI_PG_URL env var.
-    If ZOLAI_PG_URL is set, uses PostgreSQL; otherwise uses SQLite
-    at config.paths.data / "zolai.db".
+    If ZOLAI_PG_URL is set, uses PostgreSQL; otherwise uses SQLite at
+    :attr:`config.paths.db` — the one resolver that honours ``ZOLAI_DB_PATH``.
+
+    It used to build the default from ``config.paths.data / "zolai.db"``, which
+    ignores ``ZOLAI_DB_PATH``. Callers that resolved the path themselves
+    (``get_manager(f"sqlite:///{config.paths.db}")``) and callers that relied on
+    this default therefore opened *different* databases in the same process.
+
+    Passing ``db_url`` replaces the process-global singleton and disposes the
+    previous one — so a caller that derives the URL from config is safe only as
+    long as every caller derives it the same way. ``reset_manager()`` exists to
+    make that unwinding explicit in tests.
     """
     global _manager
     if db_url is not None or _manager is None:
         if _manager is not None:
             _manager.dispose()
         if db_url is None:
-            db_url = os.environ.get("ZOLAI_PG_URL") or (
-                f"sqlite:///{config.paths.data / 'zolai.db'}"
-            )
+            db_url = default_db_url()
         _manager = DatabaseManager(db_url)
     return _manager
+
+
+def reset_manager() -> None:
+    """Dispose the singleton so the next ``get_manager()`` re-resolves the path.
+
+    Without this, a test that points config at a throwaway database leaves the
+    manager — and its open engine — cached for every later test in the session.
+    """
+    global _manager
+    if _manager is not None:
+        _manager.dispose()
+    _manager = None
 
 
 def init_db(db_url: str | None = None) -> DatabaseManager:
@@ -2085,7 +2160,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--db",
-        default=f"sqlite:///{config.paths.data / 'zolai.db'}",
+        default=f"sqlite:///{config.paths.db}",
         help="Database URL",
     )
     sub = parser.add_subparsers(dest="command")
