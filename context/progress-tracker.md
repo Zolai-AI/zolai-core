@@ -536,3 +536,74 @@ Books that were zero coverage (JUD/OBA/PHM/PHP/TIT/ZEP) now 869 / 654 / 573 /
 - Full suite after-change = 58 failures = baseline (all pre-existing
   pollution/foreign class); repo-wide ruff: 40 errors in 16 files, none in
   this round's touched files.
+
+---
+
+## 2026-10-27 (Session — RAG index built, vector search wired, DB manifests + N+1)
+
+### RAG builder (`zolai/rag/build.py`)
+- `SourceSpec` NamedTuple replaces the mixed 5/6-wide tuples (the old list
+  queried a nonexistent `definition` column for `dictionary_en_zo` and a
+  missing `id` for `word_observation_stats`, so both were silently skipped).
+- Fixed the local `text` variable shadowing `sqlalchemy.text` (every source
+  aborted with `UnboundLocalError`). Commit per embed batch instead of one
+  transaction around a multi-hour run; `batch_size` is passed to `encode()`
+  (sentence-transformers otherwise caps at 32); resume skips ids already
+  present (`--force` re-embeds); `by_source` accumulates for tables shared by
+  two specs (bible TDB77 + 2010). CLI: `--batch-size`, `--force`.
+- Embeddings are base64 little-endian float32 (`zolai/rag/vectors.py`; the
+  decoder still reads legacy JSON arrays).
+  `scripts/maintenance/compact_embeddings.py` converted 205,234 legacy rows
+  in 3m54s (idempotent, batched, `--dry-run`).
+
+### Full build (`zolai rag build`, 2026-10-27)
+
+| source | vectors |
+| --- | --- |
+| dictionary | 84,490 |
+| dictionary_en_zo | 64,025 |
+| bible_verses (TDB77 + 2010) | 56,119 |
+| word_observation_stats | 18,811 |
+| phrases | 10,722 |
+| grammar_patterns | 6,253 |
+| knowledge_claims | 172 |
+| **total** | **240,592** |
+
+0 errors; ~117 min (CPU-bound on Bible verses at ~11 rows/s); DB 2.40 GB →
+3.17 GB.
+
+### Vector search (`zolai/rag/retrieve.py`)
+- `UnifiedRetriever` step 7 now scores cosine over the DB-resident matrix (it
+  was a stub returning `[]`). `ZOLAI_VECTOR_SEARCH=0` disables;
+  `VECTOR_MIN_SCORE=0.35`.
+- Matrix cache keyed by `(db URL, row count, max imported_at)`; rows are
+  streamed into a preallocated matrix (peak RSS 1,655 → 655 MB; cold load
+  ~12 s at 240k rows; warm semantic query ~0.8 s).
+- Sentence-like queries always consult the vector pass; single-word lookups
+  that hit lexically never load the matrix.
+- Legacy `zolai/knowledge/retrieve.py` loads DB-first, caches per process, and
+  drops unreadable embeddings in one aligned pass.
+
+### Snapshots / versioning
+- `create_knowledge_version(content_manifest=True)` hashes table content via
+  the `sqlite3` CLI `.sha3sum` and stores `manifest_mode`
+  (content | mixed | counts); `verify_knowledge_version` and
+  `zolai knowledge verify-version` exit 1 on drift.
+- `v2026.10.27` verified **false** — hypotheses 859→865 and
+  foundation_evidence 1963→1974 (real writes after the snapshot, not a hash
+  bug). `v2026.10.27.1` = `ok: true`, 19 tables, mode content.
+
+### N+1 / boundary fixes
+- `DatabaseManager.counts()`: 150 `SELECT COUNT(*)` statements → one
+  `UNION ALL`; tables absent from a partially migrated DB are skipped, so
+  `/monitor/health` no longer 500s (fixes
+  `test_monitor_health_never_leaks_the_data_path`).
+- `/knowledge/status` reports counts from SQL instead of hydrating the
+  ~380 MB matrix.
+
+### Gates
+- New suites: `tests/test_rag_vector_search.py` (5),
+  `tests/test_knowledge_versioning.py` (4).
+- 35 vector/retriever tests, 56 knowledge+eval+RAG-contract tests, 15 API
+  smoke tests, 42 database tests pass. `PRAGMA quick_check` = ok; WAL
+  checkpointed (0 B).
