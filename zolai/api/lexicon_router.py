@@ -185,6 +185,89 @@ def _parse_cursor(cursor: str | None) -> tuple[int, str] | None:
     return int(raw_id), table
 
 
+#: Search columns per merged table — **primary field first**: the primary is the
+#: identity column of its table (``zolai`` / ``headword``), the rest are
+#: secondary (``english`` / ``translations``).
+_SEARCH_FIELDS: dict[str, tuple[str, ...]] = {
+    "dictionary": _ZO_EN_SEARCH,
+    "dictionary_en_zo": _EN_ZO_SEARCH,
+}
+
+#: Graded relevance tiers (core#5). A row's score is the **best** tier any of
+#: its search fields reaches, so an exact headword always outranks a prefix
+#: hit, which outranks a substring hit. Values are absolute — identical across
+#: the two merged tables — which is what lets one cursor compare rows from
+#: either side:
+#:
+#: - ``1.0`` exact on the primary (identity) field
+#: - ``0.9`` exact on a secondary field
+#: - ``0.8`` prefix on the primary field
+#: - ``0.7`` prefix on a secondary field
+#: - ``0.5`` contains — the WHERE clause's floor; it matched or it is not here
+_TIER_EXACT_PRIMARY = 1.0
+_TIER_EXACT_SECONDARY = 0.9
+_TIER_PREFIX_PRIMARY = 0.8
+_TIER_PREFIX_SECONDARY = 0.7
+_TIER_CONTAINS = 0.5
+
+
+def _score_sql(search_fields: list[str] | tuple[str, ...]) -> str:
+    """SQL ``CASE`` grading one row against the query — the single ranking rule.
+
+    Used in three places (SELECT, ORDER BY, and the cursor's resume clause) so
+    a row can never be scored one way on the page that returns it and another
+    way on the page that follows it. ``:q_exact`` is the raw trimmed query
+    (``lower()`` on both sides keeps lookup case-insensitive, like the
+    ``LIKE`` match it ranks); ``:q_prefix`` is that query escaped with a
+    trailing ``%``.
+    """
+    primary, *secondary = search_fields
+    parts = [
+        f"CASE WHEN lower(\"{primary}\") = lower(:q_exact) "
+        f"THEN {_TIER_EXACT_PRIMARY}"
+    ]
+    if secondary:
+        ors = " OR ".join(f'lower("{col}") = lower(:q_exact)' for col in secondary)
+        parts.append(f"WHEN {ors} THEN {_TIER_EXACT_SECONDARY}")
+    parts.append(f'WHEN "{primary}" LIKE :q_prefix ESCAPE \'\\\' THEN {_TIER_PREFIX_PRIMARY}')
+    if secondary:
+        ors = " OR ".join(f'"{col}" LIKE :q_prefix ESCAPE \'\\\'' for col in secondary)
+        parts.append(f"WHEN {ors} THEN {_TIER_PREFIX_SECONDARY}")
+    parts.append(f"ELSE {_TIER_CONTAINS} END")
+    return " ".join(parts)
+
+
+def _cursor_score(
+    conn: sqlite3.Connection,
+    keyset: tuple[int, str],
+    cleaned: str,
+    prefix: str,
+) -> float | None:
+    """Score of the row a cursor points at, under the *current* query.
+
+    Relevance order needs a keyset of ``(score, id, table)``; the cursor stays
+    the opaque ``"<id>:<table>"`` because the score of that one row is
+    recomputed here. ``None`` means the cursor cannot be resolved at all (row
+    gone, table absent) — the caller turns that into the same 400 a forged
+    cursor gets, rather than resuming from an invented position and repeating
+    or skipping rows.
+    """
+    cid, table = keyset
+    available = table_columns(conn, table)
+    if not available or "id" not in available:
+        return None
+    search_fields = _present(_SEARCH_FIELDS.get(table, ()), available)
+    if not search_fields:
+        return None
+    sql = f"SELECT {_score_sql(search_fields)} AS _score FROM {table} WHERE id = :cid"
+    row = conn.execute(
+        sql, {"cid": cid, "q_exact": cleaned, "q_prefix": prefix}
+    ).fetchone()
+    if row is None or row["_score"] is None:
+        return None
+    return float(row["_score"])
+
+
 @router.get("/search", summary="Bilingual lexicon search (cursor paginated)")
 def lexicon_search(
     response: Response,
@@ -192,48 +275,79 @@ def lexicon_search(
     limit: int = Query(50, ge=1, le=500, description="Page size (api-design §4: default 50, cap 500)"),
     cursor: str | None = Query(None, description="Opaque composite cursor '<id>:<table>' from next_cursor"),
 ) -> dict[str, Any]:
-    """Search ``dictionary`` + ``dictionary_en_zo`` and merge by ``(id, table)``.
+    """Search ``dictionary`` + ``dictionary_en_zo``, ranked by graded relevance.
 
-    ``id`` values collide across the two tables, so the merge order is the
-    pair ``(id, table)`` with a **stable tie-break: ``dictionary`` sorts
-    before ``dictionary_en_zo``** (also their lexicographic order).  The
-    returned ``next_cursor`` is the opaque composite ``"<id>:<table>"`` of
-    the last item; hand it back as ``cursor`` to fetch the next page.
+    **Ranking (core#5).** Every hit carries a ``score`` in ``0.5–1.0``
+    (:func:`_score_sql`'s tiers) and the page is ordered by that score, so an
+    exact headword match is always the first item — the old order was
+    ``ORDER BY id ASC``, i.e. insertion order, which answered ``q=pasian``
+    with ``abba`` first and gave the caller nothing to rank on.
 
-    Each per-table query advances with the SQLite row value
-    ``WHERE (id, '<own-table>') > (:cid, :ctable)`` — so after a
-    ``dictionary`` row at id X, the ``dictionary_en_zo`` twin at id X still
-    qualifies (and vice versa), which plain ``id > ?`` used to drop.
+    **Merge order** is ``(-score, id, table)``: ``dictionary`` sorts before
+    ``dictionary_en_zo`` on an equal score (also their lexicographic order), so
+    ties keep the previous, documented order. The returned ``next_cursor`` is
+    the opaque composite ``"<id>:<table>"`` of the last item; hand it back as
+    ``cursor`` (with the same ``q``) to fetch the next page.
+
+    **Pagination** is a keyset over ``(score, id, table)``: each per-table
+    query resumes with
+    ``WHERE (score) < :cs OR ((score) = :cs AND (id, '<own-table>') > (:cid, :ctable))``
+    — the row value keeps the cross-table id twins (the ``dictionary_en_zo``
+    row at id X still qualifies after the ``dictionary`` row at id X), and
+    ``:cs`` is the cursor row's score recomputed for this query.
     """
     # Public linguistic data → safe to cache briefly (60 s).
     response.headers["Cache-Control"] = "public, max-age=60"
 
+    cleaned = q.strip()
     keyset = _parse_cursor(cursor)
-    pattern = f"%{escape_like(q.strip())}%"
+    pattern = f"%{escape_like(cleaned)}%"
+    prefix = f"{escape_like(cleaned)}%"
     conn = connect_db()
     try:
+        cursor_score: float | None = None
+        if keyset is not None:
+            cursor_score = _cursor_score(conn, keyset, cleaned, prefix)
+            if cursor_score is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "invalid_cursor",
+                        "cursor": cursor,
+                        "expected": "a next_cursor from this query",
+                    },
+                )
         merged: list[dict[str, Any]] = []
-        for table, fields in ((_MERGE_TABLES[0], _ZO_EN_SEARCH), (_MERGE_TABLES[1], _EN_ZO_SEARCH)):
+        for table in _MERGE_TABLES:
             available = table_columns(conn, table)
             if not available:
                 continue
-            search_fields = _present(fields, available)
+            search_fields = _present(_SEARCH_FIELDS[table], available)
             if not search_fields:
                 continue
-            clauses = [f"{field} LIKE ? ESCAPE '\\'" for field in search_fields]
+            score_sql = _score_sql(search_fields)
+            clauses = [f"{field} LIKE :q_pat ESCAPE '\\'" for field in search_fields]
             where = [f"({' OR '.join(clauses)})"]
-            params: list[Any] = [pattern] * len(search_fields)
+            params: dict[str, Any] = {
+                "q_pat": pattern,
+                "q_exact": cleaned,
+                "q_prefix": prefix,
+            }
             if keyset is not None:
-                # Row value: own table's name is the second element, so this
-                # table keeps (id, <own name>) > (cursor id, cursor table).
-                where.insert(0, f"(id, '{table}') > (?, ?)")
-                params[:0] = [keyset[0], keyset[1]]
+                # Score first, then the own-table row value: this table keeps
+                # (id, <own name>) > (cursor id, cursor table).
+                where.append(
+                    f"(({score_sql}) < :cs OR (({score_sql}) = :cs "
+                    f"AND (id, '{table}') > (:cid, :ctable)))"
+                )
+                params.update(cs=cursor_score, cid=keyset[0], ctable=keyset[1])
             selected = _present(("id",) + tuple(search_fields) + ("pos", "source"), available)
             sql = (
-                f"SELECT {', '.join(f'\"{c}\"' for c in selected)} FROM {table} "
-                f"WHERE {' AND '.join(where)} ORDER BY id ASC LIMIT ?"
+                f"SELECT {', '.join(f'\"{c}\"' for c in selected)}, {score_sql} AS _score "
+                f"FROM {table} WHERE {' AND '.join(where)} "
+                f"ORDER BY _score DESC, id ASC LIMIT :lim"
             )
-            params.append(limit + 1)
+            params["lim"] = limit + 1
             for row in conn.execute(sql, params):
                 item = _row_dict(row)
                 item["table"] = table
@@ -241,11 +355,13 @@ def lexicon_search(
     finally:
         conn.close()
 
-    # Stable merge order = (id, table); 'dictionary' < 'dictionary_en_zo'.
-    merged.sort(key=lambda item: (item["id"], item["table"]))
+    # Best score first; (id, table) breaks ties — 'dictionary' < 'dictionary_en_zo'.
+    merged.sort(key=lambda item: (-item["_score"], item["id"], item["table"]))
     has_more = len(merged) > limit
     items = merged[:limit]
     next_cursor = f"{items[-1]['id']}:{items[-1]['table']}" if (has_more and items) else None
+    for item in items:
+        item["score"] = round(float(item.pop("_score")), 4)
     return {"items": items, "next_cursor": next_cursor, "has_more": has_more}
 
 
