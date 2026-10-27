@@ -792,16 +792,30 @@ def foundation_promote(
     fact_type: str = typer.Option("word", "--fact-type", "-f", help="Fact type: word|sentence|paragraph"),
     threshold: float = typer.Option(0.9, "--threshold", "-t", help="Consensus threshold for promotion"),
     batch_size: int = typer.Option(1000, "--batch-size", "-b", help="Batch size for processing"),
+    attested: bool = typer.Option(
+        False, "--from-attestations",
+        help="Promote attested vocabulary (attestation_index) instead of staging words",
+    ),
+    attested_threshold: float = typer.Option(
+        0.85, "--attested-threshold",
+        help="Consensus threshold for --from-attestations",
+    ),
+    limit: int = typer.Option(0, "--limit", "-l", help="Max candidates (0 = all)"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
-    """⬆️ Promote staging to canonical with evidence gating."""
+    """⬆️ Promote staging (or attested vocabulary) to canonical with evidence gating."""
     _setup_logging(verbose)
     from zolai.pipeline.foundation import FoundationETL
 
     etl = FoundationETL(db_path=f"sqlite:///{config.paths.db}")
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
         task = progress.add_task("Promoting with threshold={threshold}...", total=None)
-        result = etl.promote_staging_to_canonical(threshold=threshold, batch_size=batch_size)
+        if attested:
+            result = etl.promote_words_from_attestations(
+                threshold=attested_threshold, limit=limit
+            )
+        else:
+            result = etl.promote_staging_to_canonical(threshold=threshold, batch_size=batch_size)
         progress.update(task, completed=True)
         promoted = result.records_promoted
         queued = result.records_queued_for_review

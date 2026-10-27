@@ -292,7 +292,7 @@ class FoundationAnalyzer:
             bible_attestations = ("Bible corpus",)
 
         # ZVS compliance check (basic)
-        zvs_compliant, zvs_notes = self._check_zvs_word(clean_word, morph_info)
+        zvs_compliant, zvs_notes = self._check_zvs_word(clean_word)
 
         return WordAnalysis(
             word=clean_word,
@@ -431,7 +431,11 @@ class FoundationAnalyzer:
             return self.enhanced_morphology.decompose(word)
 
     # ── Helpers ──────────────────────────────────────────────────────────────
-    def _check_zvs_word(self, word: str, morph: MorphologyInfo) -> tuple[bool, tuple[str, ...]]:
+    def check_zvs_word(self, word: str) -> tuple[bool, tuple[str, ...]]:
+        """ZVS 2018 compliance for a single word, without loading any engine."""
+        return self._check_zvs_word(word)
+
+    def _check_zvs_word(self, word: str) -> tuple[bool, tuple[str, ...]]:
         """Basic ZVS 2018 compliance check for a word."""
         forbidden = {
             "pathian": "pasian",

@@ -14,6 +14,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
+from sqlalchemy import text
+
 from zolai.data.database import DatabaseManager
 from zolai.data.repositories import get_foundation_repositories
 from zolai.foundation import (
@@ -458,6 +460,266 @@ class FoundationETL:
             stats.errors += 1
             self._complete_batch(stats, "failed")
             raise
+
+    # ── Stage 3b: PROMOTE FROM ATTESTATIONS ────────────────────────────────
+
+    #: ``attestation_index.source`` → evidence tier. ``extra`` is a second
+    #: community dictionary, so it shares the dictionary tier.
+    ATTESTATION_TIERS: dict[str, EvidenceTier] = {
+        "bible": EvidenceTier.BIBLE_PARALLEL,
+        "dict": EvidenceTier.DICTIONARY,
+        "extra": EvidenceTier.DICTIONARY,
+        "corpus": EvidenceTier.CORPUS_ATTESTATION,
+    }
+
+    def promote_words_from_attestations(
+        self,
+        threshold: float = 0.85,
+        limit: int = 0,
+    ) -> PipelineStats:
+        """Promote attested words into ``canonical_words``.
+
+        The raw-corpus staging path seeds word candidates with sentence
+        evidence only, so they always reach consensus empty-handed and land in
+        the review queue. ``attestation_index`` already carries the
+        independent source memberships for every known word, so that is the
+        candidate set here: one evidence item per distinct tier, the two-tier
+        gate, then the consensus threshold. Words that clear the gate but miss
+        the threshold go to the review queue.
+
+        Provenance is recorded once per batch (``foundation_batches``) rather
+        than per row, which keeps a 20k-word backfill from writing 150k audit
+        entries.
+        """
+        start = datetime.now()
+        stats = PipelineStats()
+
+        mgr = self._get_manager()
+        analyzer = self._get_analyzer()
+        batch_repo = self._get_repos()["foundation_batches"]
+        stats.batch_id = batch_repo.create_batch("promote_words", {"threshold": threshold})
+
+        limit_clause = f" LIMIT {int(limit)}" if limit else ""
+        query = text(
+            f"""
+            SELECT a.word, GROUP_CONCAT(DISTINCT a.source) AS sources,
+                   v.syllables, v.syllable_count, v.pos_canonical, v.pos,
+                   v.frequency, v.english, d.gloss
+            FROM attestation_index a
+            LEFT JOIN (
+                SELECT headword, MAX(syllables) AS syllables,
+                       MAX(syllable_count) AS syllable_count,
+                       MAX(pos_canonical) AS pos_canonical,
+                       MAX(pos) AS pos, MAX(frequency) AS frequency,
+                       MAX(english) AS english
+                FROM vocabulary GROUP BY headword
+            ) v ON v.headword = a.word
+            LEFT JOIN (
+                SELECT zolai, MAX(english_clean) AS gloss
+                FROM dictionary GROUP BY zolai
+            ) d ON d.zolai = a.word
+            WHERE a.word NOT IN (SELECT form FROM canonical_words)
+              AND ('word:' || a.word) NOT IN (
+                  SELECT fact_key FROM foundation_review_queue
+                  WHERE fact_type = 'word'
+              )
+            GROUP BY a.word
+            HAVING COUNT(DISTINCT a.source) >= 2
+            ORDER BY COUNT(DISTINCT a.source) DESC, a.word{limit_clause}
+            """
+        )
+
+        evidence_insert = text(
+            """
+            INSERT INTO foundation_evidence
+                (fact_type, fact_key, tier, source, confidence,
+                 provenance_hash, payload, created_at, method)
+            VALUES ('word', :fact_key, :tier, :source, :confidence,
+                    :provenance_hash, :payload, :created_at, 'attestation_index')
+            """
+        )
+        review_insert = text(
+            """
+            INSERT INTO foundation_review_queue
+                (fact_type, fact_key, priority, assignee, status, created_at)
+            VALUES ('word', :fact_key, 2, '', 'pending', :created_at)
+            """
+        )
+        consensus_insert = text(
+            """
+            INSERT INTO foundation_consensus
+                (fact_type, fact_key, candidates, decision, confidence,
+                 method, threshold, agreeing_count, notes, created_at)
+            VALUES ('word', :fact_key, :candidates, :decision, :confidence,
+                    :method, :threshold, :agreeing_count, :notes, :created_at)
+            """
+        )
+        canonical_insert = text(
+            """
+            INSERT INTO canonical_words
+                (form, syllables, syllable_count, pos, morphology, meanings,
+                 tone_profile, zvs_compliant, frequency, version, source_hash,
+                 verified_at, verified_by, evidence_ids, created_at)
+            VALUES (:form, :syllables, :syllable_count, :pos, '{}', :meanings,
+                    '{}', :zvs_compliant, :frequency, 1, :source_hash,
+                    :verified_at, :verified_by, :evidence_ids, :created_at)
+            """
+        )
+
+        now = datetime.now().isoformat()
+        promoted = queued = skipped = 0
+
+        try:
+            with mgr.engine.begin() as conn:
+                rows = conn.execute(query).fetchall()
+
+                for row in rows:
+                    r = row._mapping
+                    form = (r["word"] or "").strip()
+                    if not form or " " in form:
+                        skipped += 1
+                        continue
+
+                    sources = sorted({
+                        s for s in (r["sources"] or "").split(",")
+                        if s in self.ATTESTATION_TIERS
+                    })
+                    fact_key = f"word:{form}"
+                    evidence = tuple(
+                        Evidence(
+                            fact_type="word",
+                            fact_key=fact_key,
+                            tier=self.ATTESTATION_TIERS[src],
+                            source=f"attestation_index:{src}",
+                            confidence=self.ATTESTATION_TIERS[src].weight(),
+                            provenance_hash=hashlib.sha256(
+                                f"{src}:{form}".encode()
+                            ).hexdigest()[:16],
+                            payload={"word": form, "source": src},
+                        )
+                        for src in sources
+                    )
+                    if len({e.tier for e in evidence}) < 2:
+                        skipped += 1
+                        continue
+
+                    meanings = self._merge_glosses(r["gloss"])
+                    if not meanings:
+                        meanings = self._merge_glosses(r["english"])
+                    if not meanings:
+                        skipped += 1
+                        continue
+
+                    syllables = self._parse_syllables(r["syllables"], form)
+                    candidate = Candidate(
+                        fact_type="word",
+                        fact_key=fact_key,
+                        value={
+                            "form": form,
+                            "syllables": syllables,
+                            "pos": r["pos_canonical"] or r["pos"] or "",
+                            "meanings": meanings,
+                            "zvs_compliant": analyzer.check_zvs_word(form)[0],
+                        },
+                        evidence=evidence,
+                        source="attestation_index",
+                    )
+                    consensus = run_consensus([candidate])
+
+                    if consensus.confidence < threshold:
+                        queued += 1
+                        conn.execute(review_insert, {"fact_key": fact_key, "created_at": now})
+                        continue
+
+                    evidence_ids = []
+                    for e in evidence:
+                        result = conn.execute(
+                            evidence_insert,
+                            {
+                                "fact_key": fact_key,
+                                "tier": e.tier.value,
+                                "source": e.source,
+                                "confidence": e.confidence,
+                                "provenance_hash": e.provenance_hash,
+                                "payload": json.dumps(e.payload, ensure_ascii=False),
+                                "created_at": now,
+                            },
+                        )
+                        evidence_ids.append(result.lastrowid)
+
+                    conn.execute(
+                        canonical_insert,
+                        {
+                            "form": form,
+                            "syllables": json.dumps(syllables),
+                            "syllable_count": len(syllables),
+                            "pos": candidate.value["pos"],
+                            "meanings": json.dumps(meanings, ensure_ascii=False),
+                            "zvs_compliant": 1 if candidate.value["zvs_compliant"] else 0,
+                            "frequency": int(r["frequency"] or 0),
+                            "source_hash": hashlib.sha256(form.encode()).hexdigest()[:16],
+                            "verified_at": now,
+                            "verified_by": f"consensus:{consensus.method}",
+                            "evidence_ids": json.dumps(evidence_ids),
+                            "created_at": now,
+                        },
+                    )
+                    conn.execute(
+                        consensus_insert,
+                        {
+                            "fact_key": fact_key,
+                            "candidates": json.dumps([candidate.value], ensure_ascii=False),
+                            "decision": json.dumps(consensus.decision, ensure_ascii=False),
+                            "confidence": consensus.confidence,
+                            "method": consensus.method,
+                            "threshold": threshold,
+                            "agreeing_count": consensus.agreeing_candidates,
+                            "notes": json.dumps(list(consensus.notes)),
+                            "created_at": now,
+                        },
+                    )
+                    promoted += 1
+
+            stats.records_processed = len(rows)
+            stats.records_promoted = promoted
+            stats.records_queued_for_review = queued
+            stats.duration_seconds = (datetime.now() - start).total_seconds()
+            log.info(
+                "promote_words_from_attestations: processed=%d promoted=%d "
+                "queued=%d skipped=%d",
+                len(rows), promoted, queued, skipped,
+            )
+            self._complete_batch(stats, "completed")
+            return stats
+
+        except Exception:
+            stats.duration_seconds = (datetime.now() - start).total_seconds()
+            stats.errors += 1
+            self._complete_batch(stats, "failed")
+            raise
+
+    @staticmethod
+    def _merge_glosses(*values: Optional[str]) -> list[str]:
+        """Keep the first clean gloss per source, dropping corrupt values."""
+        merged: list[str] = []
+        for value in values:
+            gloss = (value or "").strip()
+            if len(gloss) < 2 or not any(ch.isalpha() for ch in gloss):
+                continue
+            if gloss not in merged:
+                merged.append(gloss)
+        return merged
+
+    @staticmethod
+    def _parse_syllables(raw: Optional[str], form: str) -> list[str]:
+        if raw:
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, list) and parsed:
+                return [str(s) for s in parsed]
+        return [form]
 
     # ── Stage 4: VERIFY ─────────────────────────────────────────────────────
 

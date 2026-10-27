@@ -477,7 +477,7 @@ class UnifiedRetriever:
             #    shipped database; the old ``dictionary_fts``/``phrases_fts``
             #    targets were never created, so this pass silently did nothing.
             #    Its schema is (title, content) over ``content=wiki_content``.
-            if not source_filter or "wiki" in source_filter:
+            if not source_filter or {"wiki", "wiki_content"} & set(source_filter):
                 try:
                     rows = conn.execute(
                         text(
@@ -672,6 +672,8 @@ class UnifiedRetriever:
         scores = matrix @ query_vec
         allowed = set(source_filter) if source_filter else None
         if allowed is not None:
+            if "wiki" in allowed:
+                allowed.add("wiki_content")
             mask = np.fromiter(
                 (s in allowed for s in index["sources"]), dtype=bool, count=len(scores)
             )

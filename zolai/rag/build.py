@@ -21,6 +21,16 @@ log = logging.getLogger(__name__)
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 VECTOR_DIM = 384
 
+# Per-document ceiling for chunked sources. Two generated vocabulary dumps in
+# the wiki exceed it by 4–6x; the remainder of those files stays reachable
+# through the ``wiki_content_fts`` lexical pass.
+MAX_CHUNKS_PER_DOC = 2048
+
+# Text budget per embed call. A row-batch is a poor flush unit for chunked
+# sources: 256 documents can expand to a quarter-million chunks, and one
+# ``encode`` call that size runs for hours without committing anything.
+MAX_TEXTS_PER_EMBED = 1024
+
 
 class SourceSpec(NamedTuple):
     """One embeddable source, in the single schema every consumer reads.
@@ -44,6 +54,7 @@ class SourceSpec(NamedTuple):
     label: str
     definition_col: str | None = None
     extra_cols: tuple[str, ...] = ()
+    chunk: bool = False
 
 
 # Sources to embed (in priority order)
@@ -69,6 +80,15 @@ SOURCES: list[SourceSpec] = [
         "id",
         "Knowledge claims",
         extra_cols=("predicate", "object"),
+    ),
+    SourceSpec(
+        "wiki",
+        "wiki_content",
+        "content",
+        "id",
+        "Zolai wiki (grammar, vocabulary, culture)",
+        extra_cols=("title", "wiki_category"),
+        chunk=True,
     ),
 ]
 
@@ -126,6 +146,15 @@ def _build_text_for_source(spec: SourceSpec, row: dict[str, Any]) -> str | None:
         predicate = row.get("predicate", "")
         obj = row.get("object", "")
         return f"{subject} {predicate} {obj}".strip()
+
+    elif source_type == "wiki":
+        body = row.get(spec.text_col) or ""
+        if not body:
+            return None
+        title = row.get("title") or ""
+        category = row.get("wiki_category") or ""
+        header = " — ".join(p for p in (title, category) if p)
+        return f"{header}\n{body}" if header else body
 
     return None
 
@@ -251,15 +280,86 @@ def build_knowledge_vectors(
                 }
 
             # Process in batches
+            flush_at = max(batch_size, MAX_TEXTS_PER_EMBED)
             for i in range(0, len(rows), batch_size):
                 batch = rows[i:i+batch_size]
 
                 # Build texts. Rows already in the index are skipped before
                 # embedding, so an interrupted multi-hour build resumes where
                 # it stopped instead of re-encoding everything.
-                texts = []
-                ids = []
-                vec_ids = []
+                texts: list[str] = []
+                ids: list[str] = []
+                vec_ids: list[str] = []
+
+                def flush() -> None:
+                    """Embed and commit the pending pieces."""
+                    nonlocal built_count, texts, ids, vec_ids
+                    if not texts:
+                        return
+                    # ``batch_size`` must be passed to encode():
+                    # sentence-transformers otherwise defaults to 32 no matter
+                    # how many texts are handed over.
+                    try:
+                        embeddings = embedder.encode(
+                            texts,
+                            batch_size=batch_size,
+                            show_progress_bar=False,
+                            normalize_embeddings=True,
+                        )
+                    except Exception as e:
+                        log.error("Embedding failed for %s batch %d: %s", table, i, e)
+                        summary["errors"].append(f"{table} batch {i}: {e}")
+                        texts, ids, vec_ids = [], [], []
+                        return
+
+                    records = []
+                    for idx, (content, emb) in enumerate(zip(texts, embeddings)):
+                        records.append(
+                            {
+                                "id": vec_ids[idx],
+                                "text": content,
+                                # source_type/source sit in metadata too: the
+                                # retrieval filters read metadata, not just columns.
+                                "meta": json.dumps(
+                                    {
+                                        "source_type": spec.source_type,
+                                        "source": table,
+                                        "source_table": table,
+                                        "source_id": ids[idx],
+                                    }
+                                ),
+                                # base64 float32 instead of a JSON float array:
+                                # ~2.3x smaller and decoded in milliseconds, which
+                                # is what keeps the retriever's index load short.
+                                "emb": encode_embedding(emb),
+                                "stype": spec.source_type,
+                                "src": table,
+                            }
+                        )
+
+                    if not dry_run:
+                        try:
+                            conn.execute(
+                                text("""
+                                    INSERT OR REPLACE INTO knowledge_vectors
+                                    (id, text, metadata, embedding, source_type, source, version, imported_at)
+                                    VALUES (:id, :text, :meta, :emb, :stype, :src, 1, datetime('now'))
+                                """),
+                                records,
+                            )
+                            conn.commit()
+                        except Exception as e:
+                            conn.rollback()
+                            log.error("Insert failed for %s batch %d: %s", table, i, e)
+                            summary["errors"].append(f"{table} insert: {e}")
+                            texts, ids, vec_ids = [], [], []
+                            return
+
+                    # Stable sha256 ids make a re-run a no-op, so committing
+                    # this slice early is always safe.
+                    built_count += len(records)
+                    texts, ids, vec_ids = [], [], []
+
                 for row in batch:
                     row_dict = dict(row._mapping) if hasattr(row, '_mapping') else dict(zip(select_cols, row))
                     content = _build_text_for_source(spec, row_dict)
@@ -267,80 +367,33 @@ def build_knowledge_vectors(
                         skipped_count += 1
                         continue
                     source_id = str(row_dict.get(spec.id_col, ''))
-                    vec_id = hashlib.sha256(
-                        f"{table}:{source_id}:{content[:50]}".encode()
-                    ).hexdigest()[:32]
-                    if vec_id in existing_ids:
-                        skipped_count += 1
-                        continue
-                    texts.append(content)
-                    ids.append(source_id)
-                    vec_ids.append(vec_id)
-
-                if not texts:
-                    continue
-
-                # Embed batch. ``batch_size`` must be passed to encode():
-                # sentence-transformers otherwise defaults to 32 no matter how
-                # many texts are handed over.
-                try:
-                    embeddings = embedder.encode(
-                        texts,
-                        batch_size=batch_size,
-                        show_progress_bar=False,
-                        normalize_embeddings=True,
-                    )
-                except Exception as e:
-                    log.error("Embedding failed for batch: %s", e)
-                    summary["errors"].append(f"{table} batch {i}: {e}")
-                    continue
-
-                # Write the whole embed batch with one INSERT OR REPLACE
-                # (executemany) instead of one statement per row. Membership
-                # keys are stable sha256 ids, so re-runs stay idempotent.
-                records = []
-                for idx, (content, emb) in enumerate(zip(texts, embeddings)):
-                    records.append(
-                        {
-                            "id": vec_ids[idx],
-                            "text": content,
-                            # source_type/source sit in metadata too: the
-                            # retrieval filters read metadata, not just columns.
-                            "meta": json.dumps(
-                                {
-                                    "source_type": spec.source_type,
-                                    "source": table,
-                                    "source_table": table,
-                                    "source_id": ids[idx],
-                                }
-                            ),
-                            # base64 float32 instead of a JSON float array:
-                            # ~2.3x smaller and decoded in milliseconds, which
-                            # is what keeps the retriever's index load short.
-                            "emb": encode_embedding(emb),
-                            "stype": spec.source_type,
-                            "src": table,
-                        }
-                    )
-
-                if not dry_run:
-                    try:
-                        conn.execute(
-                            text("""
-                                INSERT OR REPLACE INTO knowledge_vectors
-                                (id, text, metadata, embedding, source_type, source, version, imported_at)
-                                VALUES (:id, :text, :meta, :emb, :stype, :src, 1, datetime('now'))
-                            """),
-                            records,
+                    pieces = _chunk_text(content) if spec.chunk else [content]
+                    if len(pieces) > MAX_CHUNKS_PER_DOC:
+                        log.warning(
+                            "Capping %s:%s from %d to %d chunks",
+                            table, source_id, len(pieces), MAX_CHUNKS_PER_DOC,
                         )
-                        conn.commit()
-                    except Exception as e:
-                        conn.rollback()
-                        log.error("Insert failed for %s batch %d: %s", table, i, e)
-                        summary["errors"].append(f"{table} insert: {e}")
-                        continue
+                        pieces = pieces[:MAX_CHUNKS_PER_DOC]
+                    pieces_skipped = 0
+                    for chunk_idx, piece in enumerate(pieces):
+                        key = (
+                            f"{table}:{source_id}:{chunk_idx}:{piece[:50]}"
+                            if spec.chunk
+                            else f"{table}:{source_id}:{piece[:50]}"
+                        )
+                        vec_id = hashlib.sha256(key.encode()).hexdigest()[:32]
+                        if vec_id in existing_ids:
+                            pieces_skipped += 1
+                            continue
+                        texts.append(piece)
+                        ids.append(source_id)
+                        vec_ids.append(vec_id)
+                        if len(texts) >= flush_at:
+                            flush()
+                    if pieces_skipped == len(pieces):
+                        skipped_count += 1
 
-                built_count += len(records)
+                flush()
 
             summary["built"] += built_count
             summary["skipped"] += skipped_count
