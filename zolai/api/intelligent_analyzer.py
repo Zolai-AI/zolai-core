@@ -10,7 +10,8 @@ Works WITH or WITHOUT Gemini:
 import logging
 import sqlite3
 from dataclasses import asdict, dataclass
-from pathlib import Path
+
+from ..config import config
 
 logger = logging.getLogger(__name__)
 
@@ -453,7 +454,7 @@ class IntelligentAnalyzer:
 def analyze_word_full(word: str, language: str = "zo", db_path: str = None) -> dict:
     """Analyze a word and return as dictionary."""
     if db_path is None:
-        db_path = str(Path(__file__).resolve().parents[3] / "data" / "zolai.db")
+        db_path = str(config.paths.db)
 
     analyzer = IntelligentAnalyzer(db_path)
     result = analyzer.analyze_word(word, language)

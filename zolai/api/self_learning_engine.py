@@ -15,8 +15,8 @@ import logging
 import sqlite3
 from collections import Counter
 from dataclasses import dataclass
-from pathlib import Path
 
+from ..config import config
 from .errors import internal_error_envelope
 
 logger = logging.getLogger(__name__)
@@ -316,7 +316,7 @@ class SelfLearningEngine:
 def main():
     """Run self-learning cycle."""
     import sys
-    db_path = str(Path(__file__).resolve().parents[3] / "data" / "zolai.db")
+    db_path = str(config.paths.db)
 
     if len(sys.argv) > 1:
         db_path = sys.argv[1]

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sqlite3
 from typing import Any
+
+from ..config import config
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +36,7 @@ class ZolaiQA:
             return
         self._bible_cache = []
 
-        db_path = self._db_path or os.environ.get(
-            "ZOLAI_DB_PATH", str(
-                __import__("pathlib").Path(__file__).resolve().parent.parent.parent.parent
-                / "data" / "zolai.db"
-            )
-        )
+        db_path = self._db_path or str(config.paths.db)
         try:
             conn = sqlite3.connect(db_path)
             conn.row_factory = sqlite3.Row

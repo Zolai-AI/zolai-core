@@ -24,8 +24,9 @@ import json
 import logging
 import sqlite3
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Optional
+
+from ..config import config
 
 logger = logging.getLogger(__name__)
 
@@ -703,7 +704,7 @@ class ComprehensiveAnalyzer:
 def analyze_comprehensive(word: str, language: str = "zo", db_path: str = None) -> dict:
     """Full linguistic analysis returned as dictionary."""
     if db_path is None:
-        db_path = str(Path(__file__).resolve().parents[3] / "data" / "zolai.db")
+        db_path = str(config.paths.db)
 
     analyzer = ComprehensiveAnalyzer(db_path)
     result = analyzer.analyze(word, language)

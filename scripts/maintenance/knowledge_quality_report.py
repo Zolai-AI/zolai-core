@@ -152,19 +152,19 @@ def load_pins(path: Path) -> dict:
 
 
 def resolve_db(cli_db: str | None) -> Path:
-    """Default resolver mirrors ``config.paths.zolai_db`` (env honored first)."""
+    """Single resolver: ``config.paths.db``, which already honours
+    ``ZOLAI_DB_PATH`` and ``ZOLAI_DATA_ROOT``.
+
+    This used to read those variables by hand before trying the package, so the
+    report could answer a different question than the toolkit about which
+    database it had just scored.
+    """
     if cli_db:
-        return Path(cli_db)
-    env_db = os.environ.get("ZOLAI_DB_PATH", "").strip()
-    if env_db:
-        return Path(env_db)
-    data_root = os.environ.get("ZOLAI_DATA_ROOT", "").strip()
-    if data_root:
-        return Path(data_root) / "zolai.db"
+        return Path(cli_db).expanduser()
     try:  # pragma: no cover — heavy package init is optional here
         from zolai.config import config  # type: ignore[import-not-found]
 
-        return Path(config.paths.zolai_db)
+        return Path(config.paths.db)
     except Exception:
         return REPO_ROOT.parent / "data" / "zolai.db"
 

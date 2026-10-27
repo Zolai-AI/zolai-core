@@ -13,8 +13,8 @@ Features:
 import logging
 import sqlite3
 from datetime import datetime
-from pathlib import Path
 
+from ..config import config
 from .errors import internal_error_envelope
 
 logger = logging.getLogger(__name__)
@@ -209,7 +209,7 @@ class DynamicDataPipeline:
 def main():
     """Run dynamic data pipeline."""
     import sys
-    db_path = str(Path(__file__).resolve().parents[3] / "data" / "zolai.db")
+    db_path = str(config.paths.db)
 
     if len(sys.argv) > 1:
         db_path = sys.argv[1]

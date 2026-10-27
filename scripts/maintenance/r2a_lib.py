@@ -34,9 +34,23 @@ from typing import Any, Iterator
 
 REPO_ROOT = Path(__file__).resolve().parents[2]  # zolai-core
 ZOLAI_ROOT = REPO_ROOT.parent  # zolai-ai
-DEFAULT_DB = (
-    Path(os.environ["ZOLAI_DB_PATH"]) if os.environ.get("ZOLAI_DB_PATH") else ZOLAI_ROOT / "data" / "zolai.db"
-)
+def _default_db() -> Path:
+    """The canonical database, from the one resolver that owns the answer.
+
+    ``config.paths.db`` already applies ``ZOLAI_DB_PATH`` / ``ZOLAI_DATA_ROOT``;
+    reading those here gave this script a second opinion that could disagree with
+    the toolkit about which file it was consolidating. The literal path is the
+    fallback for a run without the package installed.
+    """
+    try:
+        from zolai.config import config
+
+        return Path(config.paths.db)
+    except Exception:
+        return ZOLAI_ROOT / "data" / "zolai.db"
+
+
+DEFAULT_DB = _default_db()
 BACKUP_DIR = ZOLAI_ROOT / "data" / "backups"
 ARCHIVE_DB = BACKUP_DIR / "zolai-import-archive-2026-10-27.db"
 ARCHIVE_MANIFEST = BACKUP_DIR / "zolai-import-archive-2026-10-27.manifest.json"
