@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .tools.registry import json_schemas, native_tool_defs
-from .tools.types import ToolCall, ToolResult
+from .tools.types import ToolCall, ToolErrorCode, ToolResult
 
 #: Tool call marker emitted by the prompt-embedded protocol.
 TOOL_MARKER = "<<<TOOL>>>"
@@ -46,8 +46,10 @@ TOOL_RESULT_MARKER = "<<<TOOL_RESULT>>>"
 HOLD_CHARS = 16
 
 #: Loop budgets (env-overtable, plan §C determinism block).
+#: ``AGENT_MAX_STEPS`` was dropped here: the loop enforces ≤1 tool call per
+#: turn, so turns *are* the step count, and advertising a second, larger bound
+#: on the status route was a number nothing read.
 AGENT_MAX_TURNS = max(1, int(os.environ.get("AGENT_MAX_TURNS", "3")))
-AGENT_MAX_STEPS = max(1, int(os.environ.get("AGENT_MAX_STEPS", "16")))
 AGENT_TIMEOUT_S = max(1, int(os.environ.get("AGENT_TIMEOUT_S", "60")))
 
 MAX_TURNS_EXCEEDED = "Max turns reached"
@@ -216,12 +218,15 @@ def native_tool_call_id(call: ToolCall) -> str:
     return call.call_id or f"call_{call.turn}"
 
 
-def build_native_assistant_message(call: ToolCall, reply: str = "") -> dict[str, Any]:
-    """The assistant turn that requested ``call`` on the native wire.
+def build_native_assistant_message(calls: list[ToolCall], reply: str = "") -> dict[str, Any]:
+    """The assistant turn that requested ``calls`` on the native wire.
 
-    Exactly **one** tool call is echoed — the one this turn executes.  Echoing
-    ids that never receive a ``role:"tool"`` reply is what makes strict OpenAI
-    validation (``tool_call_ids did not have response messages``) fail.
+    Every id echoed here must also be answered by a ``role:"tool"`` turn — strict
+    OpenAI validation rejects a tool_call with no response (``tool_call_ids did
+    not have response messages``). So the echo carries exactly the calls this loop
+    answers: the one it executed plus any the model asked for in parallel and the
+    per-turn budget declined, each of which gets an explicit refusal rather than
+    silence.
 
     ``arguments`` is the provider's own raw string when it sent one, so the
     provider is handed back byte-identical arguments rather than a re-serialised
@@ -240,6 +245,7 @@ def build_native_assistant_message(call: ToolCall, reply: str = "") -> dict[str,
                     or json.dumps(call.input or {}, ensure_ascii=False),
                 },
             }
+            for call in calls
         ],
     }
 
@@ -445,8 +451,25 @@ def run_agent_loop(
                 "ok": True,
             }
 
-        # ≤1 tool per turn — extra markers in the same turn are ignored.
+        # ≤1 tool per turn. The rest of a parallel batch is not dropped: a model
+        # that asked for three lookups and got one, with no word about the other
+        # two, asks for the same three next turn and spends the whole budget
+        # re-asking. Each extra is refused by name, in the trace and on the wire.
         call = calls[0]
+        declined = [
+            ToolResult(
+                tool_name=extra.name,
+                ok=False,
+                error=(
+                    "not executed: this run answers one tool call per turn. "
+                    "Ask again for it, or answer from the results above."
+                ),
+                error_code=ToolErrorCode.BUDGET_EXCEEDED,
+                turn=turns_used,
+                call_id=extra.call_id,
+            )
+            for extra in calls[1:]
+        ]
         if on_tool_event:
             on_tool_event({"name": call.name, "status": "started", "latency_ms": 0.0, "turn": turns_used})
         result = execute_tool(call, allow, turn=turns_used)
@@ -455,6 +478,11 @@ def run_agent_loop(
         entry["input"] = call.input or {}
         entry["status"] = "completed" if result.ok else "failed"
         trace.append(entry)
+        for extra, refusal in zip(calls[1:], declined, strict=True):
+            skipped = refusal.to_dict()
+            skipped["input"] = extra.input or {}
+            skipped["status"] = "declined"
+            trace.append(skipped)
         if on_tool_event:
             on_tool_event(
                 {
@@ -466,13 +494,18 @@ def run_agent_loop(
             )
         if native_track:
             # Native replay: the model needs the turn it asked in and the turn
-            # that answers it, in the OpenAI wire shape.
-            messages.append(build_native_assistant_message(call, reply))
+            # that answers it, in the OpenAI wire shape — including an answer for
+            # every call id it made, so the declined ones are echoed and refused.
+            messages.append(build_native_assistant_message(calls, reply))
             messages.append(build_native_tool_message(result, call))
+            messages.extend(
+                build_native_tool_message(refusal, extra)
+                for extra, refusal in zip(calls[1:], declined, strict=True)
+            )
         else:
             messages = [
                 {"role": "system", "content": system},
-                {"role": "user", "content": build_followup_prompt(user_message, [result])},
+                {"role": "user", "content": build_followup_prompt(user_message, [result, *declined])},
             ]
 
     # Turns exhausted but evidence WAS gathered. Hand it back for one final

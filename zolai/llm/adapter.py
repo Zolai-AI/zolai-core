@@ -158,6 +158,22 @@ class ProviderError(Exception):
         self.message = message
 
 
+class _UnhealthyProvider(Exception):
+    """HTTP status meaning the provider is down or throttling us (429 / 5xx).
+
+    Raised *inside* the breaker-wrapped callable on purpose: ``CircuitBreaker.call``
+    scores whatever the callable returns, so a status checked afterwards was
+    invisible to it — a provider answering 503 to every request recorded only
+    successes and the circuit never opened, leaving each caller to pay the full
+    timeout. A 4xx that is not 429 stays a plain response: our payload or key is
+    wrong, and tripping the breaker would only hide that behind "circuit open".
+    """
+
+    def __init__(self, response: httpx.Response) -> None:
+        super().__init__(f"HTTP {response.status_code}")
+        self.response = response
+
+
 def supports_native_tools(adapter: str) -> bool:
     """Whether ``adapter`` may receive a native OpenAI ``tools`` array.
 
@@ -364,7 +380,10 @@ def chat(
     turns = len(messages)
 
     def _do_request() -> httpx.Response:
-        return _post(url, body=body, headers=headers, timeout=timeout)
+        response = _post(url, body=body, headers=headers, timeout=timeout)
+        if response.status_code == 429 or response.status_code >= 500:
+            raise _UnhealthyProvider(response)
+        return response
 
     started = time.monotonic()
     try:
@@ -374,6 +393,14 @@ def chat(
         raise ProviderError(
             PROVIDER_REQUEST_FAILED,
             f"{catalog_id!r} circuit breaker open: {exc}",
+        ) from exc
+    except _UnhealthyProvider as exc:
+        response = exc.response
+        _log_call(catalog_id, model, turns, _ms_since(started), str(response.status_code))
+        raise ProviderError(
+            PROVIDER_REQUEST_FAILED,
+            f"{catalog_id!r} returned HTTP {response.status_code}: "
+            f"{response.text[:300]}",
         ) from exc
     except httpx.HTTPError as exc:
         _log_call(catalog_id, model, turns, _ms_since(started), "transport_error")

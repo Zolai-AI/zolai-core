@@ -199,13 +199,15 @@ def agent_health() -> dict[str, Any]:
         ready = True
     except Exception:
         ready = False
-    from ..agent.loop import AGENT_MAX_STEPS, AGENT_MAX_TURNS, AGENT_TIMEOUT_S
+    from ..agent.loop import AGENT_MAX_TURNS, AGENT_TIMEOUT_S
 
     return {
         "status": "ok" if ready else "degraded",
         "mode": engine_mode(),
+        # Only what the loop enforces. ``max_steps`` used to be reported here as
+        # 16 while the run stopped at ``max_turns`` (3) — the loop takes ≤1 tool
+        # per turn, so turns are the step count and the second number was fiction.
         "max_turns": AGENT_MAX_TURNS,
-        "max_steps": AGENT_MAX_STEPS,
         "timeout_s": AGENT_TIMEOUT_S,
         "store_ready": ready,
     }

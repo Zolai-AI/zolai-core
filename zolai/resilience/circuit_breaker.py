@@ -335,9 +335,9 @@ def circuit_breaker(
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             return await cb.acall(func, *args, **kwargs)
 
-        import asyncio
+        import inspect
 
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
             return async_wrapper
         return sync_wrapper
 

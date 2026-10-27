@@ -162,6 +162,10 @@ class ToolErrorCode(str, Enum):
     UNAVAILABLE = "unavailable"
     #: The request exceeded its time budget.
     TIMEOUT = "timeout"
+    #: The call was well-formed and allowed, but the run's per-turn budget had no
+    #: room for it. Distinct from ``FORBIDDEN`` (the caller may never use the
+    #: tool) so a client knows a retry can work rather than dropping the feature.
+    BUDGET_EXCEEDED = "budget_exceeded"
     #: Anything else. The detail stays in the server log, never on the wire.
     INTERNAL = "internal"
 

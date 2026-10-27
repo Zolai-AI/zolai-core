@@ -26,7 +26,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from ..agent.loop import AGENT_MAX_TURNS, run_agent_loop
+from ..agent.loop import AGENT_MAX_TURNS, AGENT_TIMEOUT_S, run_agent_loop
 from ..agent.synthesis import citations_from_results, make_chat_fn
 from ..agent.tools.executor import execute_tool
 from ..agent.tools.registry import allow_list
@@ -373,6 +373,11 @@ def run_assistant(
         allow=allow,
         chat=chat,
         max_turns=AGENT_MAX_TURNS,
+        # The same wall-clock budget the agent route advertises. Without it the
+        # loop is unbounded in time: `max_turns` caps the work, not the duration,
+        # and a run measured 219s behind a route documented as ≤60s — a caller
+        # behind the Cloudflare proxy gets a 524 instead of an answer.
+        timeout_s=AGENT_TIMEOUT_S,
         native=bool(meta.get("native")),
     )
     answer = str(loop_result.get("reply") or "").strip()

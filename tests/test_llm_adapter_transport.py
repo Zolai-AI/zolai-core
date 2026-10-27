@@ -182,9 +182,6 @@ class TestCallObservability:
     def test_transport_failure_logs_a_token_and_keeps_the_error_code(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
-        from zolai.resilience import get_circuit_breaker
-
-        get_circuit_breaker("llm_test-provider").reset()
         rec = _Recorder(error=httpx.ConnectError("connection refused"))
         monkeypatch.setattr(adapter_mod, "_post", rec)
         with caplog.at_level(logging.INFO, logger="zolai.llm.adapter"):
@@ -194,7 +191,6 @@ class TestCallObservability:
         lines = [r.getMessage() for r in caplog.records if r.name == "zolai.llm.adapter" and r.levelno == logging.INFO]
         assert len(lines) == 1
         assert "status=transport_error" in lines[0]
-        get_circuit_breaker("llm_test-provider").reset()
 
     def test_non_json_body_logs_invalid_body(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
@@ -212,3 +208,74 @@ class TestCallObservability:
         lines = [r.getMessage() for r in caplog.records if r.name == "zolai.llm.adapter" and r.levelno == logging.INFO]
         assert len(lines) == 1
         assert "status=invalid_body" in lines[0]
+
+
+# ── 4. Provider health reaches the circuit breaker ───────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def breaker():
+    """A freshly reset breaker for ``_ROW``'s catalog id, for every test here.
+
+    One name is shared by the whole module (``llm_<catalog_id>``) and by the
+    error-mapping tests above, so a failure recorded by one test would otherwise
+    trip the next and make the suite order-dependent.
+    """
+    from zolai.resilience import get_circuit_breaker
+
+    instance = get_circuit_breaker(f"llm_{_ROW['catalog_id']}")
+    instance.reset()
+    yield instance
+    instance.reset()
+
+
+class TestBreakerSeesProviderHealth:
+    """429/5xx are provider ill-health and must count against the circuit.
+
+    ``CircuitBreaker.call`` scores whatever the callable returns, so a status
+    checked after the call was invisible to it: a provider answering 503 to
+    every request recorded only successes, never opened, and every caller paid
+    the full timeout.
+    """
+
+    @pytest.mark.parametrize("status", [429, 500, 503])
+    def test_unhealthy_status_is_a_breaker_failure(self, breaker, monkeypatch, status: int) -> None:
+        monkeypatch.setattr(
+            adapter_mod, "_post", _Recorder(response=_Response(status=status, payload={"error": "down"}))
+        )
+        with pytest.raises(adapter_mod.ProviderError) as exc:
+            adapter_mod.chat(_ROW, "test-model", [{"role": "user", "content": "hi"}])
+        assert str(status) in exc.value.message
+        assert breaker.get_stats()["failures"] == 1
+
+    def test_repeated_5xx_opens_the_circuit_and_stops_calling_the_provider(
+        self, breaker, monkeypatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        rec = _Recorder(response=_Response(status=503, payload={"error": "down"}))
+        monkeypatch.setattr(adapter_mod, "_post", rec)
+        threshold = breaker.get_stats()["config"]["failure_threshold"]
+        for _ in range(threshold):
+            with pytest.raises(adapter_mod.ProviderError):
+                adapter_mod.chat(_ROW, "test-model", [{"role": "user", "content": "hi"}])
+        assert len(rec.calls) == threshold
+
+        with caplog.at_level(logging.INFO, logger="zolai.llm.adapter"):
+            with pytest.raises(adapter_mod.ProviderError) as exc:
+                adapter_mod.chat(_ROW, "test-model", [{"role": "user", "content": "hi"}])
+        assert "circuit breaker open" in exc.value.message
+        assert len(rec.calls) == threshold  # the circuit opened before the transport
+        lines = [r.getMessage() for r in caplog.records if r.name == "zolai.llm.adapter" and r.levelno == logging.INFO]
+        assert "status=circuit_open" in lines[-1]
+
+    def test_client_error_does_not_trip_the_breaker(self, breaker, monkeypatch) -> None:
+        """A 400 is our payload's fault — reporting it must not look like an outage."""
+        rec = _Recorder(response=_Response(status=400, payload={"error": "bad_request"}))
+        monkeypatch.setattr(adapter_mod, "_post", rec)
+        for _ in range(3):
+            with pytest.raises(adapter_mod.ProviderError) as exc:
+                adapter_mod.chat(_ROW, "test-model", [{"role": "user", "content": "hi"}])
+        assert "400" in exc.value.message
+        assert len(rec.calls) == 3
+        stats = breaker.get_stats()
+        assert stats["failures"] == 0
+        assert stats["state"] == "closed"
