@@ -500,11 +500,13 @@ class UnifiedRetriever:
 
         # 7. Vector fallback — when lexical evidence is weak (no exact/prefix/
         #    FTS hit) or the query is sentence-like, where per-token matches
-        #    fill the list without answering the question. Single-word lookups
-        #    that lexically hit never pay for loading the embedding matrix.
+        #    fill the list without answering the question. The row-count guard
+        #    applies only to single words: a sentence query is exactly the case
+        #    the semantic pass exists for, so it runs even when lexical already
+        #    filled the list (the merge below re-sorts and trims).
         best_lexical = max((r.score for r in results), default=0.0)
         sentence_like = len(tokens) >= 2
-        if len(results) < limit and (best_lexical < 0.9 or sentence_like):
+        if sentence_like or (len(results) < limit and best_lexical < 0.9):
             try:
                 vector_results = self._vector_search(query, limit, source_filter)
                 for vr in vector_results:
@@ -582,43 +584,63 @@ class UnifiedRetriever:
             if _VECTOR_CACHE is not None and _VECTOR_CACHE_KEY == key:
                 return _VECTOR_CACHE
 
-            rows = conn.execute(
+            # Stream the rows and fill one preallocated matrix. ``fetchall()``
+            # held every JSON/base64 string (~0.5 GB at the built corpus) next
+            # to the matrix it was about to become; iterating frees each row as
+            # it is decoded, and preallocating avoids a second full-size array.
+            result = conn.execute(
                 text(
                     "SELECT id, text, metadata, embedding, source "
                     "FROM knowledge_vectors WHERE embedding IS NOT NULL"
                 )
-            ).fetchall()
+            )
+            expected = int(key_row[0] or 0)
+            matrix = None
+            count = 0
+            unreadable = 0
 
-        ids: list[str] = []
-        texts: list[str] = []
-        sources: list[str] = []
-        metas: list[dict[str, Any]] = []
-        vectors: list[Any] = []
-        for vid, txt, meta_json, emb_json, src in rows:
-            emb = decode_embedding(emb_json)
-            if emb is None or not emb.size:
-                continue
-            ids.append(vid)
-            texts.append(txt or "")
-            sources.append(src or "")
-            try:
-                metas.append(json.loads(meta_json or "{}"))
-            except (TypeError, ValueError):
-                metas.append({})
-            vectors.append(emb)
+            ids: list[str] = []
+            texts: list[str] = []
+            sources: list[str] = []
+            metas: list[dict[str, Any]] = []
 
-        if not vectors:
+            for vid, txt, meta_json, emb_json, src in result:
+                emb = decode_embedding(emb_json)
+                if emb is None or not emb.size:
+                    unreadable += 1
+                    continue
+                if matrix is None:
+                    matrix = np.empty((expected, emb.shape[0]), dtype=np.float32)
+                elif emb.shape[0] != matrix.shape[1]:
+                    unreadable += 1
+                    continue
+                if count == matrix.shape[0]:
+                    matrix = np.vstack(
+                        [matrix, np.empty((1024, matrix.shape[1]), dtype=np.float32)]
+                    )
+                matrix[count] = emb
+                count += 1
+                ids.append(vid)
+                texts.append(txt or "")
+                sources.append(src or "")
+                try:
+                    metas.append(json.loads(meta_json or "{}"))
+                except (TypeError, ValueError):
+                    metas.append({})
+
+        if not count or matrix is None:
             return None
-        matrix = np.vstack(vectors).astype(np.float32, copy=False)
+        if unreadable:
+            log.warning("vector index: skipped %d unreadable embeddings", unreadable)
         _VECTOR_CACHE = {
             "ids": ids,
             "texts": texts,
             "sources": sources,
             "metas": metas,
-            "matrix": matrix,
+            "matrix": matrix[:count],
         }
         _VECTOR_CACHE_KEY = key
-        log.info("vector index loaded: %d rows", len(ids))
+        log.info("vector index loaded: %d rows", count)
         return _VECTOR_CACHE
 
     def _vector_search(self, query: str, limit: int, source_filter: list[str] | None = None) -> list[SearchResult]:

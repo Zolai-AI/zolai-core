@@ -136,12 +136,25 @@ def load_index(path: Path = DEFAULT_INDEX) -> Index:
 
     # Decode alongside the text/metadata so a row with an unreadable embedding
     # is dropped from all four lists together. Two separate passes would leave
-    # ids/texts longer than the matrix and shift every later hit.
-    parsed = []
+    # ids/texts longer than the matrix and shift every later hit. The matrix is
+    # preallocated and each ``embedding`` popped so the encoded strings do not
+    # stay resident next to the float arrays.
+    matrix = None
+    count = 0
     for r in records:
-        emb = decode_embedding(r.get("embedding"))
+        emb = decode_embedding(r.pop("embedding", None))
         if emb is None or not emb.size:
             continue
+        if matrix is None:
+            matrix = np.empty((len(records), emb.shape[0]), dtype=np.float32)
+        elif emb.shape[0] != matrix.shape[1]:
+            continue
+        if count == matrix.shape[0]:
+            matrix = np.vstack(
+                [matrix, np.empty((1024, matrix.shape[1]), dtype=np.float32)]
+            )
+        matrix[count] = emb
+        count += 1
         try:
             meta = json.loads(r.get("metadata") or "{}")
         except json.JSONDecodeError:
@@ -149,9 +162,8 @@ def load_index(path: Path = DEFAULT_INDEX) -> Index:
         idx.ids.append(r.get("id", "") or "")
         idx.texts.append(r.get("text", "") or "")
         idx.metas.append(meta)
-        parsed.append(emb)
-    if parsed and len({v.shape[0] for v in parsed}) == 1:
-        idx.vectors = np.vstack(parsed).astype(np.float32, copy=False)
+    if matrix is not None and count:
+        idx.vectors = matrix[:count]
     if key[1]:
         _INDEX_CACHE = (key, idx)
     return idx
