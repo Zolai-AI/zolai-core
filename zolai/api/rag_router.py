@@ -8,10 +8,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from zolai.api.auth import require_scope
+from zolai.api.errors import api_error
 from zolai.data.repositories import get_engine
 from zolai.rag.retrieve import UnifiedRetriever
 
@@ -170,8 +171,27 @@ async def get_word_detail(
     retriever: UnifiedRetriever = Depends(get_retriever),
 ) -> WordDetailResponse:
     """Full word detail per §20: forms, frequency, POS, morphology,
-        examples, collocations, grammar usage, sources, confidence."""
+        examples, collocations, grammar usage, sources, confidence.
+
+    Unknown lemmas are a real **404** (core#4), not a 200 whose every count is
+    zero: ``query_word`` answers an empty evidence pack for a word no table
+    knows, and a client branching on ``res.ok`` cannot tell "empty entry" from
+    "no such word". The body is the house envelope
+    (``{"error": ..., "message": ...}``, under FastAPI's ``detail``), matching
+    the real-404 precedent of ``ce04c72``. ``/api/v1/lexicon/{word}`` keeps its
+    own documented ``found`` flag — that contract is asserted by its own tests
+    and is deliberately not changed here.
+    """
     pack = retriever.query_word(word)
+    if not getattr(pack, "evidence_items", None):
+        raise HTTPException(
+            status_code=404,
+            detail=api_error(
+                "word_not_found",
+                f"'{word}' is not in the lexicon or any corpus. "
+                "Check the spelling, or search instead of looking the word up.",
+            ),
+        )
     return WordDetailResponse(**pack.__dict__)
 
 

@@ -128,10 +128,21 @@ class TestWordDetailSource:
         assert pack["pos"], "word detail must carry POS (the evidence pack aggregates it)"
         assert pack["morphology"], "the KG node supplies morphology for this word"
 
-    def test_get_word_unknown_word_is_empty_not_an_error(self, client: TestClient) -> None:
+    def test_get_word_unknown_word_is_404_with_the_house_envelope(
+        self, client: TestClient
+    ) -> None:
+        """core#4: a word no table knows is missing, not an all-zero 200."""
         body = client.get("/api/v1/word/zzzznotaword")
+        assert body.status_code == 404, body.text
+        detail = body.json()["detail"]
+        assert detail["error"] == "word_not_found"
+        assert "zzzznotaword" in detail["message"]
+
+    def test_get_word_known_word_still_answers_200(self, client: TestClient) -> None:
+        """The 404 branch must not swallow a word that does have evidence."""
+        body = client.get("/api/v1/word/pasian")
         assert body.status_code == 200, body.text
-        assert body.json()["pos"] == []
+        assert body.json()["frequency"] > 0
 
 
 class TestAnalyzeWordSharesTheSource:
