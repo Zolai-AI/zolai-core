@@ -184,7 +184,7 @@ CANONICAL_POST = {
     "translations_news": 150_965,
     "bible_verses": 31_102,
     "dictionary": 84_490,
-    "vocab": 104_906,
+    "vocabulary": 104_906,
 }
 
 NON_DATA_COLS = frozenset({"id", "version", "created_at", "updated_at", "content_hash"})
