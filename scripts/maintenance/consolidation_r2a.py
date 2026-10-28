@@ -104,6 +104,11 @@ class Paths:
     final_counts: Path = FINAL_COUNTS
     backup_dir: Path = BACKUP_DIR
     use_gates: bool = True  # fuser + backup gates (disable only for fixtures)
+    expected: dict = None  # plan §0 expectations (tests override with fixture scale)
+
+    def __post_init__(self) -> None:
+        if self.expected is None:
+            self.expected = PLAN_EXPECTED
 
     def ensure_dirs(self) -> None:
         self.archive_db.parent.mkdir(parents=True, exist_ok=True)
@@ -116,15 +121,15 @@ class Paths:
 
 def item_d13(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
     rep = ItemReport("d13", mode)
-    exp = PLAN_EXPECTED["d13"]
+    exp = p.expected["d13"]
+    if not table_exists(con, "translations_import"):
+        rep.skipped.append("translations_import already dropped (idempotent re-run)")
+        return rep
     total = count(con, "translations_import")
     dot = scalar(con, "SELECT COUNT(*) FROM translations_import WHERE reference LIKE '%.%'")
     nah = scalar(con, "SELECT COUNT(*) FROM translations_import WHERE reference LIKE 'NAH.%'")
     empty = scalar(con, "SELECT COUNT(*) FROM translations_import WHERE reference=''")
     rep.before = {"rows": total, "dot_refs": dot, "nah_refs": nah, "empty_refs": empty}
-    if not table_exists(con, "translations_import"):
-        rep.skipped.append("translations_import already dropped (idempotent re-run)")
-        return rep
     if dot == 0 and nah == 0:
         rep.skipped.append("refs already normalized (idempotent re-run)")
         rep.after = {"dot_refs": 0, "unresolved": 0}
@@ -195,42 +200,47 @@ def item_archive(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
             assert_eq(f"archive {t} source==archive", entry["source_count"], entry["archive_count"])
         rep.after = {"manifest_tables": len(man)}
         return rep
-    # apply: build/refresh archive DB via ATTACH (idempotent: verified tables skipped)
+    # apply: build/refresh archive DB by ATTACHing it on the SAME connection (no 2nd writer)
     man = _archive_tables(con, p)
     p.ensure_dirs()
-    arc = sqlite3.connect(str(p.archive_db))
+    fresh: list[str] = []
+    arc_ro = sqlite3.connect(str(p.archive_db))
     try:
-        arc.execute("PRAGMA journal_mode=DELETE")
-        fresh: list[str] = []
         for t in targets:
             n = counts[t]
             entry = man.get(t)
-            if entry and entry.get("source_count") == n and table_exists(arc, t) and count(arc, t) == n:
+            if entry and entry.get("source_count") == n and table_exists(arc_ro, t) and count(arc_ro, t) == n:
                 rep.skipped.append(f"{t} (archive already verified: {n} rows)")
             else:
                 fresh.append(t)
-        if fresh:
-            arc.execute("ATTACH DATABASE ? AS src", (str(p.db),))
-            try:
-                for t in fresh:
-                    arc.execute(f"DROP TABLE IF EXISTS main.{t}")
-                    arc.execute(f"CREATE TABLE main.{t} AS SELECT * FROM src.{t}")
-                    assert_eq(f"archive {t} count", count(arc, t), counts[t])
-                    man[t] = {"source_count": counts[t], "archive_count": count(arc, t), "archived_at": now_iso()}
-            finally:
-                arc.execute("DETACH DATABASE src")
-        digest = hashlib.sha256()
-        with p.archive_db.open("rb") as fh:
-            for chunk in iter(lambda: fh.read(1 << 20), b""):
-                digest.update(chunk)
-        man["_manifest"] = {
-            "archive_db": str(p.archive_db),
-            "sha256": digest.hexdigest(),
-            "generated_at": now_iso(),
-        }
-        p.manifest.write_text(json.dumps(man, indent=2, sort_keys=True))
-        for t in targets:
-            assert_eq(f"archive {t} count", count(arc, t), counts[t])
+    finally:
+        arc_ro.close()
+    if fresh:
+        # copy in autocommit (no outer txn): DETACH is illegal while the attached db
+        # has pending writes inside an open transaction
+        con.execute("ATTACH DATABASE ? AS arcdb", (str(p.archive_db),))
+        try:
+            con.execute("PRAGMA arcdb.journal_mode=DELETE")
+            for t in fresh:
+                con.execute(f"DROP TABLE IF EXISTS arcdb.{t}")
+                con.execute(f"CREATE TABLE arcdb.{t} AS SELECT * FROM main.{t}")
+                got = scalar(con, f"SELECT COUNT(*) FROM arcdb.{t}")
+                assert_eq(f"archive {t} count", got, counts[t])
+                man[t] = {"source_count": counts[t], "archive_count": got, "archived_at": now_iso()}
+        finally:
+            con.execute("DETACH DATABASE arcdb")
+    digest = hashlib.sha256()
+    with p.archive_db.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    man["_manifest"] = {
+        "archive_db": str(p.archive_db),
+        "sha256": digest.hexdigest(),
+        "generated_at": now_iso(),
+    }
+    p.manifest.write_text(json.dumps(man, indent=2, sort_keys=True))
+    # self-managed txn: the copy above runs in autocommit (DETACH requires it)
+    with write_batch(con):
         log_batch(
             con,
             item="archive",
@@ -238,8 +248,6 @@ def item_archive(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
             rows=sum(counts.values()),
             note=f"archive-validated dump of {len(targets)} import tables",
         )
-    finally:
-        arc.close()
     rep.applied = {"archived_tables": len(targets), "fresh": len(fresh)}
     rep.after = {"manifest_tables": len([t for t in IMPORT_TABLES if t in man])}
     return rep
@@ -250,7 +258,7 @@ def item_archive(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
 
 def item_split(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
     rep = ItemReport("split", mode)
-    exp = PLAN_EXPECTED["split"]
+    exp = p.expected["split"]
     canon = count(con, "translations")
     enmy = scalar(con, "SELECT COUNT(*) FROM translations WHERE direction='en→my'")
     rep.before = {"translations": canon, "en_to_my": enmy}
@@ -309,7 +317,7 @@ PROTECTED_SQL = "source_file IS NULL AND language='zolai'"
 
 def item_articles(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
     rep = ItemReport("articles", mode)
-    exp = PLAN_EXPECTED["articles"]
+    exp = p.expected["articles"]
     total = count(con, "articles")
     null_hash = scalar(con, "SELECT COUNT(*) FROM articles WHERE content_hash IS NULL")
     prot = scalar(con, f"SELECT COUNT(*) FROM articles WHERE {PROTECTED_SQL}")
@@ -433,7 +441,7 @@ def _collapse_table(con: sqlite3.Connection, table: str, key_cols: list[str], re
 
 def item_collapse(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
     rep = ItemReport("collapse", mode)
-    exp = PLAN_EXPECTED["collapse"]
+    exp = p.expected["collapse"]
     wa = count(con, "word_alignments")
     zba = count(con, "zolai_bible_analysis")
     rep.before = {"word_alignments": wa, "zolai_bible_analysis": zba}
@@ -493,8 +501,15 @@ def item_drop_imports(con: sqlite3.Connection, mode: str, p: Paths) -> ItemRepor
     targets = [t for t in IMPORT_TABLES if t in present]
     man = _archive_tables(con, p)
     rep.before = {"import_tables_present": len(targets)}
-    # BLOCK unless archive manifest proves count equality for every target
-    unverified = [t for t in targets if t not in man or man[t].get("source_count") != man[t].get("archive_count")]
+    # BLOCK unless manifest proves count equality AND live counts still match archive-time counts
+    live_counts = {t: count(con, t) for t in targets}
+    unverified = [
+        t
+        for t in targets
+        if t not in man
+        or man[t].get("source_count") != man[t].get("archive_count")
+        or live_counts[t] != man[t].get("source_count")
+    ]
     if unverified:
         if mode == "apply":
             raise R2AStop(f"drop blocked: no count-verified archive for {unverified[:5]}")
@@ -533,17 +548,18 @@ def item_drop_imports(con: sqlite3.Connection, mode: str, p: Paths) -> ItemRepor
 
 def item_import_log(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
     rep = ItemReport("import_log", mode)
-    exp = PLAN_EXPECTED["import_log"]
+    exp = p.expected["import_log"]
     total = count(con, "import_log")
     completed = scalar(con, "SELECT COUNT(*) FROM import_log WHERE status='completed'")
     failed = scalar(con, "SELECT COUNT(*) FROM import_log WHERE status='failed'")
     rep.before = {"entries": total, "completed": completed, "failed": failed}
     census_done = scalar(con, "SELECT COUNT(*) FROM import_log WHERE status='census'")
-    if completed == 0 and (census_done or 0) > 0:
+    if (census_done or 0) > 0:
         rep.skipped.append("import_log rebuild already applied (idempotent re-run)")
-        rep.after = {"entries": total, "completed": 0}
+        rep.after = {"entries": total, "completed": completed}
         return rep
-    assert_drift("import_log entries", total, exp["total"])
+    # drift keys on completed+failed (plan §0 46/49) — r2a bookkeeping entries are ours
+    assert_drift("import_log completed+failed", completed + failed, exp["completed"] + exp["failed"])
     alias_hits = scalar(
         con,
         f"SELECT COUNT(*) FROM import_log WHERE table_name IN ({','.join('?' * len(ALIAS_MAP))})",
@@ -556,10 +572,9 @@ def item_import_log(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
         "-- (d) census: populated unlogged tables, status='census', uuid batch_id",
         "-- (e) one provenance row for census batch (row_count>0)",
     ]
-    census_scope = _census_scope(con)
-    rep.projections["census_tables"] = len(census_scope)
     if mode == "dry-run":
-        rep.after = {"alias_entries": alias_hits, "completed_target": 0}
+        rep.projections["census_tables"] = len(_census_scope(con))
+        rep.after = {"alias_entries": alias_hits, "completed_target": "recounted (mismatches→0)"}
         return rep
     if mode == "apply":
         # (a) completed entries whose table no longer exists -> archived
@@ -574,7 +589,7 @@ def item_import_log(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
                 archived += 1
             else:
                 live = count(con, tname)
-                claimed = scalar(con, "SELECT rows_imported FROM import_log WHERE id=?", (eid)) or 0
+                claimed = scalar(con, "SELECT rows_imported FROM import_log WHERE id=?", (eid,)) or 0
                 if claimed > 0 and live == 0:
                     con.execute(
                         "UPDATE import_log SET status='lost', error_message=? WHERE id=?",
@@ -593,7 +608,8 @@ def item_import_log(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
                 (canonical, alias, canonical),
             )
             renamed += cur2.rowcount
-        # (d)+(e) census
+        # (d)+(e) census — scope computed AFTER (a)-(c) so newly-archived tables are excluded
+        census_scope = _census_scope(con)
         census_rows = 0
         for tname, live in census_scope:
             con.execute(
@@ -622,7 +638,14 @@ def item_import_log(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
             "renamed": renamed,
             "census": census_rows,
         }
-        assert_eq("M8a completed residual", scalar(con, "SELECT COUNT(*) FROM import_log WHERE status='completed'"), 0)
+        # M8a = reconciliation MISMATCHES among completed entries (missing table or claimed != live)
+        mismatch = 0
+        for tname, claimed in con.execute(
+            "SELECT table_name, SUM(rows_imported) FROM import_log WHERE status='completed' GROUP BY table_name"
+        ):
+            if not table_exists(con, tname) or count(con, tname) != (claimed or 0):
+                mismatch += 1
+        assert_eq("M8a reconciliation mismatches", mismatch, 0)
         assert_eq(
             "M8d failed missing error_message",
             scalar(
@@ -639,9 +662,13 @@ def item_import_log(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
             note="D16 import_log rebuild: archived/lost/recount/aliases/census",
         )
     if mode == "verify":
-        assert_eq(
-            "M8a completed residual verify", scalar(con, "SELECT COUNT(*) FROM import_log WHERE status='completed'"), 0
-        )
+        mismatch = 0
+        for tname, claimed in con.execute(
+            "SELECT table_name, SUM(rows_imported) FROM import_log WHERE status='completed' GROUP BY table_name"
+        ):
+            if not table_exists(con, tname) or count(con, tname) != (claimed or 0):
+                mismatch += 1
+        assert_eq("M8a reconciliation mismatches verify", mismatch, 0)
     rep.after = {
         "entries": count(con, "import_log"),
         "completed": scalar(con, "SELECT COUNT(*) FROM import_log WHERE status='completed'") or 0,
@@ -684,10 +711,11 @@ def item_phase2_drops(con: sqlite3.Connection, mode: str, p: Paths) -> ItemRepor
     if mode == "verify":
         assert_eq("phase2 tables residual", len(targets), 0)
         return rep
+    keep_present = {k for k in DROP_KEEP if table_exists(con, k)}
     for t in targets:
         con.execute(f"DROP TABLE {t}")
         rep.applied[t] = "dropped"
-    for keep in DROP_KEEP:
+    for keep in keep_present:
         assert_eq(f"keep table {keep}", table_exists(con, keep), 1)
     log_batch(
         con,
@@ -810,8 +838,13 @@ def run(db: Path, mode: str, items: list[str], p: Paths) -> int:
         try:
             for name in ordered:
                 try:
-                    with write_batch(con):
+                    if name == "archive":
+                        # self-managed: ATTACH copy must run in autocommit (DETACH
+                        # is illegal inside a txn); log entry gets its own batch
                         rep = ITEMS[name](con, "apply", p)
+                    else:
+                        with write_batch(con):
+                            rep = ITEMS[name](con, "apply", p)
                 except R2AStop as e:
                     print(f"[{name}] STOP: {e}", file=sys.stderr)
                     rep = ItemReport(name, "apply")
