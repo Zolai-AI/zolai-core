@@ -15,14 +15,18 @@ rendered from them (see :mod:`zolai.agent.tools.render`).  Classification:
 - **member** — the public set above, the remaining analysis tools
   (``analyze_text``, ``word_related``), the whole generated ``foundation_*``
   family (one tool per typed ``/api/v1/foundation/*`` contract — see
-  :mod:`zolai.agent.tools.foundation`) and the ``language`` family
+  :mod:`zolai.agent.tools.foundation`), the ``language`` family
   (``lex_search``, ``word_detail``, ``syllable_segment``, ``pos_tag``,
-  ``zvs_validate`` — see :mod:`zolai.agent.tools.language`).  The language
+  ``zvs_validate`` — see :mod:`zolai.agent.tools.language`) and the
+  ``learning`` reads (``study_*``, ``predict_*``, ``suggest_*`` — see
+  :mod:`zolai.agent.tools.learning`).  The language
   tools are **not** anonymous: widening the anonymous set is a founder decision
   (registry-extension §5.7) and was not taken here.
 - **admin extras** — knowledge-base introspection + proposal surfaces:
   ``knowledge_stats``, ``kb_research``, ``review_queue_submit``,
-  ``provider_status`` (names/enabled/model — **never keys**)
+  ``provider_status`` (names/enabled/model — **never keys**), and the
+  ``learning`` write-back channels (``study_record_review``,
+  ``contribute_word``, ``submit_usage_example``)
 - **optional** — ``web_search`` (only when ``ZOLAI_AGENT_WEB_SEARCH=1`` and
   the engine mode allows network; the handler enforces both gates)
 """
@@ -34,6 +38,12 @@ from typing import Any
 
 from .foundation import FOUNDATION_SPECS, FOUNDATION_TOOL_NAMES
 from .language import LANGUAGE_SPECS, LANGUAGE_TOOL_NAMES
+from .learning import (
+    LEARNING_READ_TOOLS,
+    LEARNING_SPECS,
+    LEARNING_TOOL_NAMES,
+)
+from .learning_runs import LEARNING_RUN_SPECS, LEARNING_RUN_TOOL_NAMES
 from .render import render_many
 from .types import ToolSpec, ToolSpecError
 
@@ -286,6 +296,10 @@ SPECS: dict[str, ToolSpec] = {
     # very functions their REST twins call (zolai/agent/tools/language.py).
     # Member tier only; the anonymous set is untouched.
     **LANGUAGE_SPECS,
+    # The learning family: study/quiz/SRS/ngram reads (member+) plus the
+    # SM-2 and corpus contribution write-back channels, which are admin-only
+    # specs (zolai/agent/tools/learning.py) — the member list stays read-only.
+    **LEARNING_SPECS,
 }
 
 
@@ -349,7 +363,8 @@ def allow_list(scope: str, *, granted: Iterable[str] | None = None) -> frozenset
 
     ``public`` → the anonymous retrieval/analysis set (retrieval tools +
     3 Myanmar lookups); ``member`` → every Zolai analysis tool, the generated
-    ``foundation_*`` family and the ``language`` family; ``admin`` → that plus
+    ``foundation_*`` family, the ``language`` family and the ``learning``
+    family reads; ``admin`` → that plus the ``learning`` write-back channels,
     the admin extras and the optional web tool.
 
     ``granted`` is the caller's own scope set.  It can only ever *narrow* the
@@ -363,12 +378,14 @@ def allow_list(scope: str, *, granted: Iterable[str] | None = None) -> frozenset
             frozenset(PUBLIC_TOOLS)
             | frozenset(FOUNDATION_TOOL_NAMES)
             | frozenset(LANGUAGE_TOOL_NAMES)
+            | frozenset(LEARNING_READ_TOOLS)
         )
     elif scope == "admin":
         tier = (
             frozenset(PUBLIC_TOOLS)
             | frozenset(FOUNDATION_TOOL_NAMES)
             | frozenset(LANGUAGE_TOOL_NAMES)
+            | frozenset(LEARNING_TOOL_NAMES)
             | frozenset(ADMIN_TOOLS)
             | frozenset(OPTIONAL_TOOLS)
         )

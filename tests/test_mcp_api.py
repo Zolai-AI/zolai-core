@@ -9,7 +9,7 @@ Two halves:
   and the one refusal message shared by an unknown tool and a not-allowed one.
 * **Transport (HTTP).** `POST /api/v1/mcp` (and its bare `POST /mcp` alias)
   through the real app: anonymous is open in `warn` *and* `enforce`, the tool
-  set is derived from the presented key (anon 8 / member 26 / admin 31), a
+  set is derived from the presented key (anon 8 / member 31 / admin 39), a
   client-supplied `scope` is ignored, and both routes are declared public
   routes on the strict anonymous bucket.
 """
@@ -164,7 +164,7 @@ class TestProtocolHandshake:
 
 class TestToolsList:
     @pytest.mark.parametrize(
-        ("scope", "count"), [("public", 8), ("member", 26), ("admin", 31)]
+        ("scope", "count"), [("public", 8), ("member", 31), ("admin", 39)]
     )
     def test_tool_count_per_scope(self, scope: str, count: int) -> None:
         response, _ = _dispatch(
@@ -399,13 +399,13 @@ class TestMcpHttpSurface:
     def test_member_lists_its_scope(self, client, auth_db, member_key) -> None:
         resp = client.post("/api/v1/mcp", json=_tools_list(), headers=_headers(member_key))
         tools = resp.json()["result"]["tools"]
-        assert len(tools) == 26
+        assert len(tools) == 31
         assert {t["name"] for t in tools} == set(allow_list("member"))
 
     def test_admin_lists_its_scope(self, client, auth_db, admin_key) -> None:
         resp = client.post("/api/v1/mcp", json=_tools_list(), headers=_headers(admin_key))
         tools = resp.json()["result"]["tools"]
-        assert len(tools) == 31
+        assert len(tools) == 39
         assert {t["name"] for t in tools} == set(allow_list("admin"))
 
     def test_anonymous_cannot_reach_an_admin_tool(self, client, auth_db) -> None:
@@ -543,7 +543,7 @@ class TestMcpRootAlias:
         resp = client.post("/mcp", json=_tools_list(), headers=_headers(member_key))
         assert resp.status_code == 200, resp.text
         tools = resp.json()["result"]["tools"]
-        assert len(tools) == 26
+        assert len(tools) == 31
         assert {t["name"] for t in tools} == set(allow_list("member"))
 
     def test_anonymous_handshake_over_the_bare_path(self, client, auth_db) -> None:

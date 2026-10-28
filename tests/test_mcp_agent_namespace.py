@@ -87,7 +87,9 @@ class TestNamespace:
         admin = allow_list("admin")
         assert public <= member <= admin
         # The member namespace is exactly the public set + the family + the two
-        # remaining bare analysis tools + the B1a language family.
+        # remaining bare analysis tools + the B1a language family + the
+        # learning reads (the learning WRITE tools are admin-only, so the
+        # member list stays read-only).
         assert member == (
             public
             | set(fnd.FOUNDATION_TOOL_NAMES)
@@ -98,6 +100,13 @@ class TestNamespace:
                 "syllable_segment",
                 "pos_tag",
                 "zvs_validate",
+            }
+            | {
+                "study_quiz_generate",
+                "study_review_schedule",
+                "study_learner_stats",
+                "predict_word_completion",
+                "suggest_word_corrections",
             }
         )
 

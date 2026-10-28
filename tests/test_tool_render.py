@@ -165,15 +165,20 @@ class TestMcpShape:
 
     def test_writes_flag_only_on_the_proposal_surface(self) -> None:
         writers = {name for name, spec in SPECS.items() if spec.writes}
-        assert writers == {"review_queue_submit"}
+        assert writers == {
+            "review_queue_submit",
+            "study_record_review",
+            "contribute_word",
+            "submit_usage_example",
+        }
 
     def test_scope_tool_counts(self) -> None:
-        # anon 8 / member 26 / admin 31 — the counts the MCP surface publishes.
-        # The public tier is unchanged from before B1a; the member/admin tiers
-        # carry the five B1a language tools.
+        # anon 8 / member 31 / admin 39 — the counts the MCP surface publishes.
+        # The public tier is unchanged; member carries the B1a language tools and
+        # the learning reads; admin adds the learning write-back channels.
         assert len(mcp_tools(allow_list("public"))) == 8
-        assert len(mcp_tools(allow_list("member"))) == 26
-        assert len(mcp_tools(allow_list("admin"))) == 31
+        assert len(mcp_tools(allow_list("member"))) == 31
+        assert len(mcp_tools(allow_list("admin"))) == 39
 
     def test_rendered_strings_are_plain(self) -> None:
         payload = json.dumps(registry_mod.mcp_tools(names_for("admin")), ensure_ascii=False)

@@ -21,6 +21,7 @@ from .errors import classify_failure
 from .family import assert_handlers_cover_specs
 from .foundation import FOUNDATION_HANDLERS
 from .language import LANGUAGE_HANDLERS
+from .learning import LEARNING_HANDLERS
 from .registry import SPECS, get_tool
 from .types import ToolCall, ToolError, ToolErrorCode, ToolResult
 
@@ -348,6 +349,9 @@ HANDLERS = {
     # B1a — the language family (zolai/agent/tools/language.py): each handler
     # is one in-process call into the function its REST twin routes to.
     **LANGUAGE_HANDLERS,
+    # The learning family (zolai/agent/tools/learning.py): study/quiz/SRS reads
+    # and the SM-2 + corpus contribution write-back channels.
+    **LEARNING_HANDLERS,
 }
 
 # Import-time: a published tool with no handler would be advertised and then

@@ -18,7 +18,8 @@ Done-when asserted here:
   no handler, and a handler with no declared tool;
 - the published surface is exactly the declared one: public/member/admin stay
   8 with byte-identical name sets, and the member/admin tiers carry the B1a
-  language family (public 8 / member 26 / admin 31) and nothing else.
+  language family, the learning reads and (admin only) the learning write-back
+  channels (public 8 / member 31 / admin 39) and nothing else.
 
 Pure: no DB, no network, no FastAPI app.
 """
@@ -68,10 +69,12 @@ _WORD = {"type": "object", "properties": {"word": {"type": "string"}}, "required
 # Captured from the registry before B0 (public 8 / member 21 / admin 26) and
 # re-asserted here.  B0 added plumbing + annotations only, so that batch changed
 # no name.  B1a (zolai/agent/tools/language.py) added exactly five member-tier
-# language tools; nothing was removed or reordered, so the public tier is still
-# byte-identical and every pre-B1a name is still present in both grown tiers.
+# language tools; the learning family added five member reads and three
+# admin-only write-back channels.  Nothing was removed or
+# reordered, so the public tier is still byte-identical and every earlier name
+# is still present in both grown tiers.
 
-EXPECTED_COUNTS = {"public": 8, "member": 26, "admin": 31}
+EXPECTED_COUNTS = {"public": 8, "member": 31, "admin": 39}
 
 #: The five B1a language tools — member tier, never anonymous.
 LANGUAGE_TOOL_NAMES: tuple[str, ...] = (
@@ -80,6 +83,22 @@ LANGUAGE_TOOL_NAMES: tuple[str, ...] = (
     "syllable_segment",
     "word_detail",
     "zvs_validate",
+)
+
+#: The learning family reads — member tier, read-only.
+LEARNING_READ_TOOL_NAMES: tuple[str, ...] = (
+    "study_quiz_generate",
+    "study_review_schedule",
+    "study_learner_stats",
+    "predict_word_completion",
+    "suggest_word_corrections",
+)
+
+#: The learning write-back channels — admin tier only.
+LEARNING_WRITE_TOOL_NAMES: tuple[str, ...] = (
+    "study_record_review",
+    "contribute_word",
+    "submit_usage_example",
 )
 
 EXPECTED_TIERS: dict[str, list[str]] = {
@@ -117,6 +136,7 @@ EXPECTED_TIERS: dict[str, list[str]] = {
             "foundation_translate_enhanced",
             "foundation_validate_structure",
             *LANGUAGE_TOOL_NAMES,
+            *LEARNING_READ_TOOL_NAMES,
         ]
     ),
     "admin": sorted(
@@ -143,6 +163,8 @@ EXPECTED_TIERS: dict[str, list[str]] = {
             "foundation_translate_enhanced",
             "foundation_validate_structure",
             *LANGUAGE_TOOL_NAMES,
+            *LEARNING_READ_TOOL_NAMES,
+            *LEARNING_WRITE_TOOL_NAMES,
             "knowledge_stats",
             "kb_research",
             "provider_status",
