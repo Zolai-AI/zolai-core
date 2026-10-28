@@ -226,6 +226,29 @@ Machine clients keep using `X-API-Key` / `Authorization: Bearer zolai_sk_*` —
 username sessions are additive and never weaken key auth. `ZOLAI_AUTH_SESSIONS=off`
 turns the login surface off (404) and the middleware ignores `zolai_ss_*` tokens.
 
+## MCP Server
+
+The native MCP server is a streamable-HTTP route inside this API — no separate
+service. Live at **https://mcp.zolai.space/mcp** and **https://api.zolai.space/mcp**
+(route `/api/v1/mcp`).
+
+- **Clients:** ChatGPT, Claude, Cursor, Gemini, VS Code (any MCP client).
+- **OAuth 2.1:** RFC 9728 protected-resource metadata, RFC 8414 authorization-server
+  metadata, RFC 7591 dynamic client registration, PKCE (S256) + refresh rotation.
+  Optional (`ZOLAI_MCP_OAUTH_REQUIRED`, off by default); API keys still work.
+- **39 tiered tools:** 8 public / 31 member / 39 admin. Public + member tiers are
+  read-only; admin tier adds writes.
+- **Two-way learning family:** members read (`study_quiz_generate`,
+  `study_review_schedule`, `study_learner_stats`, ...) and admins contribute back
+  (`study_record_review`, `contribute_word`, `submit_usage_example`).
+
+```bash
+curl -s https://mcp.zolai.space/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
 ## User Accounts
 
 Accounts are CLI-only: there is **no** self-registration and **no** default
