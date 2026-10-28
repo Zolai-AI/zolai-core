@@ -607,3 +607,25 @@ Books that were zero coverage (JUD/OBA/PHM/PHP/TIT/ZEP) now 869 / 654 / 573 /
 - 35 vector/retriever tests, 56 knowledge+eval+RAG-contract tests, 15 API
   smoke tests, 42 database tests pass. `PRAGMA quick_check` = ok; WAL
   checkpointed (0 B).
+
+## Phase — R2-A DB consolidation CLOSED (2026-10-28)
+
+- **Loop:** plan PLAN_READY → implement (RED-first fixture suite, 3 commits) → live apply → verify →
+  VACUUM → KQ tail. Runner `scripts/maintenance/consolidation_r2a.py` + gates lib `r2a_lib.py`;
+  fixture suite `tests/test_consolidation_r2a.py` (25 tests, synthetic tmp_path only).
+- **Live result (per-D-item table in `docs/database/consolidation-execution.md`):** translations
+  207,623 → 56,658 + translations_news 150,965 (M9c split); articles 15,649 → 15,648, NULL hash
+  9,278 → 0, namespace news/lessons/legacy = 9,277/4,163/2,208; word_alignments 385,120 → 384,801
+  (319 exact pairs collapsed); 26 import tables (1,925,577 rows) archived to
+  `zolai-import-archive-2026-10-27.db` + sha256 manifest then dropped; import_log rebuilt (M8a
+  7→0); 13 redundant indexes dropped; DB 3.37 GB → 2.32 GB (**~1,006 MiB reclaimed**, freelist → 0).
+- **KQ tail (ro, no --persist):** M8a red→**green**, M4.12 red→**green**, M4.1–M4.11 → absent
+  (tables dropped). **M4.13 stays RED (owner gate)** — all 706 zba dup groups are book-code
+  dialect collisions differing in data columns; full-row-identity gate skipped them; skip-list
+  at `data/conductor/r2a-skiplist-zba.json`. No non-owned red grew.
+- **Never touched (re-verified post-run):** bible_verses 31,102 · ZOMIDAILY sentinel 209,538 ·
+  phrase:* 45,597 · protected legacy 2,208 · KQ `--persist` never run.
+- **Follow-ups:** R2-C = dictionary_my_import (7,840 rows, the LOST Myanmar load — archived,
+  reload with provenance); M4.13 owner decision on book-code normalization before any zba merge.
+- Fresh pre-A backup `zolai-2026-10-28_1935.db.gz` + verify drill restore-proven; pre-vacuum
+  file `zolai.db.pre-vacuum-20261028T133227Z` kept.
