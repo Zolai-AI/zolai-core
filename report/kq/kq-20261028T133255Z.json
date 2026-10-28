@@ -1,0 +1,1058 @@
+{
+ "run_id": "kq-20261028T133255Z",
+ "db_path": "/home/peter/Documents/Projects/zolai-ai/data/zolai.db",
+ "db_size": 2315354112,
+ "sqlite_version": "3.53.4",
+ "git_rev": "4d17223",
+ "started_at": "2026-10-28T13:32:55Z",
+ "db_unixepoch": 1793194377,
+ "pins_file": "/home/peter/Documents/Projects/zolai-ai/zolai-core/scripts/maintenance/knowledge_quality_pins.json",
+ "track": "R2-A",
+ "deep": false,
+ "duration_ms": 3041.3,
+ "metrics": [
+  {
+   "id": "M4.1",
+   "label": "bible_verses_import dup ratio (ref)",
+   "family": "dup",
+   "track": "R2-A",
+   "measure": "dup",
+   "direction": "lower",
+   "baseline": 1.0,
+   "amber": 1.05,
+   "green": 1.0,
+   "sql": null,
+   "value": null,
+   "denominator": null,
+   "ratio": null,
+   "measured": null,
+   "status": "absent",
+   "detail": {
+    "table": "bible_verses_import",
+    "present": false
+   },
+   "note": "Track 0 G2 deduped to 30,569 rows = 1.00x; unique guard index ux_bible_verses_import_ref live",
+   "deep": false,
+   "dropped": false
+  },
+  {
+   "id": "M4.2",
+   "label": "word_alignments_import dup ratio (ref,zo,en)",
+   "family": "dup",
+   "track": "R2-A",
+   "measure": "dup",
+   "direction": "lower",
+   "baseline": 4.7486,
+   "amber": 1.05,
+   "green": 1.0,
+   "sql": null,
+   "value": null,
+   "denominator": null,
+   "ratio": null,
+   "measured": null,
+   "status": "absent",
+   "detail": {
+    "table": "word_alignments_import",
+    "present": false
+   },
+   "note": null,
+   "deep": false,
+   "dropped": false
+  },
+  {
+   "id": "M4.3",
+   "label": "dictionary_import dup ratio (zolai,english)",
+   "family": "dup",
+   "track": "R2-A",
+   "measure": "dup",
+   "direction": "lower",
+   "baseline": 1.7123,
+   "amber": 1.05,
+   "green": 1.0,
+   "sql": null,
+   "value": null,
+   "denominator": null,
+   "ratio": null,
+   "measured": null,
+   "status": "absent",
+   "detail": {
+    "table": "dictionary_import",
+    "present": false
+   },
+   "note": null,
+   "deep": false,
+   "dropped": false
+  },
+  {
+   "id": "M4.4",
+   "label": "dictionary_en_zo_import dup ratio (headword)",
+   "family": "dup",
+   "track": "R2-A",
+   "measure": "dup",
+   "direction": "lower",
+   "baseline": 1.5863,
+   "amber": 1.05,
+   "green": 1.0,
+   "sql": null,
+   "value": null,
+   "denominator": null,
+   "ratio": null,
+   "measured": null,
+   "status": "absent",
+   "detail": {
+    "table": "dictionary_en_zo_import",
+    "present": false
+   },
+   "note": null,
+   "deep": false,
+   "dropped": false
+  },
+  {
+   "id": "M4.5",
+   "label": "vocab_import dup ratio (headword)",
+   "family": "dup",
+   "track": "R2-A",
+   "measure": "dup",
+   "direction": "lower",
+   "baseline": 1.9105,
+   "amber": 1.05,
+   "green": 1.0,
+   "sql": null,
+   "value": null,
+   "denominator": null,
+   "ratio": null,
+   "measured": null,
+   "status": "absent",
+   "detail": {
+    "table": "vocab_import",
+    "present": false
+   },
+   "note": null,
+   "deep": false,
+   "dropped": false
+  },
+  {
+   "id": "M4.6",
+   "label": "translations_import dup ratio (reference)",
+   "family": "dup",
+   "track": "R2-A",
+   "measure": "dup",
+   "direction": "lower",
+   "baseline": 4.3626,
+   "amber": 1.05,
+   "green": 1.0,
+   "sql": null,
+   "value": null,
+   "denominator": null,
+   "ratio": null,
+   "measured": null,
+   "status": "absent",
+   "detail": {
+    "table": "translations_import",
+    "present": false
+   },
+   "note": null,
+   "deep": false,
+   "dropped": false
+  },
+  {
+   "id": "M4.7",
+   "label": "phrases_from_bible_import dup ratio (phrase)",
+   "family": "dup",
+   "track": "R2-A",
+   "measure": "dup",
+   "direction": "lower",
+   "baseline": 2.0,
+   "amber": 1.05,
+   "green": 1.0,
+   "sql": null,
+   "value": null,
+   "denominator": null,
+   "ratio": null,
+   "measured": null,
+   "status": "green",
+   "detail": {
+    "table": "phrases_from_bible_import",
+    "present": false
+   },
+   "note": "green is the drop (trivial exact-2x duplicate set, R2-A#1)",
+   "deep": false,
+   "dropped": true
+  },
+  {
+   "id": "M4.8",
+   "label": "zolai_vocabulary_import dup ratio (word)",
+   "family": "dup",
+   "track": "R2-A",
+   "measure": "dup",
+   "direction": "lower",
+   "baseline": 2.0,
+   "amber": 1.05,
+   "green": 1.0,
+   "sql": null,
+   "value": null,
+   "denominator": null,
+   "ratio": null,
+   "measured": null,
+   "status": "green",
+   "detail": {
+    "table": "zolai_vocabulary_import",
+    "present": false
+   },
+   "note": "green is the drop (trivial exact-2x duplicate set, R2-A#1)",
+   "deep": false,
+   "dropped": true
+  },
+  {
+   "id": "M4.9",
+   "label": "zvs_corrections_import dup ratio",
+   "family": "dup",
+   "track": "R2-A",
+   "measure": "dup",
+   "direction": "lower",
+   "baseline": 2.0,
+   "amber": 1.05,
+   "green": 1.0,
+   "sql": null,
+   "value": null,
+   "denominator": null,
+   "ratio": null,
+   "measured": null,
+   "status": "green",
+   "detail": {
+    "table": "zvs_corrections_import",
+    "present": false
+   },
+   "note": "green is the drop (trivial exact-2x duplicate set, R2-A#1)",
+   "deep": false,
+   "dropped": true
+  },
+  {
+   "id": "M4.10",
+   "label": "phrases_import dup ratio (zo)",
+   "family": "dup",
+   "track": "R2-A",
+   "measure": "dup",
+   "direction": "lower",
+   "baseline": 3.0,
+   "amber": 1.05,
+   "green": 1.0,
+   "sql": null,
+   "value": null,
+   "denominator": null,
+   "ratio": null,
+   "measured": null,
+   "status": "absent",
+   "detail": {
+    "table": "phrases_import",
+    "present": false
+   },
+   "note": null,
+   "deep": false,
+   "dropped": false
+  },
+  {
+   "id": "M4.11",
+   "label": "grammar_patterns_import dup ratio (pattern)",
+   "family": "dup",
+   "track": "R2-A",
+   "measure": "dup",
+   "direction": "lower",
+   "baseline": 5.6497,
+   "amber": 1.05,
+   "green": 1.0,
+   "sql": null,
+   "value": null,
+   "denominator": null,
+   "ratio": null,
+   "measured": null,
+   "status": "absent",
+   "detail": {
+    "table": "grammar_patterns_import",
+    "present": false
+   },
+   "note": null,
+   "deep": false,
+   "dropped": false
+  },
+  {
+   "id": "M4.12",
+   "label": "articles dup ratio (content_hash) — ACTIVE",
+   "family": "dup",
+   "track": "R2-A",
+   "measure": "dup",
+   "direction": "lower",
+   "baseline": 2.4563,
+   "amber": 1.2,
+   "green": 1.0,
+   "sql": null,
+   "value": 1.0,
+   "denominator": null,
+   "ratio": null,
+   "measured": 1.0,
+   "status": "green",
+   "detail": {
+    "table": "articles",
+    "rows": 15648,
+    "distinct": 15648
+   },
+   "note": "dedupe must keep the 2,208 DB-only rows (protect-on-dedupe, R2-D) — deduping by content_hash keeps them automatically (each has a unique hash); the protect-count itself needs the on-disk file list, so it is a manual track check",
+   "deep": false,
+   "dropped": false,
+   "rows": 15648,
+   "distinct": 15648
+  },
+  {
+   "id": "M4.13",
+   "label": "zolai_bible_analysis dup ratio (book,chapter,verse) — ACTIVE",
+   "family": "dup",
+   "track": "R2-A",
+   "measure": "dup",
+   "direction": "lower",
+   "baseline": 1.0235,
+   "amber": 1.01,
+   "green": 1.0,
+   "sql": null,
+   "value": 1.0235,
+   "denominator": null,
+   "ratio": null,
+   "measured": 1.0235,
+   "status": "red",
+   "detail": {
+    "table": "zolai_bible_analysis",
+    "rows": 30758,
+    "distinct": 30052
+   },
+   "note": null,
+   "deep": false,
+   "dropped": false,
+   "rows": 30758,
+   "distinct": 30052
+  },
+  {
+   "id": "M8a",
+   "label": "import_log reconciliation mismatches (claimed vs live rows)",
+   "family": "provenance",
+   "track": "R2-A",
+   "measure": "count",
+   "direction": "lower",
+   "baseline": 7,
+   "amber": 2,
+   "green": 0,
+   "sql": "import_reconciliation",
+   "value": 0,
+   "denominator": null,
+   "ratio": null,
+   "measured": 0,
+   "status": "green",
+   "detail": {
+    "mismatches": []
+   },
+   "note": null,
+   "deep": false
+  },
+  {
+   "id": "M13c",
+   "label": "verse-union gap: import-only refs (deep anti-join)",
+   "family": "junk",
+   "track": "R2-A",
+   "measure": "count",
+   "direction": "lower",
+   "baseline": 545,
+   "amber": 100,
+   "green": 0,
+   "sql": "verse_union_gap",
+   "value": null,
+   "denominator": null,
+   "ratio": null,
+   "measured": null,
+   "status": "skipped",
+   "detail": {},
+   "note": "anti-join measured 340 s on the live DB — never runs outside --deep",
+   "deep": true
+  }
+ ],
+ "pins": [
+  {
+   "id": "pin:sanga",
+   "headword": "sanga",
+   "kind": "conflict",
+   "mode": "MUST_IMPROVE",
+   "active_from": "R2-C",
+   "note": "Track 0 moved the vocab gloss to 'thou'; dictionary still says '31'. R2-C: ≥2 dictionary_meanings rows (number + pronoun senses), no bare-number gloss anywhere",
+   "status": "amber",
+   "grandfathered": true,
+   "current": [
+    "thou",
+    "31"
+   ],
+   "expected": [
+    "thou",
+    "31"
+   ],
+   "target_met": false,
+   "detail": {
+    "context_current": [
+     "[\"thou\", \"here\", \"take\", \"there\", \"would\", \"disdained\", \"set\", \"dogs\"]"
+    ],
+    "reason": "expected-red: pinned bad value unchanged until R2-C lands (spec §4)"
+   }
+  },
+  {
+   "id": "pin:sawmthum",
+   "headword": "sawmthum",
+   "kind": "conflict",
+   "mode": "MUST_IMPROVE",
+   "active_from": "R2-C",
+   "note": "R2-C: verb-vs-numeral split into sense rows; dictionary still 'lived' (bible_learned)",
+   "status": "amber",
+   "grandfathered": true,
+   "current": [
+    "and",
+    "lived"
+   ],
+   "expected": [
+    "and",
+    "lived"
+   ],
+   "target_met": false,
+   "detail": {
+    "context_current": [
+     "[\"thirty\", \"hundred\", \"years\", \"thousand\", \"silver\", \"shekels\", \"offering\", \"bits\"]"
+    ],
+    "reason": "expected-red: pinned bad value unchanged until R2-C lands (spec §4)"
+   }
+  },
+  {
+   "id": "pin:za",
+   "headword": "za",
+   "kind": "conflict",
+   "mode": "MUST_IMPROVE",
+   "active_from": "R2-C",
+   "note": "R2-C: typo 'a hundered' fixed; 3 senses (hundred/hear/wide) as sense rows",
+   "status": "amber",
+   "grandfathered": true,
+   "current": [
+    "hear",
+    "a hundered"
+   ],
+   "expected": [
+    "hear",
+    "a hundered"
+   ],
+   "target_met": false,
+   "detail": {
+    "context_current": [
+     "[]"
+    ],
+    "reason": "expected-red: pinned bad value unchanged until R2-C lands (spec §4)"
+   }
+  },
+  {
+   "id": "pin:nang",
+   "headword": "nang",
+   "kind": "conflict",
+   "mode": "MUST_IMPROVE",
+   "active_from": "R2-C",
+   "note": "R2-C: primary gloss reconciled with the 'you' evidence (words.json, app db, legacy z2e)",
+   "status": "amber",
+   "grandfathered": true,
+   "current": [
+    "weak, ye",
+    "weak, ye"
+   ],
+   "expected": [
+    "weak, ye",
+    "weak, ye"
+   ],
+   "target_met": false,
+   "detail": {
+    "context_current": [
+     "[]"
+    ],
+    "reason": "expected-red: pinned bad value unchanged until R2-C lands (spec §4)"
+   }
+  },
+  {
+   "id": "pin:in",
+   "headword": "in",
+   "kind": "conflict",
+   "mode": "MUST_IMPROVE",
+   "active_from": "R2-C",
+   "note": "R2-C: the 4 analyses (ergative/directional/suffix/2ps) become sense rows; vocabulary holds a reviewed primary — LENGTH<40 encodes 'the run-on raw_vzt gloss is gone'",
+   "status": "amber",
+   "grandfathered": true,
+   "current": [
+    "with",
+    "2ps as in \"Pai in,\" you go (in:)\"Inn ah ciah ing,\" You,go home"
+   ],
+   "expected": [
+    "with",
+    "2ps as in \"Pai in,\" you go (in:)\"Inn ah ciah ing,\" You,go home"
+   ],
+   "target_met": false,
+   "detail": {
+    "context_current": [
+     "[\"Sungah sungin sung laitak laitakin lakah\"]"
+    ],
+    "reason": "expected-red: pinned bad value unchanged until R2-C lands (spec §4)"
+   }
+  },
+  {
+   "id": "pin:kei",
+   "headword": "kei",
+   "kind": "conflict",
+   "mode": "MUST_IMPROVE",
+   "active_from": "R2-C",
+   "note": "R2-C: polysemy collapsed (pronoun vs negation vs verb) — ≥3 sense rows",
+   "status": "amber",
+   "grandfathered": true,
+   "current": [
+    "I (pronoun, subject)",
+    "I (pronoun, subject)"
+   ],
+   "expected": [
+    "I (pronoun, subject)",
+    "I (pronoun, subject)"
+   ],
+   "target_met": false,
+   "detail": {
+    "context_current": [
+     "[]"
+    ],
+    "reason": "expected-red: pinned bad value unchanged until R2-C lands (spec §4)"
+   }
+  },
+  {
+   "id": "pin:hoih",
+   "headword": "hoih",
+   "kind": "conflict",
+   "mode": "MUST_NOT_REGRESS",
+   "active_from": null,
+   "note": "vocab gloss must stay byte-identical 'good, beautiful'",
+   "status": "green",
+   "grandfathered": false,
+   "current": "good, beautiful",
+   "expected": "good, beautiful",
+   "target_met": null,
+   "detail": {
+    "context_current": [
+     "good, beautiful",
+     "[]"
+    ]
+   }
+  },
+  {
+   "id": "pin:khat",
+   "headword": "khat",
+   "kind": "conflict",
+   "mode": "MUST_NOT_REGRESS",
+   "active_from": null,
+   "note": "vocab gloss must stay byte-identical 'one'",
+   "status": "green",
+   "grandfathered": false,
+   "current": "one",
+   "expected": "one",
+   "target_met": null,
+   "detail": {
+    "context_current": [
+     "one",
+     "[]"
+    ]
+   }
+  },
+  {
+   "id": "pin-num:khat",
+   "headword": "khat",
+   "kind": "numeral",
+   "mode": "MUST_NOT_REGRESS",
+   "active_from": null,
+   "note": "verified numeral (spec §4.2)",
+   "status": "green",
+   "grandfathered": false,
+   "current": "one",
+   "expected": "one",
+   "target_met": null,
+   "detail": {
+    "context_current": []
+   }
+  },
+  {
+   "id": "pin-num:hnih",
+   "headword": "hnih",
+   "kind": "numeral",
+   "mode": "MUST_NOT_REGRESS",
+   "active_from": null,
+   "note": "verified numeral (spec §4.2)",
+   "status": "green",
+   "grandfathered": false,
+   "current": "two",
+   "expected": "two",
+   "target_met": null,
+   "detail": {
+    "context_current": []
+   }
+  },
+  {
+   "id": "pin-num:thum",
+   "headword": "thum",
+   "kind": "numeral",
+   "mode": "MUST_NOT_REGRESS",
+   "active_from": null,
+   "note": "verified numeral (spec §4.2)",
+   "status": "green",
+   "grandfathered": false,
+   "current": "three",
+   "expected": "three",
+   "target_met": null,
+   "detail": {
+    "context_current": []
+   }
+  },
+  {
+   "id": "pin-num:nga",
+   "headword": "nga",
+   "kind": "numeral",
+   "mode": "MUST_NOT_REGRESS",
+   "active_from": null,
+   "note": "verified numeral (spec §4.2)",
+   "status": "green",
+   "grandfathered": false,
+   "current": "five",
+   "expected": "five",
+   "target_met": null,
+   "detail": {
+    "context_current": []
+   }
+  },
+  {
+   "id": "pin-num:giat",
+   "headword": "giat",
+   "kind": "numeral",
+   "mode": "MUST_NOT_REGRESS",
+   "active_from": null,
+   "note": "verified numeral (spec §4.2)",
+   "status": "green",
+   "grandfathered": false,
+   "current": "eight",
+   "expected": "eight",
+   "target_met": null,
+   "detail": {
+    "context_current": []
+   }
+  },
+  {
+   "id": "pin-num:kua",
+   "headword": "kua",
+   "kind": "numeral",
+   "mode": "MUST_NOT_REGRESS",
+   "active_from": null,
+   "note": "verified numeral (spec §4.2)",
+   "status": "green",
+   "grandfathered": false,
+   "current": "nine",
+   "expected": "nine",
+   "target_met": null,
+   "detail": {
+    "context_current": []
+   }
+  },
+  {
+   "id": "pin-amb:four",
+   "headword": "four",
+   "kind": "ambiguous",
+   "mode": "MUST_NOT_REGRESS",
+   "active_from": null,
+   "note": "competing headwords (pang / li 4) — deliberately NOT pinned until R2-C picks the canonical form",
+   "status": "skipped",
+   "grandfathered": false,
+   "current": null,
+   "expected": null,
+   "target_met": null,
+   "detail": {
+    "reason": "ambiguous headword — never enforced (spec §4.2)"
+   }
+  },
+  {
+   "id": "pin-amb:six",
+   "headword": "six",
+   "kind": "ambiguous",
+   "mode": "MUST_NOT_REGRESS",
+   "active_from": null,
+   "note": "competing headwords (guk 6) — not pinned until R2-C picks the canonical form",
+   "status": "skipped",
+   "grandfathered": false,
+   "current": null,
+   "expected": null,
+   "target_met": null,
+   "detail": {
+    "reason": "ambiguous headword — never enforced (spec §4.2)"
+   }
+  },
+  {
+   "id": "pin-amb:seven",
+   "headword": "seven",
+   "kind": "ambiguous",
+   "mode": "MUST_NOT_REGRESS",
+   "active_from": null,
+   "note": "competing headwords (sagih / sagat) — not pinned until R2-C picks the canonical form",
+   "status": "skipped",
+   "grandfathered": false,
+   "current": null,
+   "expected": null,
+   "target_met": null,
+   "detail": {
+    "reason": "ambiguous headword — never enforced (spec §4.2)"
+   }
+  },
+  {
+   "id": "pin-amb:ten",
+   "headword": "ten",
+   "kind": "ambiguous",
+   "mode": "MUST_NOT_REGRESS",
+   "active_from": null,
+   "note": "competing headwords (sawmvei / makin / sawm khat) — not pinned until R2-C picks the canonical form",
+   "status": "skipped",
+   "grandfathered": false,
+   "current": null,
+   "expected": null,
+   "target_met": null,
+   "detail": {
+    "reason": "ambiguous headword — never enforced (spec §4.2)"
+   }
+  }
+ ],
+ "guards": [
+  {
+   "id": "G-VERSE-FORMAT",
+   "label": "bible_verses ref conformance = total (never regresses)",
+   "status": "green",
+   "parts": [
+    {
+     "label": "nonconforming_or_null_refs",
+     "op": "<=",
+     "value": 0,
+     "actual": 0,
+     "status": "green"
+    }
+   ],
+   "note": null
+  },
+  {
+   "id": "G-VERSE-UNIQUE",
+   "label": "bible_verses dup ratio stays 1.00",
+   "status": "green",
+   "parts": [
+    {
+     "label": "dup_ratio",
+     "op": "<=",
+     "value": 1.0,
+     "actual": 1.0,
+     "status": "green"
+    }
+   ],
+   "note": null
+  },
+  {
+   "id": "G-BIBLE-REFS-SPLIT",
+   "label": "translations Bible directions 100% conforming",
+   "status": "green",
+   "parts": [
+    {
+     "label": "bad_bible_direction_refs",
+     "op": "<=",
+     "value": 0,
+     "actual": 0,
+     "status": "green"
+    }
+   ],
+   "note": null
+  },
+  {
+   "id": "G-WORDUSAGE-CLEANUP-ONLY",
+   "label": "word_usage corrupt slices may shrink but never grow (Track 0 G1)",
+   "status": "green",
+   "parts": [
+    {
+     "label": "corrupt_dict_string_rows",
+     "op": "<=",
+     "value": 0,
+     "actual": 0,
+     "status": "green"
+    },
+    {
+     "label": "phrase_namespace_rows",
+     "op": "<=",
+     "value": 45597,
+     "actual": 45597,
+     "status": "green"
+    }
+   ],
+   "note": null
+  },
+  {
+   "id": "G-CONTAMINATION",
+   "label": "zero Burmese-script chars in all six live lexicon fields",
+   "status": "green",
+   "parts": [
+    {
+     "label": "burmese_lexicon_chars",
+     "op": "<=",
+     "value": 0,
+     "actual": 0,
+     "status": "green"
+    }
+   ],
+   "note": null
+  },
+  {
+   "id": "G-CONTROL-DUP",
+   "label": "six active control tables stay exactly 1.00x",
+   "status": "green",
+   "parts": [
+    {
+     "label": "max_control_dup_ratio",
+     "op": "<=",
+     "value": 1.0,
+     "actual": 1.0,
+     "status": "green"
+    }
+   ],
+   "note": null
+  },
+  {
+   "id": "G-PHONEME-CORE",
+   "label": "vocabulary rows for hoih/khat/hnih/thum/nga/giat/kua never deleted",
+   "status": "green",
+   "parts": [
+    {
+     "label": "kept_headwords",
+     "op": ">=",
+     "value": 7,
+     "actual": 7,
+     "status": "green"
+    }
+   ],
+   "note": null
+  }
+ ],
+ "track_checks": [
+  {
+   "track": "R2-A",
+   "check_id": "M4.1-green",
+   "kind": "metric",
+   "status": "absent",
+   "actual": null,
+   "detail": {
+    "reason": "metric table absent"
+   },
+   "note": null
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M4.2-green",
+   "kind": "metric",
+   "status": "absent",
+   "actual": null,
+   "detail": {
+    "reason": "metric table absent"
+   },
+   "note": null
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M4.3-green",
+   "kind": "metric",
+   "status": "absent",
+   "actual": null,
+   "detail": {
+    "reason": "metric table absent"
+   },
+   "note": null
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M4.4-green",
+   "kind": "metric",
+   "status": "absent",
+   "actual": null,
+   "detail": {
+    "reason": "metric table absent"
+   },
+   "note": null
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M4.5-green",
+   "kind": "metric",
+   "status": "absent",
+   "actual": null,
+   "detail": {
+    "reason": "metric table absent"
+   },
+   "note": null
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M4.6-green",
+   "kind": "metric",
+   "status": "absent",
+   "actual": null,
+   "detail": {
+    "reason": "metric table absent"
+   },
+   "note": null
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M4.7-green",
+   "kind": "metric",
+   "status": "green",
+   "actual": "green",
+   "detail": {},
+   "note": null
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M4.8-green",
+   "kind": "metric",
+   "status": "green",
+   "actual": "green",
+   "detail": {},
+   "note": null
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M4.9-green",
+   "kind": "metric",
+   "status": "green",
+   "actual": "green",
+   "detail": {},
+   "note": null
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M4.10-green",
+   "kind": "metric",
+   "status": "absent",
+   "actual": null,
+   "detail": {
+    "reason": "metric table absent"
+   },
+   "note": null
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M4.11-green",
+   "kind": "metric",
+   "status": "absent",
+   "actual": null,
+   "detail": {
+    "reason": "metric table absent"
+   },
+   "note": null
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M4.12-protect",
+   "kind": "metric",
+   "status": "green",
+   "actual": 1.0,
+   "detail": {
+    "op": "<=",
+    "expected": 1.2,
+    "measured": 1.0
+   },
+   "note": null
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M4.13-green",
+   "kind": "metric",
+   "status": "red",
+   "actual": "red",
+   "detail": {},
+   "note": null
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M8a-reconciled",
+   "kind": "metric",
+   "status": "green",
+   "actual": 0,
+   "detail": {
+    "op": "<=",
+    "expected": 0,
+    "measured": 0
+   },
+   "note": null
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M9d-dropped",
+   "kind": "table_absent",
+   "status": "green",
+   "actual": {
+    "table_present": false
+   },
+   "detail": {},
+   "note": null
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M9c-news-split",
+   "kind": "sql",
+   "status": "green",
+   "actual": 0,
+   "detail": {
+    "op": "<=",
+    "expected": 0,
+    "actual": 0
+   },
+   "note": "en→my news/parallel rows move to translations_news (D14)"
+  },
+  {
+   "track": "R2-A",
+   "check_id": "articles-dbonly-protect",
+   "kind": "manual",
+   "status": "manual",
+   "actual": null,
+   "detail": {
+    "note": "2,208 DB-only article rows must survive the content_hash dedupe — needs the on-disk file list, not SQL"
+   },
+   "note": "2,208 DB-only article rows must survive the content_hash dedupe — needs the on-disk file list, not SQL"
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M13c-import-gap",
+   "kind": "metric",
+   "status": "skipped",
+   "actual": null,
+   "detail": {
+    "reason": "deep-only metric (run with --deep)"
+   },
+   "note": null
+  },
+  {
+   "track": "R2-A",
+   "check_id": "M13c-main-gap",
+   "kind": "metric_sub",
+   "status": "skipped",
+   "actual": null,
+   "detail": {
+    "reason": "deep-only metric (run with --deep)"
+   },
+   "note": null
+  }
+ ],
+ "gate_importable": null,
+ "status": "red",
+ "counts": {
+  "greens": 27,
+  "ambers": 6,
+  "reds": 2,
+  "grandfathered": 6,
+  "neutral": 24
+ },
+ "exit_code": 1
+}
