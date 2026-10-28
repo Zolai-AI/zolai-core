@@ -19,8 +19,8 @@ The tool set is derived *server-side* from the authenticated caller:
 | caller | scope | tools |
 |---|---|---|
 | anonymous | ``public`` | 8 |
-| valid key (member) | ``member`` | 21 |
-| admin key | ``admin`` | 26 |
+| valid key (member) | ``member`` | 31 |
+| admin key | ``admin`` | 39 |
 
 Both paths are declared in :mod:`zolai.api.rbac` as **public** routes so
 ``ZOLAI_API_AUTH=enforce`` never 401s an anonymous MCP client, and both ride
@@ -106,6 +106,19 @@ async def handle_mcp_request(request: Request) -> Response:
     )
     if body is None:  # 202: a notification was accepted and nothing is returned
         return Response(status_code=status)
+    # Streamable-HTTP lets the server answer either application/json or
+    # text/event-stream. A client that explicitly asked for the SSE media type
+    # (Claude's stack, the MCP Inspector) breaks on bare JSON, so when its
+    # Accept prefers event-stream we wrap the *single* response as one SSE
+    # message event — still stateless: no stream stays open afterwards.
+    if "text/event-stream" in request.headers.get("accept", ""):
+        sse = f"event: message\ndata: {json.dumps(body, separators=(',', ':'))}\n\n"
+        return Response(
+            content=sse,
+            media_type="text/event-stream",
+            status_code=status,
+            headers={"Cache-Control": "no-store"},
+        )
     return JSONResponse(status_code=status, content=body)
 
 

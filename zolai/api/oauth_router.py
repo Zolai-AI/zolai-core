@@ -160,6 +160,8 @@ class RegistrationIn(BaseModel):
     response_types: list[str] | None = None
     token_endpoint_auth_method: str | None = None
     scope: str | None = None
+    software_id: str | None = Field(default=None, max_length=500)
+    software_version: str | None = Field(default=None, max_length=100)
 
 
 def _oauth_error(status: int, error: str, description: str) -> JSONResponse:
@@ -237,6 +239,15 @@ async def oauth_register(body: RegistrationIn, request: Request) -> JSONResponse
         # body, and RFC 7591 only requires the error code to be nameable.
         logger.debug("oauth register rejected: %s", exc)
         return _invalid_metadata("client metadata failed validation")
+
+    # RFC 7591 §3.2.1: scope/software_id/software_version must be echoed when
+    # the client sent them — some hosts (ChatGPT included) check for the echo.
+    if body.scope:
+        response["scope"] = body.scope
+    if body.software_id:
+        response["software_id"] = body.software_id
+    if body.software_version:
+        response["software_version"] = body.software_version
 
     # The response carries a plaintext secret — never cacheable.
     return JSONResponse(content=response, status_code=201, headers={"Cache-Control": "no-store"})
@@ -504,6 +515,10 @@ async def oauth_authorize_post(request: Request) -> Response:
     )
     if params["state"]:
         target += f"&state={quote(params['state'], safe='')}"
+    # RFC 9207: ``iss`` must equal the advertised issuer exactly — ChatGPT and
+    # Codex check it before redeeming the code, and only use their stable
+    # connector redirect URI when the AS does this.
+    target += f"&iss={quote(oauth.public_origin(request.scope).rstrip('/'), safe='')}"
     return RedirectResponse(target, status_code=302, headers={"Cache-Control": "no-store"})
 
 

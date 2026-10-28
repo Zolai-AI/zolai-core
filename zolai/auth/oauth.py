@@ -54,6 +54,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import os
 import secrets
 import threading
@@ -61,6 +62,8 @@ import time
 from typing import Any
 
 from sqlalchemy import text
+
+logger = logging.getLogger(__name__)
 
 # ── Token / identifier formats ───────────────────────────────────────────────
 #
@@ -277,6 +280,12 @@ def authorization_server_metadata(origin: str) -> dict[str, Any]:
         ],
         "scopes_supported": grantable_scopes(),
         "require_pushed_authorization_requests": False,
+        # ChatGPT prioritizes CIMD and skips DCR when this is advertised
+        # (developers.openai.com/plugins/build/auth); SEP-3149 in MCP.
+        "client_id_metadata_document_supported": True,
+        # RFC 9207 — the redirect carries ``iss``, so ChatGPT/Codex can use
+        # their stable connector redirect URI and reject mix-up attacks.
+        "authorization_response_iss_parameter_supported": True,
     }
 
 
@@ -513,10 +522,157 @@ def get_client(client_id: str | None) -> dict[str, Any] | None:
             {"cid": str(client_id)},
         ).first()
     if row is None:
-        return None
+        return resolve_client_metadata_document(str(client_id))
     found = dict(row._mapping)
     found["redirect_uris"] = _decode_json_list(found.get("redirect_uris"))
     return found
+
+
+# ---------------------------------------------------------------------------
+# CIMD — OAuth Client ID Metadata Documents
+# (draft-ietf-oauth-client-id-metadata-document; MCP SEP-3149, used by ChatGPT
+# in place of dynamic registration). The client_id is itself the https:// URL
+# of the client's published metadata document. Resolution is stateless: we
+# fetch, validate and cache briefly — nothing is persisted, so the redirect
+# allowlist stays owned by the client host.
+# ---------------------------------------------------------------------------
+
+CIMD_FETCH_TIMEOUT_S = 5.0
+CIMD_MAX_DOCUMENT_BYTES = 64 * 1024
+CIMD_CACHE_TTL_S = 300
+CIMD_CACHE_MAX_ENTRIES = 128
+
+#: client_id -> (monotonic expiry, resolved record or None). A negative result
+#: is cached too, so a hostile client_id cannot make us re-fetch per request.
+_cimd_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
+_cimd_cache_lock = threading.Lock()
+
+
+def is_client_id_metadata_document(client_id: str) -> bool:
+    """Syntax-only check: an https URL with a path and nothing else.
+
+    Rejects non-https, missing/dotted-private hosts, port, query, fragment and
+    userinfo — a CIMD document must sit on the default port behind a plain
+    path, so no redirect chain or crafted URL shape can move where we fetch.
+    """
+    from urllib.parse import urlsplit
+
+    candidate = str(client_id or "")
+    if not candidate.startswith("https://") or len(candidate) > MAX_URI_LENGTH:
+        return False
+    try:
+        parts = urlsplit(candidate)
+    except ValueError:
+        return False
+    if parts.scheme != "https" or not parts.hostname:
+        return False
+    if parts.query or parts.fragment or parts.username or parts.password or parts.port:
+        return False
+    if (parts.path or "") in ("", "/"):
+        return False
+    host = parts.hostname.lower()
+    if host in _LOOPBACK_HOSTS or host.endswith((".localhost", ".local", ".internal")):
+        return False
+    import ipaddress
+
+    try:
+        if not ipaddress.ip_address(host).is_global:
+            return False
+    except ValueError:
+        pass  # a domain name — the fetch either resolves or fails
+    return True
+
+
+def _cimd_fetch(url: str) -> dict[str, Any]:
+    """GET + parse the metadata document (no redirects). The test seam."""
+    import httpx
+
+    with httpx.Client(timeout=CIMD_FETCH_TIMEOUT_S, follow_redirects=False) as session:
+        response = session.get(url, headers={"Accept": "application/json"})
+    if response.status_code != 200:
+        raise ClientMetadataError("client metadata document did not answer 200")
+    if len(response.content) > CIMD_MAX_DOCUMENT_BYTES:
+        raise ClientMetadataError("client metadata document too large")
+    if "application/json" not in response.headers.get("content-type", ""):
+        raise ClientMetadataError("client metadata document is not JSON")
+    try:
+        doc = json.loads(response.content)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise ClientMetadataError("client metadata document is not parseable") from exc
+    if not isinstance(doc, dict):
+        raise ClientMetadataError("client metadata document must be a JSON object")
+    return doc
+
+
+def _client_from_metadata_document(
+    url: str, doc: dict[str, Any]
+) -> dict[str, Any]:
+    """Policy on a fetched document, before it becomes a client record.
+
+    ``client_id`` inside must equal the URL (identity is the location), the
+    redirect list runs through the same validator DCR uses, and the client
+    must be able to act as a public client — we accept ``none`` only, so the
+    document's ``token_endpoint_auth_methods_supported`` (or the legacy
+    singular field) must include it.
+    """
+    if str(doc.get("client_id") or "") != url:
+        raise ClientMetadataError(
+            "metadata document client_id does not match its URL"
+        )
+    methods = doc.get("token_endpoint_auth_methods_supported")
+    if methods is None:
+        methods = [str(doc.get("token_endpoint_auth_method") or "none")]
+    if not isinstance(methods, (list, tuple)) or "none" not in {
+        str(m) for m in methods
+    }:
+        raise ClientMetadataError(
+            "metadata document client cannot act as a public client"
+        )
+    grants = doc.get("grant_types")
+    if grants is not None and (
+        not isinstance(grants, (list, tuple))
+        or not set(map(str, grants)) <= SUPPORTED_GRANT_TYPES
+    ):
+        raise ClientMetadataError("metadata document grant_types unsupported")
+    uris = validate_redirect_uris(doc.get("redirect_uris"))
+    name = str(doc.get("client_name") or "").strip()[:MAX_CLIENT_NAME_LENGTH]
+    return {
+        "client_id": url,
+        "client_secret_hash": None,
+        "client_name": name or "OAuth client",
+        "redirect_uris": uris,
+        "token_endpoint_auth_method": "none",
+    }
+
+
+def resolve_client_metadata_document(
+    client_id: str,
+) -> dict[str, Any] | None:
+    """Resolve a CIMD client_id to a client record shaped like
+    :func:`get_client`'s — or ``None`` (not a document URL, fetch failed, or
+    policy rejected). Never raises; failures are cached for the TTL so a
+    bogus id cannot hammer the network."""
+    if not is_client_id_metadata_document(client_id):
+        return None
+    now = time.monotonic()
+    with _cimd_cache_lock:
+        hit = _cimd_cache.get(client_id)
+        if hit is not None and hit[0] > now:
+            return hit[1]
+    try:
+        record: dict[str, Any] | None = _client_from_metadata_document(
+            client_id, _cimd_fetch(client_id)
+        )
+    except Exception as exc:  # transport, parse, or policy failure
+        logger.debug("CIMD resolution failed for %s: %s", client_id, exc)
+        record = None
+    with _cimd_cache_lock:
+        if len(_cimd_cache) >= CIMD_CACHE_MAX_ENTRIES:
+            expired = [k for k, (exp, _) in _cimd_cache.items() if exp <= now]
+            for key in expired or list(_cimd_cache)[:1]:
+                _cimd_cache.pop(key, None)
+        _cimd_cache[client_id] = (now + CIMD_CACHE_TTL_S, record)
+    return record
 
 
 def verify_client_secret(client: dict[str, Any], presented: str | None) -> bool:
