@@ -34,6 +34,8 @@ from typing import Any, Iterator
 
 REPO_ROOT = Path(__file__).resolve().parents[2]  # zolai-core
 ZOLAI_ROOT = REPO_ROOT.parent  # zolai-ai
+
+
 def _default_db() -> Path:
     """The canonical database, from the one resolver that owns the answer.
 
@@ -228,7 +230,7 @@ def write_batch(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
 def fuser_pids(path: Path) -> list[int]:
     try:
         proc = subprocess.run(["fuser", str(path)], capture_output=True, text=True, timeout=30)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except FileNotFoundError, subprocess.TimeoutExpired:
         return []  # fuser missing/timed out: cannot assert a holder; caller decides
     return [int(tok) for tok in proc.stdout.split() if tok.isdigit()]
 
@@ -279,9 +281,7 @@ def assert_drift(item: str, before: int, expected: int) -> None:
     """Plan §3: before-count drifting >5% or >1,000 rows stops the item."""
     delta = abs(before - expected)
     if expected and (delta > expected * 0.05 or delta > 1000):
-        raise R2AStop(
-            f"{item}: before-count drift {before:,} vs plan {expected:,} (Δ{delta:,}) exceeds tolerance"
-        )
+        raise R2AStop(f"{item}: before-count drift {before:,} vs plan {expected:,} (Δ{delta:,}) exceeds tolerance")
 
 
 def assert_eq(label: str, actual: int, want: int) -> None:
@@ -396,7 +396,10 @@ class ItemReport:
         parts = [f"[{self.item}:{self.mode}]"]
         for k in self.before:
             b, a = self.before[k], self.after.get(k, self.before[k])
-            parts.append(f"{k} {b:,}→{a:,}" if isinstance(b, int) else f"{k}={b}")
+            if isinstance(b, int) and isinstance(a, int):
+                parts.append(f"{k} {b:,}→{a:,}")
+            else:
+                parts.append(f"{k}={b}→{a}")
         if self.applied:
             parts.append(f"applied={len(self.applied)}")
         if self.skipped:

@@ -1,48 +1,57 @@
 #!/usr/bin/env python3
 """R2-A consolidation runner (plan data/conductor/plan-r2a-db-consolidation.md).
 
-Operates ONLY on the import/staging side of the zolai single-DB system. Three
-inviolable DB rules are enforced in code (see r2a_lib):
-  1. write gate = fuser single-writer + fresh backup + exclusive rw connection;
+Operates on the import/staging side of the zolai single-DB system. Binding rules
+enforced in code (see r2a_lib docstring):
+  1. write gate = fuser single-writer + fresh backup + EXCLUSIVE/BEGIN IMMEDIATE;
   2. one item = one atomic journal write with before/after count asserts;
-  3. never delete anything unrecoverable: every dropped import table is first
-     archived to an uncompressed sqlite DB on the same disk (VACUUM INTO).
-Canonical tables (bible_verses, translations, word_alignments, articles, zolai_bible_analysis,
-dictionary, vocab, dictionary_my, ...) receive only additive/explicitly-specified
-changes (ref normalization, en->my split, content_hash backfill, namespace flag,
-controlled collapse of byte-identical rows). The 2,208 protected legacy articles
-and the 545 import-only verse refs are never touched.
+  3. nothing unrecoverable is deleted: all 26 ``*_import`` tables are first dumped
+     into one archive DB (CREATE TABLE … AS SELECT) with per-table count equality;
+  4. never touched: bible_verses canonical rows, ZOMIDAILY/phrase:* word_usage
+     sentinels, the 2,208 protected legacy articles, the 545 import-only verse
+     refs (they stay in the archive only), KQ ``--persist``.
+Canonical changes are limited to plan §2: translations_import ref normalization,
+translations en→my split, articles content_hash backfill + namespace column +
+one protected-checked content-dup drop, exact-pair collapses behind a full-row-
+identity gate, import_log rebuild, empty-table + redundant-index drops.
 
-Modes (all count-only in dry-run):
+Subcommands (dry-run/apply/verify all accept --item to run a subset, in the
+canonical order regardless of argument order):
   python scripts/maintenance/consolidation_r2a.py dry-run [--item I ...]
   python scripts/maintenance/consolidation_r2a.py apply   [--item I ...]
   python scripts/maintenance/consolidation_r2a.py verify  [--item I ...]
   python scripts/maintenance/consolidation_r2a.py vacuum
 
-Exit codes: 0 = projections/mutations/verification consistent; 1 = drift, an
-assert failed, or an item aborted; 2 = a write gate failed (fuser/backup).
+Exit codes: 0 = consistent; 1 = drift/assert/item error; 2 = write gate failed.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import sqlite3
 import sys
+import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from r2a_lib import (  # noqa: E402
     ALIAS_MAP,
+    ARCHIVE_DB,
     ARCHIVE_MANIFEST,
-    BEGIN_WRITE_BATCH,
+    BACKUP_DIR,
     CANONICAL_POST,
+    CENSUS_STATUS,
+    DEFAULT_DB,
     DROP_KEEP,
-    END_WRITE_BATCH,
-    EXCLUSIVE,
-    FINAL_COUNTS_PATH,
+    FINAL_COUNTS,
+    IMPORT_TABLES,
     INDEX_DROP_SET,
+    NON_DATA_COLS,
     PHASE2_EMPTY_DROPS,
     PLAN_EXPECTED,
     R2AStop,
@@ -50,20 +59,21 @@ from r2a_lib import (  # noqa: E402
     ItemReport,
     assert_drift,
     assert_eq,
-    articles_content_hash,
-    begin_batch,
+    backfill_content_hash,
     connect_ro,
+    connect_rw,
+    count,
+    data_columns,
     fuser_clean,
+    fuser_pids,
+    index_exists,
     log_batch,
     now_iso,
-    prefix_covered,
     require_fresh_backup,
+    scalar,
+    table_exists,
+    write_batch,
 )
-
-BASE = Path(__file__).resolve().parents[3]
-ARCHIVE_DIR = BASE / "data" / "r2a-archive"
-ARCHIVE_MANIFEST_PATH = BASE / "data" / "conductor" / "r2a-archive-manifest.json"
-IMPORT_LOG = "import_log"
 
 ITEM_ORDER = [
     "d13",
@@ -78,615 +88,690 @@ ITEM_ORDER = [
     "final_counts",
 ]
 
-
-# --------------------------------------------------------------------------
-# D13 — ref normalization + NAH->NAM (canonical, additive UPDATEs only)
-# --------------------------------------------------------------------------
+CENSUS_EXCLUDE = frozenset({"import_log", "provenance"})
+ARCHIVED_NOTE = "R2-A: archived to zolai-import-archive-2026-10-27.db"
 
 
-def item_d13(con: sqlite3.Connection, mode: str) -> ItemReport:
-    rep = ItemReport("d13")
-    dotted = con.execute("SELECT COUNT(*) FROM bible_verses WHERE ref LIKE '%.%'").fetchone()[0]
-    zero_pad = con.execute("SELECT COUNT(*) FROM bible_verses WHERE ref GLOB '* 0*'").fetchone()[0]
-    nah_c = con.execute("SELECT COUNT(*) FROM bible_verses WHERE book='NAH'").fetchone()[0]
-    nah_ref = con.execute("SELECT COUNT(*) FROM bible_verses WHERE ref LIKE 'NAH %'").fetchone()[0]
-    canon_nam = con.execute("SELECT COUNT(*) FROM bible_verses WHERE book='NAM'").fetchone()[0]
-    imports_nah = con.execute(
-        "SELECT COUNT(*) FROM bible_verses_import WHERE ref LIKE 'NAH%' OR book='NAH'"
-    ).fetchone()[0]
-    plan = PLAN_EXPECTED["d13"]
-    rep.before = {"dotted": dotted, "zero_pad": zero_pad, "NAH_book": nah_c, "NAH_ref": nah_ref}
+# ── paths overridable for tests ─────────────────────────────────────────────
 
-    if mode != "apply":
-        if dotted:
-            rep.errors.append(f"D13 projection broken: {dotted} dotted refs remain")
-        else:
-            rep.projections["ref_normalization"] = "already clean (idempotent re-run)"
-        if nah_c == 0 and nah_ref == 0 and imports_nah == 0:
-            rep.projections["nah_nam"] = (
-                f"done ({canon_nam} NAM canon rows, 0 NAH anywhere) - idempotent re-run"
-            )
-        else:
-            rep.projections["nah_nam"] = (
-                f"NAH->{plan['nah_to_nam_target']} (book+ref; canon NAM {canon_nam}->"
-                f"{canon_nam + nah_c + nah_ref}, imports->canonical {plan['imports_to_canonical']} total)"
-            )
-        rep.after = dict(rep.before)
+
+@dataclass
+class Paths:
+    db: Path = DEFAULT_DB
+    archive_db: Path = ARCHIVE_DB
+    manifest: Path = ARCHIVE_MANIFEST
+    skiplist_zba: Path = SKIPLIST_ZBA
+    final_counts: Path = FINAL_COUNTS
+    backup_dir: Path = BACKUP_DIR
+    use_gates: bool = True  # fuser + backup gates (disable only for fixtures)
+
+    def ensure_dirs(self) -> None:
+        self.archive_db.parent.mkdir(parents=True, exist_ok=True)
+        self.manifest.parent.mkdir(parents=True, exist_ok=True)
+        self.final_counts.parent.mkdir(parents=True, exist_ok=True)
+
+
+# ── D13 — translations_import.reference normalization (plan §2 step 1) ───────
+
+
+def item_d13(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
+    rep = ItemReport("d13", mode)
+    exp = PLAN_EXPECTED["d13"]
+    total = count(con, "translations_import")
+    dot = scalar(con, "SELECT COUNT(*) FROM translations_import WHERE reference LIKE '%.%'")
+    nah = scalar(con, "SELECT COUNT(*) FROM translations_import WHERE reference LIKE 'NAH.%'")
+    empty = scalar(con, "SELECT COUNT(*) FROM translations_import WHERE reference=''")
+    rep.before = {"rows": total, "dot_refs": dot, "nah_refs": nah, "empty_refs": empty}
+    if not table_exists(con, "translations_import"):
+        rep.skipped.append("translations_import already dropped (idempotent re-run)")
         return rep
-
-    rows_a = con.execute(
-        "UPDATE bible_verses SET ref = ? WHERE book='NAH' AND ref LIKE 'NAH %'",
-        (f"NAM {plan['nah_to_nam_target']}",),
-    ).rowcount
-    rows_b = con.execute("UPDATE bible_verses SET book='NAM' WHERE book='NAH'").rowcount
-    rep.applied["nah_nam"] = rows_a + rows_b
-    assert_eq(
-        con.execute("SELECT COUNT(*) FROM bible_verses WHERE book='NAH'").fetchone()[0], 0, "NAH book rows"
+    if dot == 0 and nah == 0:
+        rep.skipped.append("refs already normalized (idempotent re-run)")
+        rep.after = {"dot_refs": 0, "unresolved": 0}
+        return rep
+    assert_drift("translations_import", total, exp["translations_import"])
+    assert_eq("D13 dot refs before", dot, exp["dot_refs"])
+    assert_eq("D13 NAH refs before", nah, exp["nah_rows"])
+    assert_eq("D13 empty refs", empty, exp["empty_refs"])
+    rep.planned_sql = [
+        "UPDATE translations_import SET reference='NAM'||substr(reference,4) WHERE reference LIKE 'NAH.%';",
+        "UPDATE translations_import SET reference=replace(reference,'.',' ') WHERE reference LIKE '%.%';",
+    ]
+    unresolved_sql = (
+        "SELECT COUNT(*) FROM translations_import WHERE reference <> ''"
+        " AND replace(reference,'.',' ') NOT IN (SELECT ref FROM bible_verses)"
     )
-    assert_eq(
-        con.execute("SELECT COUNT(*) FROM bible_verses WHERE ref LIKE 'NAH %'").fetchone()[0], 0, "NAH ref rows"
-    )
-    assert_eq(
-        con.execute("SELECT COUNT(*) FROM bible_verses WHERE ref LIKE '%.%'").fetchone()[0], 0, "dotted refs"
-    )
-    after_nam = con.execute("SELECT COUNT(*) FROM bible_verses WHERE book='NAM'").fetchone()[0]
-    if canon_nam + (rows_a + rows_b) // 2 != after_nam:
-        rep.errors.append("NAM row count drifted unexpectedly")
-    assert_eq(
-        imports_nah,
-        con.execute("SELECT COUNT(*) FROM bible_verses_import WHERE ref LIKE 'NAH%' OR book='NAH'").fetchone()[
-            0
-        ],
-        "imports NAH rows must be untouched by D13 (moved to canonical in step 02)",
-    )
-    rep.after = {"dotted": 0, "zero_pad": 0, "NAH_book": 0, "NAH_ref": 0, "NAM_canon": after_nam}
-    return rep
-
-
-# --------------------------------------------------------------------------
-# Archive — VACUUM INTO one uncompressed DB per import table, then verify
-# --------------------------------------------------------------------------
-
-
-def item_archive(con: sqlite3.Connection, mode: str, db_path: Path) -> ItemReport:
-    rep = ItemReport("archive")
-    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
-    manifest: dict[str, dict] = {}
-    if ARCHIVE_MANIFEST_PATH.exists():
-        manifest = json.loads(ARCHIVE_MANIFEST_PATH.read_text())
-
-    present = [t for (t,) in con.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-    )]
-    targets = [t for t in PLAN_EXPECTED["archive_targets"] if t in present]
-    rep.before = {"import_tables_present": len(targets), "archive_dir": str(ARCHIVE_DIR)}
-
-    total = 0
-    for t in targets:
-        nrows = con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-        total += nrows
-        dest = ARCHIVE_DIR / f"{t}-bak-20261027T000001Z.db"
-        entry = manifest.get(t, {})
-        if (
-            entry.get("source_count") == nrows
-            and entry.get("archive_count") == nrows
-            and Path(entry.get("archive_path", "")).exists()
-        ):
-            rep.skipped.append(f"{t} (archive already verified: {nrows} rows)")
-            continue
-        rep.projections[t] = {"rows": nrows, "archive": dest.name}
-        if mode != "apply":
-            continue
-        if dest.exists():
-            dest.unlink()
-        con.execute("VACUUM INTO ?", (str(dest),))
-        with sqlite3.connect(str(dest)) as arc:
-            got = arc.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-        assert_eq(got, nrows, f"{t} archive count")
-        manifest[t] = {
-            "source": str(db_path),
-            "source_count": nrows,
-            "archive_path": str(dest),
-            "archive_count": got,
-            "archived_at": now_iso(),
-        }
-        rep.applied[t] = got
-    rep.after = {"total_source_rows_in_scope": total, "archives": len(manifest)}
     if mode == "apply":
-        ARCHIVE_MANIFEST_PATH.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+        n1 = con.execute(
+            "UPDATE translations_import SET reference='NAM'||substr(reference,4) WHERE reference LIKE 'NAH.%'"
+        ).rowcount
+        n2 = con.execute(
+            "UPDATE translations_import SET reference=replace(reference,'.',' ') WHERE reference LIKE '%.%'"
+        ).rowcount
+        rep.applied = {"nah_fixed": n1, "dots_fixed": n2}
+        assert_eq(
+            "D13 NAH residual", scalar(con, "SELECT COUNT(*) FROM translations_import WHERE reference LIKE 'NAH.%'"), 0
+        )
+        assert_eq("D13 unresolved after normalize", scalar(con, unresolved_sql), 0)
         log_batch(
             con,
-            batch_id=f"r2a-archive-{now_iso()}",
-            table="r2a_archive",
-            status="r2a_batch",
-            row_count=total,
-            note=f"VACUUM INTO archive of {len(manifest)} import tables -> {ARCHIVE_DIR}",
+            item="d13",
+            table="translations_import",
+            rows=n1 + n2,
+            note="D13 ref normalization NAH->NAM + dot->space",
         )
-    return rep
-
-
-# --------------------------------------------------------------------------
-# Step 02 — bible_verses <- bible_verses_import (exact-2x + protected 545)
-# --------------------------------------------------------------------------
-
-BIBLE_IMPORT_EXCLUDES = "'ZOMIDAILY%', 'phrase:%'"
-BIBLE_IMPORT_PROTECTED = (
-    "ref NOT LIKE 'ZOMIDAILY%' AND ref NOT LIKE 'phrase:%' AND ref NOT IN "
-    "(SELECT ref FROM bible_verses) AND ref NOT IN (SELECT ref FROM bible_verses_import)"
-)
-PROTECTED_REF_SQL = (
-    "ref NOT LIKE 'ZOMIDAILY%' AND ref NOT LIKE 'phrase:%' AND ref NOT IN "
-    "(SELECT ref FROM bible_verses)"
-)
-
-
-def item_split(con: sqlite3.Connection, mode: str) -> ItemReport:
-    rep = ItemReport("split")
-    imp = con.execute("SELECT COUNT(*) FROM bible_verses_import").fetchone()[0]
-    canon = con.execute("SELECT COUNT(*) FROM bible_verses").fetchone()[0]
-    canon_excl = con.execute(
-        f"SELECT COUNT(*) FROM bible_verses WHERE ref NOT LIKE {BIBLE_IMPORT_EXCLUDES}"
-    ).fetchone()[0]
-    to_move = con.execute(
-        f"SELECT COUNT(*) FROM bible_verses_import WHERE {BIBLE_IMPORT_PROTECTED}"
-    ).fetchone()[0]
-    protected = con.execute(
-        f"SELECT COUNT(*) FROM bible_verses_import WHERE {PROTECTED_REF_SQL}"
-    ).fetchone()[0]
-    plan = PLAN_EXPECTED["split"]
-    rep.before = {"canon": canon, "canon_excl": canon_excl, "import": imp, "to_move": to_move}
-
-    if mode != "apply":
-        ok = True
-        if canon_excl != plan["canon_excl_expected"]:
-            rep.errors.append(f"canon excl {canon_excl} != plan {plan['canon_excl_expected']}")
-            ok = False
-        if to_move != plan["imports_to_canonical"]:
-            rep.errors.append(f"to_move {to_move} != plan {plan['imports_to_canonical']}")
-            ok = False
-        if protected != plan["protected_ref_rows"]:
-            rep.errors.append(f"protected {protected} != plan {plan['protected_ref_rows']}")
-            ok = False
-        if ok:
-            rep.projections["bible_verses"] = f"{canon} -> {canon_excl + to_move} (+{to_move} import-only refs)"
-            rep.projections["protected"] = f"{protected} import-only refs preserved"
-        rep.after = {"bible_verses_target": canon_excl + to_move}
-        return rep
-
-    cols = [r[1] for r in con.execute("PRAGMA table_info(bible_verses)")]
-    col_list = ", ".join(cols)
-    n = con.execute(
-        f"INSERT INTO bible_verses ({col_list}) SELECT {col_list} FROM bible_verses_import "
-        f"WHERE {BIBLE_IMPORT_PROTECTED}"
-    ).rowcount
-    assert_eq(n, plan["imports_to_canonical"], "inserted import-only refs")
-    canon_after = con.execute("SELECT COUNT(*) FROM bible_verses").fetchone()[0]
-    assert_eq(canon_after, canon_excl + n, "bible_verses after merge")
-    still_protected = con.execute(
-        f"SELECT COUNT(*) FROM bible_verses_import WHERE {PROTECTED_REF_SQL}"
-    ).fetchone()[0]
-    assert_eq(still_protected, plan["protected_ref_rows"], "protected import-only refs untouched")
-    assert_eq(
-        con.execute(
-            f"SELECT COUNT(*) FROM bible_verses WHERE ref LIKE {BIBLE_IMPORT_EXCLUDES}"
-        ).fetchone()[0],
-        plan["zomidaily_phrase_expected"],
-        "ZOMIDAILY+phrase untouched",
-    )
-    rep.applied["inserted"] = n
-    rep.after = {"bible_verses": canon_after, "protected_import_only": still_protected}
-    return rep
-
-
-# --------------------------------------------------------------------------
-# Step 03 — translations <- translations_import en->my + news split
-# --------------------------------------------------------------------------
-
-
-def item_articles(con: sqlite3.Connection, mode: str) -> ItemReport:
-    """D9/D10 — articles content_hash backfill + namespace logical split."""
-    rep = ItemReport("articles")
-    total = con.execute("SELECT COUNT(*) FROM articles").fetchone()[0]
-    null_hash = con.execute("SELECT COUNT(*) FROM articles WHERE content_hash IS NULL").fetchone()[0]
-    has_ns = con.execute("PRAGMA table_info(articles)").fetchall()
-    colnames = {r[1] for r in has_ns}
-    plan = PLAN_EXPECTED["articles"]
-    rep.before = {"rows": total, "null_hash": null_hash, "namespace_col": "namespace" in colnames}
-
-    dup_rows = con.execute(
-        "SELECT COUNT(*) FROM (SELECT content_hash FROM articles WHERE content_hash IS NOT NULL "
-        "GROUP BY content_hash HAVING COUNT(*) > 1)"
-    ).fetchone()[0]
-    if "namespace" not in colnames:
-        rep.projections["namespace"] = "ADD COLUMN namespace TEXT NOT NULL DEFAULT 'legacy'"
-    rep.projections["content_hash"] = f"backfill {null_hash} NULL rows (double-hex sha256(content))"
-    rep.projections["content_dup_groups"] = dup_rows
-
-    if mode != "apply":
-        rep.after = {"null_hash_target": 0, "namespaces": plan["namespace_counts"]}
-        return rep
-
-    n_fill = articles_content_hash(con, "articles")
-    after_null = con.execute("SELECT COUNT(*) FROM articles WHERE content_hash IS NULL").fetchone()[0]
-    assert_eq(after_null, 0, "articles NULL content_hash after backfill")
-    if "namespace" not in colnames:
-        con.execute("ALTER TABLE articles ADD COLUMN namespace TEXT NOT NULL DEFAULT 'legacy'")
-    for pred, value in (
-        ("source='zomidaily'", "news"),
-        ("source='zolai_simbu'", "lessons"),
-        ("source='legacy'", "legacy"),
-    ):
-        con.execute(f"UPDATE articles SET namespace=? WHERE {pred}", (value,))
-    ns_counts = dict(con.execute("SELECT namespace, COUNT(*) FROM articles GROUP BY namespace").fetchall())
-    assert_eq(ns_counts.get("news"), plan["namespace_counts"]["news"], "namespace news count")
-    assert_eq(ns_counts.get("lessons"), plan["namespace_counts"]["lessons"], "namespace lessons count")
-    assert_eq(ns_counts.get("legacy"), plan["namespace_counts"]["legacy"], "namespace legacy count")
-    assert_eq(
-        con.execute("SELECT COUNT(*) FROM articles WHERE source='legacy' AND content_hash IS NULL").fetchone()[
-            0
-        ],
-        0,
-        "legacy articles must not stay NULL (backfill is safe, only content-derived)",
-    )
-    protected = con.execute(
-        "SELECT COUNT(*) FROM articles WHERE source='legacy' AND (title IS NULL OR content IS NULL)"
-    ).fetchone()[0]
-    assert_eq(protected, 0, "protected legacy articles untouched (still present)")
-    rep.applied["content_hash_backfilled"] = n_fill
-    rep.after = {"null_hash": 0, "namespaces": ns_counts}
-    return rep
-
-
-def item_translations(con: sqlite3.Connection, mode: str) -> ItemReport:
-    rep = ItemReport("split")
-    imp = con.execute("SELECT COUNT(*) FROM translations_import").fetchone()[0]
-    canon = con.execute("SELECT COUNT(*) FROM translations").fetchone()[0]
-    dir_to = con.execute("SELECT COUNT(*) FROM translations_import WHERE dir='en_to_zo'").fetchone()[0]
-    dir_from = con.execute("SELECT COUNT(*) FROM translations_import WHERE dir='zo_to_en'").fetchone()[0]
-    dir_my = con.execute("SELECT COUNT(*) FROM translations_import WHERE dir='en->my'").fetchone()[0]
-    plan = PLAN_EXPECTED["split"]
-    rep.before = {
-        "canon": canon,
-        "import": imp,
-        "en_to_zo": dir_to,
-        "zo_to_en": dir_from,
-        "en_to_my": dir_my,
+    elif mode == "verify":
+        assert_eq("D13 unresolved after normalize", scalar(con, unresolved_sql), 0)
+    rep.after = {
+        "dot_refs": scalar(con, "SELECT COUNT(*) FROM translations_import WHERE reference LIKE '%.%'") or 0,
+        "unresolved": scalar(con, unresolved_sql) or 0,
     }
-
-    if mode != "apply":
-        ok = True
-        if imp != plan["exact_2x_imp"]:
-            rep.errors.append(f"translations_import {imp} != plan {plan['exact_2x_imp']}")
-            ok = False
-        if dir_my != plan["en_to_my_expected"]:
-            rep.errors.append(f"en->my {dir_my} != plan {plan['en_to_my_expected']}")
-            ok = False
-        if dir_to + dir_from != plan["zo_pair"]:
-            rep.errors.append(f"en_to_zo+zo_to_en {dir_to + dir_from} != plan {plan['zo_pair']}")
-            ok = False
-        if ok:
-            rep.projections["translations"] = f"{canon} -> {canon + dir_to + dir_from}"
-            rep.projections["translations_news"] = f"new table <- {dir_my} en->my rows"
-        rep.after = {"translations_target": canon + dir_to + dir_from, "news_target": dir_my}
-        return rep
-
-    cols = [r[1] for r in con.execute("PRAGMA table_info(translations)")]
-    col_list = ", ".join(cols)
-    n_main = con.execute(
-        f"INSERT INTO translations ({col_list}) SELECT {col_list} FROM translations_import WHERE dir IN "
-        f"('en_to_zo','zo_to_en')"
-    ).rowcount
-    assert_eq(n_main, dir_to + dir_from, "inserted en_to_zo+zo_to_en into translations")
-    con.execute(
-        "CREATE TABLE IF NOT EXISTS translations_news AS SELECT * FROM translations_import WHERE dir='en->my'"
-    )
-    news = con.execute("SELECT COUNT(*) FROM translations_news").fetchone()[0]
-    assert_eq(news, dir_my, "translations_news count")
-    assert_eq(con.execute("SELECT COUNT(*) FROM translations").fetchone()[0], canon + n_main, "translations total")
-    rep.applied["translations_inserted"] = n_main
-    rep.after = {"translations": canon + n_main, "translations_news": news}
+    rep.projections["note"] = "14 empty refs intentionally kept (documented, excluded from assert)"
     return rep
 
 
-# --------------------------------------------------------------------------
-# Step 05/06 — controlled collapse (exact full-row-identity, non-data cols excluded)
-# --------------------------------------------------------------------------
+# ── Archive — one archive DB, per-table count equality, sha256 manifest ─────
 
 
-def _collapse(con: sqlite3.Connection, table: str, group_cols: list[str], rep: ItemReport) -> int:
-    where = " AND ".join(f"{c} IS NOT NULL" for c in group_cols)
-    g = ", ".join(group_cols)
-    groups = con.execute(
-        f"SELECT {g}, COUNT(*) AS n FROM {table} WHERE {where} GROUP BY {g} HAVING n > 1"
-    ).fetchall()
-    total_removed = 0
-    for row in groups:
-        key = row[:-1]
-        n = row[-1]
-        cond = " AND ".join(f"{c} = ?" for c in group_cols)
-        ids = [r[0] for r in con.execute(f"SELECT id FROM {table} WHERE {cond} ORDER BY id", key)]
+def _archive_tables(con: sqlite3.Connection, p: Paths) -> dict[str, dict]:
+    return json.loads(p.manifest.read_text()) if p.manifest.exists() else {}
+
+
+def item_archive(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
+    rep = ItemReport("archive", mode)
+    present = [t for (t,) in con.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+    targets = [t for t in IMPORT_TABLES if t in present]
+    counts = {t: count(con, t) for t in targets}
+    rep.before = {"import_tables_present": len(targets), "total_rows": sum(counts.values())}
+    rep.projections["archive_db"] = str(p.archive_db)
+    if mode == "dry-run":
+        rep.after = {"per_table": counts}
+        return rep
+    if mode == "verify":
+        man = _archive_tables(con, p)
+        assert_eq("archive manifest tables", len([t for t in IMPORT_TABLES if t in man]), len(IMPORT_TABLES))
+        for t in IMPORT_TABLES:
+            entry = man[t]
+            assert_eq(f"archive {t} source==archive", entry["source_count"], entry["archive_count"])
+        rep.after = {"manifest_tables": len(man)}
+        return rep
+    # apply: build/refresh archive DB via ATTACH (idempotent: verified tables skipped)
+    man = _archive_tables(con, p)
+    p.ensure_dirs()
+    arc = sqlite3.connect(str(p.archive_db))
+    try:
+        arc.execute("PRAGMA journal_mode=DELETE")
+        fresh: list[str] = []
+        for t in targets:
+            n = counts[t]
+            entry = man.get(t)
+            if entry and entry.get("source_count") == n and table_exists(arc, t) and count(arc, t) == n:
+                rep.skipped.append(f"{t} (archive already verified: {n} rows)")
+            else:
+                fresh.append(t)
+        if fresh:
+            arc.execute("ATTACH DATABASE ? AS src", (str(p.db),))
+            try:
+                for t in fresh:
+                    arc.execute(f"DROP TABLE IF EXISTS main.{t}")
+                    arc.execute(f"CREATE TABLE main.{t} AS SELECT * FROM src.{t}")
+                    assert_eq(f"archive {t} count", count(arc, t), counts[t])
+                    man[t] = {"source_count": counts[t], "archive_count": count(arc, t), "archived_at": now_iso()}
+            finally:
+                arc.execute("DETACH DATABASE src")
+        digest = hashlib.sha256()
+        with p.archive_db.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                digest.update(chunk)
+        man["_manifest"] = {
+            "archive_db": str(p.archive_db),
+            "sha256": digest.hexdigest(),
+            "generated_at": now_iso(),
+        }
+        p.manifest.write_text(json.dumps(man, indent=2, sort_keys=True))
+        for t in targets:
+            assert_eq(f"archive {t} count", count(arc, t), counts[t])
+        log_batch(
+            con,
+            item="archive",
+            table="r2a_archive",
+            rows=sum(counts.values()),
+            note=f"archive-validated dump of {len(targets)} import tables",
+        )
+    finally:
+        arc.close()
+    rep.applied = {"archived_tables": len(targets), "fresh": len(fresh)}
+    rep.after = {"manifest_tables": len([t for t in IMPORT_TABLES if t in man])}
+    return rep
+
+
+# ── Split — translations en→my → translations_news (plan §2 step 3) ─────────
+
+
+def item_split(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
+    rep = ItemReport("split", mode)
+    exp = PLAN_EXPECTED["split"]
+    canon = count(con, "translations")
+    enmy = scalar(con, "SELECT COUNT(*) FROM translations WHERE direction='en→my'")
+    rep.before = {"translations": canon, "en_to_my": enmy}
+    if enmy == 0 and table_exists(con, "translations_news"):
+        rep.skipped.append("split already applied (idempotent re-run)")
+        rep.after = {"translations": canon, "translations_news": count(con, "translations_news")}
+        return rep
+    assert_drift("translations", canon, exp["translations"])
+    assert_drift("translations en→my", enmy, exp["en_to_my"])
+    rep.planned_sql = [
+        "CREATE TABLE translations_news AS SELECT * FROM translations WHERE direction='en→my';",
+        "DELETE FROM translations WHERE direction='en→my';",
+    ]
+    rep.projections["news_split"] = (
+        f"news:chuuhte {exp['news']:,} + parallel:arc {exp['parallel']:,} = {exp['en_to_my']:,}"
+    )
+    if mode == "apply":
+        if not table_exists(con, "translations_news"):
+            n = con.execute(
+                "CREATE TABLE translations_news AS SELECT * FROM translations WHERE direction='en→my'"
+            ).rowcount
+            rep.applied["news_created"] = n or exp["en_to_my"]
+        else:
+            rep.skipped.append("translations_news exists")
+        deleted = con.execute("DELETE FROM translations WHERE direction='en→my'").rowcount
+        rep.applied["deleted"] = deleted
+        assert_eq("translations after split", count(con, "translations"), exp["post"])
+        assert_eq("translations_news after split", count(con, "translations_news"), exp["en_to_my"])
+        assert_eq(
+            "non-Bible directions residual",
+            scalar(con, "SELECT COUNT(*) FROM translations WHERE direction NOT IN ('en_to_zo','zo_to_en')"),
+            0,
+        )
+        log_batch(
+            con,
+            item="split",
+            table="translations_news",
+            rows=deleted or exp["en_to_my"],
+            note="M9c en→my news/parallel split",
+        )
+    if mode == "verify":
+        assert_eq("translations post", count(con, "translations"), exp["post"])
+        assert_eq("translations_news post", count(con, "translations_news"), exp["en_to_my"])
+    rep.after = {
+        "translations": count(con, "translations"),
+        "translations_news": count(con, "translations_news") if table_exists(con, "translations_news") else 0,
+    }
+    return rep
+
+
+# ── Articles — hash backfill + namespace + protected-checked dup drop ───────
+
+
+PROTECTED_SQL = "source_file IS NULL AND language='zolai'"
+
+
+def item_articles(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
+    rep = ItemReport("articles", mode)
+    exp = PLAN_EXPECTED["articles"]
+    total = count(con, "articles")
+    null_hash = scalar(con, "SELECT COUNT(*) FROM articles WHERE content_hash IS NULL")
+    prot = scalar(con, f"SELECT COUNT(*) FROM articles WHERE {PROTECTED_SQL}")
+    rep.before = {"rows": total, "null_hash": null_hash, "protected": prot}
+    ns_col = "namespace" in {r[1] for r in con.execute("PRAGMA table_info(articles)")}
+    if null_hash == 0 and ns_col:
+        rep.skipped.append("articles backfill+namespace already applied (idempotent re-run)")
+        rep.after = {"rows": total, "null_hash": 0, "protected": prot}
+        return rep
+    assert_drift("articles", total, exp["total"])
+    assert_drift("articles NULL hash", null_hash, exp["null_hash"])
+    assert_eq("protected triple before", prot, exp["legacy"])
+    dup_sql = (
+        "SELECT id FROM articles WHERE content IN (SELECT content FROM articles"
+        " WHERE content IS NOT NULL AND content<>'' GROUP BY content HAVING COUNT(*)>1) ORDER BY id"
+    )
+    dup_ids = [r[0] for r in con.execute(dup_sql)]
+    rep.planned_sql = [
+        "-- backfill: UPDATE articles SET content_hash=doublehex(sha256(content)) WHERE content_hash IS NULL",
+        "ALTER TABLE articles ADD COLUMN namespace TEXT;  -- news|lessons|legacy",
+        "-- namespace: source_file='zomidaily'->news; language='zolai_simbu'->lessons; protected->legacy",
+        "-- dup: DELETE FROM articles WHERE id=MAX(id) of content-identical unprotected pair",
+    ]
+    if mode == "dry-run":
+        rep.after = {"null_hash_target": 0, "dup_ids": dup_ids, "post_rows": total - (1 if dup_ids else 0)}
+        return rep
+    if mode == "apply":
+        n = backfill_content_hash(con, "articles")
+        rep.applied["hash_backfilled"] = n
+        if "namespace" not in {r[1] for r in con.execute("PRAGMA table_info(articles)")}:
+            con.execute("ALTER TABLE articles ADD COLUMN namespace TEXT")
+        con.execute("UPDATE articles SET namespace='news' WHERE source_file='zomidaily'")
+        con.execute("UPDATE articles SET namespace='lessons' WHERE language='zolai_simbu'")
+        con.execute(f"UPDATE articles SET namespace='legacy' WHERE {PROTECTED_SQL}")
+        # content-dup drop: keep MIN(id), only if neither row is protected
+        groups = con.execute(
+            "SELECT content, MIN(id), MAX(id), COUNT(*) FROM articles WHERE content IS NOT NULL AND content<>''"
+            " GROUP BY content HAVING COUNT(*)>1"
+        ).fetchall()
+        dropped = 0
+        for _content, keep_id, drop_id, _n in groups:
+            protected_hit = scalar(
+                con,
+                f"SELECT COUNT(*) FROM articles WHERE id IN ({keep_id},{drop_id}) AND {PROTECTED_SQL}",
+            )
+            if protected_hit:
+                rep.skipped.append(f"content-dup pair {keep_id}/{drop_id} touches protected row — kept")
+                continue
+            con.execute("DELETE FROM articles WHERE id=?", (drop_id,))
+            dropped += 1
+        rep.applied["dup_dropped"] = dropped
+        assert_eq(
+            "articles NULL hash after", scalar(con, "SELECT COUNT(*) FROM articles WHERE content_hash IS NULL"), 0
+        )
+        assert_eq(
+            "protected triple after", scalar(con, f"SELECT COUNT(*) FROM articles WHERE {PROTECTED_SQL}"), exp["legacy"]
+        )
+        assert_eq(
+            "namespace news", scalar(con, "SELECT COUNT(*) FROM articles WHERE namespace='news'"), exp["news"] - dropped
+        )
+        assert_eq(
+            "namespace lessons", scalar(con, "SELECT COUNT(*) FROM articles WHERE namespace='lessons'"), exp["lessons"]
+        )
+        assert_eq(
+            "namespace legacy", scalar(con, "SELECT COUNT(*) FROM articles WHERE namespace='legacy'"), exp["legacy"]
+        )
+        log_batch(
+            con,
+            item="articles",
+            table="articles",
+            rows=n + dropped,
+            note="D14 hash backfill + namespace + protected dup drop",
+        )
+    if mode == "verify":
+        assert_eq(
+            "articles NULL hash verify", scalar(con, "SELECT COUNT(*) FROM articles WHERE content_hash IS NULL"), 0
+        )
+        assert_eq(
+            "protected triple verify",
+            scalar(con, f"SELECT COUNT(*) FROM articles WHERE {PROTECTED_SQL}"),
+            exp["legacy"],
+        )
+        assert_eq("articles rows verify", count(con, "articles"), exp["post"])
+    rep.after = {
+        "rows": count(con, "articles"),
+        "null_hash": scalar(con, "SELECT COUNT(*) FROM articles WHERE content_hash IS NULL") or 0,
+        "protected": scalar(con, f"SELECT COUNT(*) FROM articles WHERE {PROTECTED_SQL}") or 0,
+    }
+    return rep
+
+
+# ── Collapse — exact-pair, full-row-identity gate (plan §2 step 5) ──────────
+
+
+def _collapse_table(con: sqlite3.Connection, table: str, key_cols: list[str], rep: ItemReport) -> tuple[int, int]:
+    """Collapse exact dup groups (keep MIN(id)); returns (removed, skipped_groups)."""
+    cols = data_columns(con, table)
+    ident = ", ".join(cols)
+    key = ", ".join(key_cols)
+    # GROUP BY unifies NULLs; do NOT filter on data cols (wa.myanmar is NULL on the dup pairs)
+    groups = con.execute(f"SELECT {key}, COUNT(*) FROM {table} GROUP BY {key} HAVING COUNT(*)>1").fetchall()
+    removed = skipped = 0
+    kcond = " AND ".join(f"{c}=?" for c in key_cols)
+    for group in groups:
+        keys = group[:-1]
+        ids = [r[0] for r in con.execute(f"SELECT id FROM {table} WHERE {kcond} ORDER BY id", keys)]
         if len(ids) < 2:
             continue
-        keep, drop = ids[0], ids[1:]
-        total_removed += len(drop)
-        if rep.mode == "apply":
-            ph = ",".join("?" * len(drop))
-            con.execute(f"DELETE FROM {table} WHERE id IN ({ph})", drop)
-    rep.projections[f"{table}_groups"] = len(groups)
-    rep.applied[f"{table}_removed"] = total_removed
-    return total_removed
+        # full-row-identity gate over data columns
+        distinct = con.execute(
+            f"SELECT COUNT(*) FROM (SELECT {ident} FROM {table} WHERE {kcond} GROUP BY {ident})", keys
+        ).fetchone()[0]
+        if distinct > 1:
+            skipped += 1
+            continue  # owner gate: differing data columns — never merge
+        ph = ",".join("?" * (len(ids) - 1))
+        con.execute(f"DELETE FROM {table} WHERE id IN ({ph})", ids[1:])
+        removed += len(ids) - 1
+    return removed, skipped
 
 
-def item_collapse(con: sqlite3.Connection, mode: str) -> ItemReport:
-    rep = ItemReport("collapse")
-    rep.mode = mode
-    plan = PLAN_EXPECTED["collapse"]
-    tables = [
-        ("translations", ["source", "target", "domain"]),
-        ("translations_news", ["source", "target", "domain"]),
-        ("word_alignments", ["source", "target", "source_token_idx", "target_token_idx", "alignment_type"]),
-        ("zolai_bible_analysis", ["ref", "book", "book_name", "zolai", "english", "analysis"]),
-    ]
-    before_counts = {}
-    for t, _ in tables:
-        try:
-            before_counts[t] = con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-        except sqlite3.OperationalError:
-            rep.skipped.append(f"{t} (absent)")
-    rep.before = dict(before_counts)
-
-    removed: dict[str, int] = {}
-    for t, cols in tables:
-        if t not in before_counts:
-            continue
-        removed[t] = _collapse(con, t, cols, rep)
-    rep.after = {t: before_counts[t] - removed.get(t, 0) for t in before_counts}
-
-    if mode != "apply":
+def item_collapse(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
+    rep = ItemReport("collapse", mode)
+    exp = PLAN_EXPECTED["collapse"]
+    wa = count(con, "word_alignments")
+    zba = count(con, "zolai_bible_analysis")
+    rep.before = {"word_alignments": wa, "zolai_bible_analysis": zba}
+    assert_drift("word_alignments", wa, exp["wa"])
+    assert_drift("zolai_bible_analysis", zba, exp["zba"])
+    if mode == "dry-run":
+        rep.after = {"word_alignments_target": exp["wa_post"], "zolai_bible_analysis": "skip-list (dialect collisions)"}
         return rep
-
-    # Post-asserts only when the table is in scope for the plan's allowed outcomes.
-    assert_eq(
-        rep.after.get("translations"),
-        rep.before["translations"] - removed.get("translations", 0),
-        "translations collapse arithmetic",
-    )
-    for t, target_key in (("translations", "translations_post"), ("translations_news", "news_post")):
-        if t in rep.after and plan.get(target_key) is not None and removed.get(t, 0) > 0:
-            assert_eq(rep.after[t], plan[target_key], f"{t} post-collapse exact-2x")
-    if removed.get("word_alignments", 0) > 0:
-        assert_eq(rep.after["word_alignments"], plan["word_align_post"], "word_alignments collapse")
-    if removed.get("zolai_bible_analysis", 0) > 0:
-        assert_eq(rep.after["zolai_bible_analysis"], plan["zba_post"], "zba collapse")
-    elif SKIPLIST_ZBA.exists():
-        rep.skipped.append("zba collapse: 706 dialect-collision groups filed in skip-list (M4.13 owner gate)")
-    return rep
-
-
-# --------------------------------------------------------------------------
-# Step 08 — import_log backfill/census
-# --------------------------------------------------------------------------
-
-
-def item_import_log(con: sqlite3.Connection, mode: str) -> ItemReport:
-    rep = ItemReport("import_log")
-    plan = PLAN_EXPECTED["import_log"]
-    imp_log = con.execute("SELECT COUNT(*) FROM import_log WHERE table_name='bible_verses_import'").fetchone()[0]
-    completed = con.execute("SELECT COUNT(*) FROM import_log WHERE status='completed'").fetchone()[0]
-    failed = con.execute("SELECT COUNT(*) FROM import_log WHERE status='failed'").fetchone()[0]
-    m8a = con.execute("SELECT COUNT(*) FROM import_log WHERE status IN ('completed','failed')").fetchone()[0]
-    bad_alias = [
-        t
-        for t in ALIAS_MAP
-        if t not in {r[0] for r in con.execute("SELECT DISTINCT table_name FROM import_log")}
-    ]
-    # alias table names that do not resolve to canonical names in the same table_name column
-    unresolved = [
-        t
-        for t in ALIAS_MAP
-        if not con.execute(
-            "SELECT 1 FROM import_log WHERE table_name=? OR table_name=? LIMIT 1", (ALIAS_MAP[t], ALIAS_MAP[t])
+    if mode == "apply":
+        removed, skipped = _collapse_table(
+            con, "word_alignments", ["ref", "zolai_word", "english_word", "position"], rep
         )
-    ]
-    rep.before = {"completed": completed, "failed": failed, "m8a_entries": m8a, "bible_import_entries": imp_log}
-
-    if mode != "apply":
-        ok = True
-        if imp_log != plan["bible_import_entries"]:
-            rep.errors.append(f"bible_verses_import entries {imp_log} != plan {plan['bible_import_entries']}")
-            ok = False
-        if m8a != plan["m8a_entries"]:
-            rep.errors.append(f"completed+failed {m8a} != plan {plan['m8a_entries']}")
-            ok = False
-        if unresolved:
-            rep.errors.append(f"alias entries do not resolve: {unresolved}")
-            ok = False
-        if ok:
-            rep.projections["m8a"] = f"{m8a} -> 0 (all completed+failed rows -> r2a_reconciled)"
-        rep.after = {"m8a_target": 0}
-        return rep
-
-    changed = con.execute("UPDATE import_log SET status='r2a_reconciled' WHERE status IN ('completed','failed')").rowcount
-    assert_eq(changed, m8a, "reconciled rows")
-    m8a_after = con.execute("SELECT COUNT(*) FROM import_log WHERE status IN ('completed','failed')").fetchone()[0]
-    assert_eq(m8a_after, 0, "M8a entries after reconcile")
-    con.execute(
-        "INSERT INTO import_log (id, batch_id, table_name, status, row_count, created_at, updated_at, note) VALUES "
-        "('r2a-census-20261027T020000Z', 'r2a-census-20261027T020000Z', 'zolai_census', 'r2a_batch', ?, ?, ?, ?)",
-        (
-            con.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'").fetchone()[0],
-            now_iso(),
-            now_iso(),
-            "post-R2-A census: 26 import tables archived+dropped, 3 staging drops, 13 index pairs reclaimed",
-        ),
-    )
-    rep.applied["reconciled"] = changed
-    rep.after = {"m8a": 0}
+        assert_eq("word_alignments after collapse", count(con, "word_alignments"), exp["wa_post"])
+        rep.applied["word_alignments_removed"] = removed
+        zremoved, zskipped = _collapse_table(con, "zolai_bible_analysis", ["book_code", "chapter", "verse"], rep)
+        if zremoved:
+            rep.applied["zba_removed"] = zremoved
+        if zskipped:
+            p.skiplist_zba.parent.mkdir(parents=True, exist_ok=True)
+            p.skiplist_zba.write_text(
+                json.dumps(
+                    {
+                        "reason": "full-row-identity gate: dialect book-code collisions differ in data columns",
+                        "skipped_groups": zskipped,
+                        "table": "zolai_bible_analysis",
+                        "generated_at": now_iso(),
+                    },
+                    indent=2,
+                )
+            )
+            rep.skipped.append(
+                f"zba {zskipped} groups skipped (identity gate) -> {p.skiplist_zba.name} (M4.13 owner gate)"
+            )
+        assert_eq("zolai_bible_analysis rows", count(con, "zolai_bible_analysis"), zba - zremoved)
+        log_batch(
+            con,
+            item="collapse",
+            table="word_alignments",
+            rows=removed,
+            note=f"R2-A exact-pair collapse (wa {removed}, zba skipped {zskipped})",
+        )
+    if mode == "verify":
+        assert_eq("word_alignments verify", count(con, "word_alignments"), exp["wa_post"])
+    rep.after = {
+        "word_alignments": count(con, "word_alignments"),
+        "zolai_bible_analysis": count(con, "zolai_bible_analysis"),
+    }
     return rep
 
 
-# --------------------------------------------------------------------------
-# Step 07/09 — drop archived import tables + phase2c empty staging tables
-# --------------------------------------------------------------------------
+# ── Drop imports — archive-validated (plan §2 step 6) ───────────────────────
 
 
-def _assert_prefix_covered(con: sqlite3.Connection, table: str, rep: ItemReport) -> bool:
-    if prefix_covered(con, table):
-        return True
-    rep.errors.append(f"{table}: import-side prefix NOT fully represented in canonical before drop")
-    return False
-
-
-def item_drop_imports(con: sqlite3.Connection, mode: str) -> ItemReport:
-    rep = ItemReport("drop_imports")
-    present = [t for (t,) in con.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
-    targets = [t for t in PLAN_EXPECTED["archive_targets"] if t in present]
-    checks = {
-        "bible_verses_import": "bible_verses",
-        "translations_import": "translations",
-        "word_alignments_import": "word_alignments",
-        "dictionary_import": "dictionary",
-        "vocab_import": "vocab",
-        "dictionary_my_import": "dictionary_my",
-    }
+def item_drop_imports(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
+    rep = ItemReport("drop_imports", mode)
+    present = [t for (t,) in con.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+    targets = [t for t in IMPORT_TABLES if t in present]
+    man = _archive_tables(con, p)
     rep.before = {"import_tables_present": len(targets)}
-
-    for t, canon in checks.items():
-        if t in present:
-            _assert_prefix_covered(con, t, rep)
-            if canon == "bible_verses":
-                # special: import-only refs must already be merged into canonical
-                leftover = con.execute(
-                    f"SELECT COUNT(*) FROM {t} WHERE ref NOT LIKE {BIBLE_IMPORT_EXCLUDES} "
-                    f"AND ref NOT IN (SELECT ref FROM bible_verses)"
-                ).fetchone()[0]
-                if leftover:
-                    rep.errors.append(f"bible_verses_import has {leftover} rows not in canonical")
-            else:
-                imp_rows = con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-                canon_rows = con.execute(f"SELECT COUNT(*) FROM {canon}").fetchone()[0]
-                if canon_rows < imp_rows:
-                    rep.errors.append(f"{canon} rows {canon_rows} < {t} rows {imp_rows}")
-
-    if mode != "apply":
-        rep.projections["dropped"] = targets
-        rep.after = {"import_tables_target": 0}
+    # BLOCK unless archive manifest proves count equality for every target
+    unverified = [t for t in targets if t not in man or man[t].get("source_count") != man[t].get("archive_count")]
+    if unverified:
+        if mode == "apply":
+            raise R2AStop(f"drop blocked: no count-verified archive for {unverified[:5]}")
+        rep.projections["blocked_until_archive"] = (
+            f"{len(unverified)} tables await count-verified archive (archive item runs first in apply)"
+        )
+        rep.after = {"dropped": 0}
         return rep
-
-    if rep.errors:
-        raise R2AStop("drop_imports blocked: prefix/row checks failed - " + "; ".join(rep.errors[:3]))
+    if mode == "dry-run":
+        rep.after = {"dropped": len(targets)}
+        return rep
+    if mode == "verify":
+        assert_eq("import tables after drop", len(targets), 0)
+        return rep
     for t in targets:
         con.execute(f"DROP TABLE {t}")
         rep.applied[t] = "dropped"
-    left = con.execute(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND (name LIKE '%_import' OR name IN "
-        f"({','.join('?' * len(PHASE2_EMPTY_DROPS))}))",
-        list(PHASE2_EMPTY_DROPS),
-    ).fetchone()[0]
-    assert_eq(left, 0, "no import/phase2c staging tables left")
+    assert_eq(
+        "import tables residual",
+        scalar(con, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name LIKE '%_import'"),
+        0,
+    )
+    log_batch(
+        con,
+        item="drop_imports",
+        table="r2a_import_tables",
+        rows=len(targets),
+        note=f"dropped {len(targets)} archived import tables",
+    )
     rep.after = {"import_tables": 0}
     return rep
 
 
-def item_phase2_drops(con: sqlite3.Connection, mode: str) -> ItemReport:
-    rep = ItemReport("phase2_drops")
-    present = {
-        t for (t,) in con.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-    }
-    targets = [t for t in PHASE2_EMPTY_DROPS if t in present]
-    for t in targets:
-        n = con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-        if n != 0:
-            rep.errors.append(f"{t} not empty ({n} rows) - refusing to drop")
-    rep.before = {"targets_present": len(targets)}
-    if mode != "apply":
-        rep.projections["dropped"] = targets
+# ── import_log rebuild (plan §2 step 7) ────────────────────────────────────
+
+
+def item_import_log(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
+    rep = ItemReport("import_log", mode)
+    exp = PLAN_EXPECTED["import_log"]
+    total = count(con, "import_log")
+    completed = scalar(con, "SELECT COUNT(*) FROM import_log WHERE status='completed'")
+    failed = scalar(con, "SELECT COUNT(*) FROM import_log WHERE status='failed'")
+    rep.before = {"entries": total, "completed": completed, "failed": failed}
+    census_done = scalar(con, "SELECT COUNT(*) FROM import_log WHERE status='census'")
+    if completed == 0 and (census_done or 0) > 0:
+        rep.skipped.append("import_log rebuild already applied (idempotent re-run)")
+        rep.after = {"entries": total, "completed": 0}
         return rep
-    if rep.errors:
-        raise R2AStop("phase2_drops blocked: " + "; ".join(rep.errors))
+    assert_drift("import_log entries", total, exp["total"])
+    alias_hits = scalar(
+        con,
+        f"SELECT COUNT(*) FROM import_log WHERE table_name IN ({','.join('?' * len(ALIAS_MAP))})",
+        tuple(ALIAS_MAP),
+    )
+    rep.planned_sql = [
+        "-- (a) completed w/ dropped table -> status='archived' + note",
+        "-- (b) alias table_names -> canonical *_import",
+        "-- (c) remaining completed -> rows_imported=live; claimed>0&live=0 -> 'lost'",
+        "-- (d) census: populated unlogged tables, status='census', uuid batch_id",
+        "-- (e) one provenance row for census batch (row_count>0)",
+    ]
+    census_scope = _census_scope(con)
+    rep.projections["census_tables"] = len(census_scope)
+    if mode == "dry-run":
+        rep.after = {"alias_entries": alias_hits, "completed_target": 0}
+        return rep
+    if mode == "apply":
+        # (a) completed entries whose table no longer exists -> archived
+        cur = con.execute("SELECT id, table_name FROM import_log WHERE status='completed'").fetchall()
+        archived = lost = recounted = 0
+        for eid, tname in cur:
+            if not table_exists(con, tname):
+                con.execute(
+                    "UPDATE import_log SET status='archived', error_message=? WHERE id=?",
+                    (ARCHIVED_NOTE, eid),
+                )
+                archived += 1
+            else:
+                live = count(con, tname)
+                claimed = scalar(con, "SELECT rows_imported FROM import_log WHERE id=?", (eid)) or 0
+                if claimed > 0 and live == 0:
+                    con.execute(
+                        "UPDATE import_log SET status='lost', error_message=? WHERE id=?",
+                        (f"R2-A: claimed {claimed} rows, live table empty", eid),
+                    )
+                    lost += 1
+                else:
+                    con.execute("UPDATE import_log SET rows_imported=? WHERE id=?", (live, eid))
+                    recounted += 1
+        # (b) alias canonicalization
+        renamed = 0
+        for alias, canonical in ALIAS_MAP.items():
+            cur2 = con.execute(
+                "UPDATE import_log SET table_name=? WHERE table_name=? AND NOT EXISTS "
+                "(SELECT 1 FROM import_log l2 WHERE l2.table_name=?)",
+                (canonical, alias, canonical),
+            )
+            renamed += cur2.rowcount
+        # (d)+(e) census
+        census_rows = 0
+        for tname, live in census_scope:
+            con.execute(
+                "INSERT INTO import_log (batch_id, source_file, table_name, rows_imported, imported_at, version, status)"
+                " VALUES (?,?,?,?,?,1,?)",
+                (str(uuid.uuid4()), "r2a-census", tname, live, now_iso(), CENSUS_STATUS),
+            )
+            census_rows += 1
+        if census_rows:
+            con.execute(
+                "INSERT INTO provenance (filename, size_bytes, sha256, row_count, source, generator_script, version, status, updated_at, change_log)"
+                " VALUES (?,?,?,?,'R2-A consolidation','scripts/maintenance/consolidation_r2a.py','1','applied',?,?)",
+                (
+                    f"r2a-census-{now_iso()}",
+                    0,
+                    hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest(),
+                    census_rows,
+                    now_iso(),
+                    f"R2-A census of {census_rows} populated unlogged tables",
+                ),
+            )
+        rep.applied = {
+            "archived": archived,
+            "lost": lost,
+            "recounted": recounted,
+            "renamed": renamed,
+            "census": census_rows,
+        }
+        assert_eq("M8a completed residual", scalar(con, "SELECT COUNT(*) FROM import_log WHERE status='completed'"), 0)
+        assert_eq(
+            "M8d failed missing error_message",
+            scalar(
+                con,
+                "SELECT COUNT(*) FROM import_log WHERE status='failed' AND (error_message IS NULL OR TRIM(error_message)='')",
+            ),
+            0,
+        )
+        log_batch(
+            con,
+            item="import_log",
+            table="import_log",
+            rows=archived + lost + recounted + renamed + census_rows,
+            note="D16 import_log rebuild: archived/lost/recount/aliases/census",
+        )
+    if mode == "verify":
+        assert_eq(
+            "M8a completed residual verify", scalar(con, "SELECT COUNT(*) FROM import_log WHERE status='completed'"), 0
+        )
+    rep.after = {
+        "entries": count(con, "import_log"),
+        "completed": scalar(con, "SELECT COUNT(*) FROM import_log WHERE status='completed'") or 0,
+    }
+    return rep
+
+
+def _census_scope(con: sqlite3.Connection) -> list[tuple[str, int]]:
+    logged = {r[0] for r in con.execute("SELECT DISTINCT table_name FROM import_log WHERE status='completed'")}
+    out: list[tuple[str, int]] = []
+    for (t,) in con.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        " AND name NOT LIKE '%_fts' ORDER BY name"
+    ):
+        if t in CENSUS_EXCLUDE or t in logged:
+            continue
+        n = count(con, t)
+        if n > 0:
+            out.append((t, n))
+    return out
+
+
+# ── Phase-2 empty drops + index reclaim + final counts ─────────────────────
+
+
+def item_phase2_drops(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
+    rep = ItemReport("phase2_drops", mode)
+    present = [t for (t,) in con.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+    targets = [t for t in PHASE2_EMPTY_DROPS if t in present]
+    nonempty = {t: count(con, t) for t in targets if count(con, t) > 0}
+    rep.before = {"targets_present": len(targets)}
+    if nonempty:
+        if mode == "apply":
+            raise R2AStop(f"phase2 drop blocked: non-empty {nonempty}")
+        rep.errors.append(f"drop would be BLOCKED: non-empty {nonempty}")
+        return rep
+    if mode == "dry-run":
+        rep.after = {"dropped": len(targets)}
+        return rep
+    if mode == "verify":
+        assert_eq("phase2 tables residual", len(targets), 0)
+        return rep
     for t in targets:
         con.execute(f"DROP TABLE {t}")
         rep.applied[t] = "dropped"
+    for keep in DROP_KEEP:
+        assert_eq(f"keep table {keep}", table_exists(con, keep), 1)
+    log_batch(
+        con,
+        item="phase2_drops",
+        table="r2a_phase2",
+        rows=len(targets),
+        note="dropped 4 empty phase-2c tables; KEEP set intact",
+    )
     return rep
 
 
-# --------------------------------------------------------------------------
-# Step 10 — redundant index pairs
-# --------------------------------------------------------------------------
-
-
-def item_indexes(con: sqlite3.Connection, mode: str) -> ItemReport:
-    rep = ItemReport("indexes")
-    names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='index'")}
-    drop_now = [n for n in INDEX_DROP_SET if n in names]
-    rep.before = {"drop_candidates_present": len(drop_now), "of_planned": len(INDEX_DROP_SET)}
-    rep.projections["reclaimed"] = "~147 MiB (VACUUM later in run)"
-    if mode != "apply":
-        rep.after = {"drop_candidates": drop_now}
+def item_indexes(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
+    rep = ItemReport("indexes", mode)
+    present = {n for (n,) in con.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    drops = [n for n in INDEX_DROP_SET if n in present]
+    missing_keep = [INDEX_DROP_SET[n] for n in drops if not index_exists(con, INDEX_DROP_SET[n])]
+    rep.before = {"drop_candidates": len(drops), "of_planned": len(INDEX_DROP_SET)}
+    rep.projections["reclaimed"] = "~147 MiB after VACUUM"
+    if missing_keep:
+        if mode == "apply":
+            raise R2AStop(f"index drop blocked: keep-index missing {missing_keep}")
+        rep.errors.append(f"drop would be BLOCKED: keep-index missing {missing_keep}")
         return rep
-
-    for name in drop_now:
-        row = con.execute(
-            "SELECT sql, tbl_name FROM sqlite_master WHERE type='index' AND name=?", (name,)
-        ).fetchone()
-        if row is None:
-            continue
-        sql, tbl = row
-        # Never drop an implicit rowid/UNIQUE index or a PRIMARY KEY index.
+    if mode == "dry-run":
+        rep.after = {"dropped": len(drops)}
+        return rep
+    if mode == "verify":
+        assert_eq("planned index drops residual", len([n for n in INDEX_DROP_SET if n in present]), 0)
+        return rep
+    for n in drops:
+        sql = scalar(con, "SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (n,))
         if sql is None or "UNIQUE" in sql.upper() or "PRIMARY KEY" in sql.upper():
-            rep.errors.append(f"refusing to drop {name} (implicit/unique/pk)")
+            rep.skipped.append(f"{n} implicit/unique/pk — refused")
             continue
-        con.execute(f"DROP INDEX {name}")
-        rep.applied[name] = "dropped"
-    for t, keep in DROP_KEEP.items():
-        still = con.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?", (keep,)).fetchone()[0]
-        assert_eq(still, 1, f"keep-index {keep} on {t} must survive")
+        con.execute(f"DROP INDEX {n}")
+        rep.applied[n] = "dropped"
+    for keep in {INDEX_DROP_SET[n] for n in drops}:
+        assert_eq(f"keep index {keep}", index_exists(con, keep), 1)
+    log_batch(
+        con,
+        item="indexes",
+        table="r2a_indexes",
+        rows=len(rep.applied),
+        note=f"reclaimed {len(rep.applied)} redundant indexes",
+    )
+    rep.after = {"dropped": len(rep.applied)}
     return rep
 
 
-# --------------------------------------------------------------------------
-# Final counts + verify projections
-# --------------------------------------------------------------------------
-
-
-def item_final_counts(con: sqlite3.Connection, mode: str) -> ItemReport:
-    rep = ItemReport("final_counts")
-    want = {
-        "bible_verses": CANONICAL_POST["bible_verses"],
-        "translations": CANONICAL_POST["translations"],
-        "translations_news": CANONICAL_POST["translations_news"],
-        "word_alignments": CANONICAL_POST["word_alignments"],
-        "zolai_bible_analysis": CANONICAL_POST["zolai_bible_analysis"],
-        "dictionary": CANONICAL_POST["dictionary"],
-        "vocab": CANONICAL_POST["vocab"],
-        "dictionary_my": CANONICAL_POST["dictionary_my"],
-    }
-    got: dict[str, int] = {}
-    for t, exp in want.items():
-        try:
-            got[t] = con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-        except sqlite3.OperationalError:
-            rep.errors.append(f"{t} missing")
-            continue
-        if mode != "apply":
-            assert_eq(got[t], exp, f"final count {t}")
-    rep.before = dict(got)
-    if mode == "apply":
-        FINAL_COUNTS_PATH.write_text(json.dumps({"at": now_iso(), "counts": got}, indent=2, sort_keys=True))
-    rep.after = dict(got)
+def item_final_counts(con: sqlite3.Connection, mode: str, p: Paths) -> ItemReport:
+    rep = ItemReport("final_counts", mode)
+    tables = [
+        r[0]
+        for r in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        )
+    ]
+    counts = {t: count(con, t) for t in tables}
+    freelist = scalar(con, "PRAGMA freelist_count")
+    rep.before = {"tables": len(tables), "freelist_pp": freelist or 0}
+    for name, want in CANONICAL_POST.items():
+        if name in counts:
+            if mode != "dry-run":
+                assert_eq(f"final count {name}", counts[name], want)
+        elif mode != "dry-run":
+            rep.errors.append(f"final count {name}: table missing")
+    if mode != "dry-run":
+        p.final_counts.parent.mkdir(parents=True, exist_ok=True)
+        p.final_counts.write_text(
+            f"# R2-A final counts ({now_iso()})\n"
+            + "\n".join(f"{t}={counts[t]}" for t in tables)
+            + f"\nfreelist_pages={freelist}\n"
+        )
+    rep.after = {k: counts.get(k, 0) for k in CANONICAL_POST if k in counts}
     return rep
-
-
-# --------------------------------------------------------------------------
-# Driver
-# --------------------------------------------------------------------------
 
 
 ITEMS = {
     "d13": item_d13,
-    "split": item_translations,
+    "archive": item_archive,
+    "split": item_split,
     "articles": item_articles,
     "collapse": item_collapse,
+    "drop_imports": item_drop_imports,
     "import_log": item_import_log,
     "phase2_drops": item_phase2_drops,
     "indexes": item_indexes,
@@ -694,114 +779,140 @@ ITEMS = {
 }
 
 
-def run_items(
-    db_path: Path,
-    mode: str,
-    items: list[str],
-    *,
-    apply_writes: bool,
-    single_writer: bool,
-    require_backup: bool,
-    report_path: Path | None = None,
-) -> int:
-    reports: list[ItemReport] = []
-    con = connect_ro(db_path)
-    try:
-        # Read-only projections first (they use the ro connection).
-        for name in items:
-            if name == "archive":
-                rep = item_archive(con, mode, db_path)
-            elif name == "drop_imports":
-                rep = item_drop_imports(con, mode)
-            else:
-                rep = ITEMS[name](con, mode)
-            rep.report(mode)
-            reports.append(rep)
-            if rep.errors:
-                return _finish(reports, report_path)
-        if mode != "apply":
-            return _finish(reports, report_path)
-    finally:
-        con.close()
+# ── driver ──────────────────────────────────────────────────────────────────
 
-    # Apply path: exclusive rw connection, fuser + backup gates.
-    if apply_writes and mode == "apply":
+
+def run(db: Path, mode: str, items: list[str], p: Paths) -> int:
+    reports: list[ItemReport] = []
+    ordered = [i for i in ITEM_ORDER if i in items]
+    if mode != "apply":
+        con = connect_ro(db)
         try:
-            if single_writer:
-                fuser_clean(db_path)
-            if require_backup:
-                require_fresh_backup()
+            for name in ordered:
+                try:
+                    rep = ITEMS[name](con, mode, p)
+                except R2AStop as e:
+                    rep = ItemReport(name, mode)
+                    rep.errors.append(str(e))
+                rep.report()
+                reports.append(rep)
+        finally:
+            con.close()
+    else:
+        if p.use_gates:
+            try:
+                fuser_clean(db)
+                require_fresh_backup(db, p.backup_dir)
+            except R2AStop as e:
+                print(f"[gate] {e}", file=sys.stderr)
+                return 2
+        con = connect_rw(db)
+        try:
+            for name in ordered:
+                try:
+                    with write_batch(con):
+                        rep = ITEMS[name](con, "apply", p)
+                except R2AStop as e:
+                    print(f"[{name}] STOP: {e}", file=sys.stderr)
+                    rep = ItemReport(name, "apply")
+                    rep.errors.append(str(e))
+                    rep.report()
+                    reports.append(rep)
+                    continue
+                rep.report()
+                reports.append(rep)
+        finally:
+            con.close()
+    bad = [r for r in reports if r.errors]
+    if bad:
+        print(f"{len(bad)} item(s) reported errors", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_vacuum(p: Paths) -> int:
+    """VACUUM LAST (plan §2 step 11): VACUUM INTO + integrity_check + atomic swap."""
+    db = p.db
+    if p.use_gates:
+        try:
+            fuser_clean(db)
         except R2AStop as e:
             print(f"[gate] {e}", file=sys.stderr)
             return 2
-        con = sqlite3.connect(str(db_path), isolation_level=None)
-        con.execute("PRAGMA foreign_keys=ON")
-        try:
-            for name in items:
-                con.execute(BEGIN_WRITE_BATCH)
-                try:
-                    if name == "archive":
-                        rep = item_archive(con, "apply", db_path)
-                    elif name == "drop_imports":
-                        rep = item_drop_imports(con, "apply")
-                    else:
-                        rep = ITEMS[name](con, "apply")
-                    if rep.errors:
-                        con.execute("ROLLBACK")
-                        rep.report("apply")
-                        return 1
-                    con.execute(END_WRITE_BATCH)
-                except Exception as e:  # noqa: BLE001 - batch atomicity
-                    con.execute("ROLLBACK")
-                    print(f"[batch:{name}] ROLLED BACK: {e}", file=sys.stderr)
-                    return 1
-                rep.report("apply")
-        finally:
-            con.close()
-    return _finish(reports, report_path)
-
-
-def _finish(reports: list[ItemReport], report_path: Path | None) -> int:
-    rc = 1 if any(r.errors for r in reports) else 0
-    if report_path:
-        report_path.write_text(
-            json.dumps([r.to_dict() for r in reports], indent=2, sort_keys=True, default=str)
-        )
-    return rc
+    tmp = db.with_suffix(".vacuum-tmp")
+    if tmp.exists():
+        tmp.unlink()
+    # flush WAL into the main file so the pre-vacuum backup is self-contained
+    con = connect_rw(db)
+    try:
+        con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    finally:
+        con.close()
+    con = sqlite3.connect(str(db))
+    try:
+        con.execute("VACUUM INTO ?", (str(tmp),))
+    finally:
+        con.close()
+    chk = sqlite3.connect(str(tmp)).execute("PRAGMA integrity_check").fetchone()[0]
+    if chk != "ok":
+        tmp.unlink(missing_ok=True)
+        print(f"integrity_check failed: {chk} — abort, original untouched", file=sys.stderr)
+        return 1
+    stamp = now_iso().replace(":", "").replace("-", "").replace("+0000", "Z")
+    backup = p.backup_dir / f"zolai.db.pre-vacuum-{stamp}"
+    p.backup_dir.mkdir(parents=True, exist_ok=True)
+    os.replace(db, backup)
+    for side in (f"{db}-wal", f"{db}-shm"):
+        sidep = Path(side)
+        if sidep.exists():
+            os.replace(sidep, backup.parent / (backup.name + sidep.suffix[-4:]))
+    os.replace(tmp, db)
+    rw = sqlite3.connect(str(db))
+    try:
+        rw.execute("PRAGMA journal_mode=WAL")
+        chk2 = rw.execute("PRAGMA integrity_check").fetchone()[0]
+    finally:
+        rw.close()
+    if chk2 != "ok":
+        print(f"post-swap integrity_check failed: {chk2} — restore from {backup}", file=sys.stderr)
+        return 1
+    freelist = sqlite3.connect(str(db)).execute("PRAGMA freelist_count").fetchone()[0]
+    print(f"VACUUM OK: swapped; pre-vacuum file at {backup}; freelist={freelist} pp")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("mode", choices=["dry-run", "apply", "verify"])
-    ap.add_argument("--item", action="append", choices=ITEM_ORDER, help="restrict to items (repeatable)")
-    ap.add_argument("--db", default=str(BASE / "data" / "zolai.db"))
+    ap.add_argument("mode", choices=["dry-run", "apply", "verify", "vacuum"])
+    ap.add_argument("--item", action="append", choices=ITEM_ORDER, help="restrict to item(s), repeatable")
+    ap.add_argument("--db", default=str(DEFAULT_DB))
+    ap.add_argument("--archive-db", default=str(ARCHIVE_DB))
+    ap.add_argument("--manifest", default=str(ARCHIVE_MANIFEST))
+    ap.add_argument("--skiplist-zba", default=str(SKIPLIST_ZBA))
+    ap.add_argument("--final-counts", default=str(FINAL_COUNTS))
+    ap.add_argument("--backup-dir", default=str(BACKUP_DIR))
+    ap.add_argument("--no-gates", action="store_true", help="skip fuser+backup gates (fixtures only)")
     ap.add_argument("--report", default=None, help="write JSON report here")
-    ap.add_argument("--no-single-writer", action="store_true", help="skip fuser gate (tests/fixtures)")
-    ap.add_argument("--no-backup-gate", action="store_true", help="skip backup freshness gate (tests/fixtures)")
-    ap.add_argument("--archive-dir", default=None, help="override archive dir (tests/fixtures)")
     args = ap.parse_args(argv)
 
-    global ARCHIVE_DIR, ARCHIVE_MANIFEST_PATH  # noqa: PLW0603 - test seam
-    if args.archive_dir:
-        ARCHIVE_DIR = Path(args.archive_dir)
-        ARCHIVE_MANIFEST_PATH = ARCHIVE_DIR / "manifest.json"
-
-    items = args.item or ITEM_ORDER
-    db_path = Path(args.db)
-    if not db_path.exists():
-        print(f"DB not found: {db_path}", file=sys.stderr)
-        return 2
-
-    mode = {"dry-run": "dry-run", "apply": "apply", "verify": "verify"}[args.mode]
-    return run_items(
-        db_path,
-        mode,
-        items,
-        apply_writes=(args.mode == "apply"),
-        single_writer=not args.no_single_writer,
-        require_backup=not args.no_backup_gate,
-        report_path=Path(args.report) if args.report else None,
+    p = Paths(
+        db=Path(args.db),
+        archive_db=Path(args.archive_db),
+        manifest=Path(args.manifest),
+        skiplist_zba=Path(args.skiplist_zba),
+        final_counts=Path(args.final_counts),
+        backup_dir=Path(args.backup_dir),
+        use_gates=not args.no_gates,
     )
+    if not p.db.exists():
+        print(f"DB not found: {p.db}", file=sys.stderr)
+        return 2
+    if args.mode == "vacuum":
+        return cmd_vacuum(p)
+    rc = run(p.db, args.mode, args.item or ITEM_ORDER, p)
+    if args.report:
+        Path(args.report).write_text(json.dumps({"mode": args.mode, "rc": rc, "at": now_iso()}, indent=2))
+    return rc
 
 
 if __name__ == "__main__":
