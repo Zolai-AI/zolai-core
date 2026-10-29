@@ -270,6 +270,85 @@ class TestAuthorizeWithCimd:
         assert response.json()["error"] == "invalid_request"
 
 
+class TestConsentUi:
+    """The login/consent page as a browser (including ChatGPT's in-app one)
+    gets it: responsive head, CSP-safe same-origin stylesheet, an explicit
+    Cancel that follows RFC 6749, and escaped attacker-controlled fields."""
+
+    def test_page_is_responsive_and_styled(
+        self, client: TestClient, oauth_db, cimd_doc: list[str]
+    ) -> None:
+        response = client.get(
+            f"/oauth/authorize?{urlencode(_authorize_params(CHATGPT_CLIENT_ID, CHATGPT_REDIRECT))}"
+        )
+        assert response.status_code == 200
+        body = response.text
+        assert 'name="viewport" content="width=device-width, initial-scale=1"' in body
+        assert 'href="/oauth/authorize.css"' in body
+        assert '<style' not in body, "CSP default-src 'self' would block it"
+        assert 'value="deny"' in body and 'value="allow"' in body
+        assert 'action="/oauth/authorize"' in body
+
+    def test_stylesheet_served_same_origin(self, client: TestClient) -> None:
+        response = client.get("/oauth/authorize.css")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/css")
+        assert ".card" in response.text
+
+    def test_client_name_is_escaped(
+        self, client: TestClient, oauth_db, cimd_doc: list[str]
+    ) -> None:
+        record = oauth.register_client(
+            client_name="<script>alert(1)</script>",
+            redirect_uris=["https://escaped.example/cb"],
+        )
+        response = client.get(
+            f"/oauth/authorize?{urlencode(_authorize_params(record['client_id'], 'https://escaped.example/cb'))}"
+        )
+        assert response.status_code == 200
+        assert "&lt;script&gt;" in response.text
+        assert "<script>alert" not in response.text
+
+    def test_cancel_redirects_with_access_denied(
+        self, client: TestClient, oauth_db, cimd_doc: list[str]
+    ) -> None:
+        response = client.post(
+            "/oauth/authorize",
+            data={
+                **_authorize_params(CHATGPT_CLIENT_ID, CHATGPT_REDIRECT),
+                "consent": "deny",
+            },
+        )
+        assert response.status_code == 302, response.text
+        query = parse_qs(urlsplit(response.headers["location"]).query)
+        assert query["error"] == ["access_denied"]
+        assert query["state"] == ["s-1"]
+        assert "code" not in query
+
+    def test_login_error_keeps_form_and_fields(
+        self, client: TestClient, oauth_db, cimd_doc: list[str]
+    ) -> None:
+        session_auth.create_user(
+            username="probe", password="correct horse battery staple",
+            role="member", actor="test",
+        )
+        response = client.post(
+            "/oauth/authorize",
+            data={
+                **_authorize_params(CHATGPT_CLIENT_ID, CHATGPT_REDIRECT),
+                "username": "probe",
+                "password": "wrong",
+                "consent": "allow",
+            },
+        )
+        assert response.status_code == 401
+        body = response.text
+        assert 'id="oauth-error"' in body
+        assert 'Invalid username or password.' in body
+        assert f'name="client_id" value="{CHATGPT_CLIENT_ID}"' in body
+        assert 'value="probe"' in body
+
+
 class TestFullFlowCarriesIss:
     def test_code_redirect_iss_then_token_exchange(
         self, client: TestClient, oauth_db, cimd_doc: list[str]

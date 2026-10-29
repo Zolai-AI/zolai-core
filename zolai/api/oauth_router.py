@@ -335,11 +335,14 @@ def _authorize_page(
 ) -> HTMLResponse:
     """The consent page: who is asking, for what, with a login form.
 
-    Server-rendered, **no JavaScript and no inline styles** (the deployment's
-    CSP is ``default-src 'self'``), every interpolated value HTML-escaped —
-    ``client_name`` and ``state`` are attacker-controlled inputs. Submitting
-    the form *is* the consent step: the POST carries the credentials and the
-    unchanged OAuth parameters back to this endpoint.
+    Server-rendered, **no JavaScript**; styling lives in the same-origin
+    ``/oauth/authorize.css`` because the deployment CSP is
+    ``default-src 'self'`` and would block a ``<style>`` block. Every
+    interpolated value is HTML-escaped — ``client_name`` and ``state`` are
+    attacker-controlled inputs. Submitting the form *is* the consent step:
+    the POST carries the credentials and the unchanged OAuth parameters
+    back to this endpoint; Cancel returns the RFC 6749 ``access_denied``
+    redirect without any credential check.
     """
     esc = html.escape
     shown_scopes = params.get("scope", "").strip() or "all scopes your role permits"
@@ -349,32 +352,128 @@ def _authorize_page(
         if params.get(key) is not None
     )
     error_html = (
-        f'    <p role="alert" id="oauth-error">{esc(error)}</p>' if error else ""
+        f'    <p class="error" role="alert" id="oauth-error">{esc(error)}</p>'
+        if error
+        else ""
     )
     document = f"""<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Authorize — Zolai MCP</title></head>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Authorize — Zolai MCP</title>
+  <link rel="stylesheet" href="/oauth/authorize.css">
+</head>
 <body>
-  <main>
+  <main class="card">
+    <p class="brand">Zolai · MCP</p>
     <h1>Authorize access</h1>
-    {error_html}
-    <p><strong>{esc(client_name)}</strong> wants to connect to your Zolai account
-       and use the MCP endpoint on your behalf.</p>
-    <p>Requested scopes: <code>{esc(shown_scopes)}</code>. A grant can only ever
-       <em>narrow</em> what your role allows — never widen it.</p>
+{error_html}
+    <p class="ask"><strong>{esc(client_name)}</strong> wants to connect to your
+       Zolai account and use the MCP endpoint on your behalf.</p>
+    <p class="scopes">Requested scopes: <code>{esc(shown_scopes)}</code>. A grant
+       can only ever <em>narrow</em> what your role allows — never widen it.</p>
     <form method="post" action="/oauth/authorize">
 {hidden}
-      <p><label>Username <input name="username" autocomplete="username"
-          value="{esc(username)}" required></label></p>
-      <p><label>Password <input name="password" type="password"
-          autocomplete="current-password" required></label></p>
-      <p><button type="submit" name="consent" value="allow">Allow</button></p>
+      <label class="field">Username
+        <input name="username" autocomplete="username" autocapitalize="none"
+               spellcheck="false" value="{esc(username)}" required>
+      </label>
+      <label class="field">Password
+        <input name="password" type="password" autocomplete="current-password"
+               required>
+      </label>
+      <div class="actions">
+        <button type="submit" name="consent" value="deny" class="secondary"
+                formnovalidate>Cancel</button>
+        <button type="submit" name="consent" value="allow" class="primary">Allow</button>
+      </div>
     </form>
+    <p class="footnote">Signing in grants this one connector access to the tools
+       your role allows. You can revoke it any time from your Zolai admin.</p>
   </main>
 </body>
 </html>
 """
     return HTMLResponse(document, status_code=status_code)
+
+
+_AUTHORIZE_CSS = """\
+:root {
+  color-scheme: light dark;
+  --bg: #f4f5f7; --card: #ffffff; --ink: #16181d; --muted: #5b6270;
+  --line: #dfe2e8; --accent: #4f46e5; --accent-ink: #ffffff;
+  --error-bg: #fdecec; --error-ink: #b3261e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111318; --card: #1a1d24; --ink: #e8eaf0; --muted: #9aa1b0;
+    --line: #2b2f3a; --accent: #6d5df7; --accent-ink: #ffffff;
+    --error-bg: #3a1f21; --error-ink: #f2b8b5;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; min-height: 100vh; display: flex; align-items: center;
+  justify-content: center; background: var(--bg); color: var(--ink);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  padding: 16px;
+}
+.card {
+  width: 100%; max-width: 420px; background: var(--card);
+  border: 1px solid var(--line); border-radius: 14px;
+  padding: 28px 26px; box-shadow: 0 10px 30px rgb(0 0 0 / 8%);
+}
+.brand {
+  margin: 0 0 14px; font-size: 13px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--accent);
+}
+h1 { margin: 0 0 12px; font-size: 22px; }
+.ask, .scopes, .footnote { margin: 0 0 12px; }
+.scopes code {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  padding: 1px 6px; font-size: 14px; overflow-wrap: anywhere;
+}
+.footnote { color: var(--muted); font-size: 13px; margin-top: 18px; }
+.error {
+  background: var(--error-bg); color: var(--error-ink);
+  border: 1px solid currentColor; border-radius: 8px;
+  padding: 10px 12px; margin: 0 0 12px; font-weight: 500;
+}
+form { display: grid; gap: 14px; margin-top: 6px; }
+.field { display: grid; gap: 6px; font-size: 14px; font-weight: 600; }
+.field input {
+  font: inherit; font-weight: 400; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  min-height: 44px;
+}
+.field input:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+  border-color: var(--accent);
+}
+.actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }
+button {
+  font: inherit; font-weight: 600; border-radius: 8px; min-height: 44px;
+  padding: 10px 18px; cursor: pointer; border: 1px solid transparent;
+}
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.primary { background: var(--accent); color: var(--accent-ink); }
+.primary:hover { filter: brightness(1.08); }
+.secondary {
+  background: transparent; color: var(--muted); border-color: var(--line);
+}
+.secondary:hover { color: var(--ink); }
+"""
+
+
+@router.get("/oauth/authorize.css")
+async def oauth_authorize_css() -> Response:
+    """Same-origin stylesheet for the consent page (CSP-safe, no JS)."""
+    return Response(
+        content=_AUTHORIZE_CSS,
+        media_type="text/css; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 @router.get("/oauth/authorize")
@@ -427,6 +526,21 @@ async def oauth_authorize_post(request: Request) -> Response:
     if error is not None:
         return error
     assert params is not None
+
+    # RFC 6749 §4.1.2.1 — refusal is a redirect, not an AS error. Only an
+    # explicit Cancel counts as refusal; a submission that carries credentials
+    # (the consent button, or a scripted client posting the form fields) is
+    # the intent to allow, matching the pre-existing endpoint contract.
+    if str(form.get("consent") or "").strip().lower() == "deny":
+        separator = "&" if "?" in params["redirect_uri"] else "?"
+        denial = (
+            f"{params['redirect_uri']}{separator}"
+            "error=access_denied&error_description="
+            + quote("The user denied the authorization request", safe="")
+        )
+        if params["state"]:
+            denial += f"&state={quote(params['state'], safe='')}"
+        return RedirectResponse(denial, status_code=302, headers={"Cache-Control": "no-store"})
 
     username = str(form.get("username") or "")
     password = str(form.get("password") or "")
