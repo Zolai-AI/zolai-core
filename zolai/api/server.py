@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -32,7 +33,7 @@ from ..api.auth_session_router import router as auth_session_router
 from ..api.bible_alias_router import router as bible_alias_router
 from ..api.contributions_router import router as contributions_router
 from ..api.desktop_router import router as desktop_router
-from ..api.errors import internal_http_error
+from ..api.errors import api_error, internal_http_error
 from ..api.foundation_router import router as foundation_router
 from ..api.jsonl_router import router as jsonl_router
 from ..api.learning_agents_router import admin_router as learning_agents_router
@@ -1242,9 +1243,14 @@ def create_app() -> FastAPI:
         zvs_compliant: bool = True
         vocabulary: list[str] = []
 
-    @app.post("/chat/zolai", response_model=ZolaiChatResponse)
+    @app.post("/chat/zolai", response_model=ZolaiChatResponse, deprecated=True)
     async def zolai_chat(req: ZolaiChatRequest):
-        """Zolai bilingual chat with RAG context injection."""
+        """Zolai bilingual chat with RAG context — **deprecated** Ollama proxy.
+
+        core#20: unreachable backend is a 501 with the replacement route, not a
+        200 whose body is an exception sentence.  Use
+        ``POST /api/v1/assistant/chat``.
+        """
         from .conversation_memory import get_conversation_memory
         from .rag_context import build_zolai_context
         from .zvs_strict import check_zvs_compliance
@@ -1272,24 +1278,15 @@ def create_app() -> FastAPI:
         messages = [ChatMessage(role="user", content=req.message)]
         prompt = build_prompt(messages, bilingual_prompt)
 
-        try:
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(
-                    f"{OLLAMA_URL}/api/generate",
-                    json={
-                        "model": req.model,
-                        "prompt": prompt,
-                        "stream": False,
-                        "options": {"temperature": 0.7, "num_predict": 512},
-                    },
-                )
-                data = resp.json()
-                raw_response = data.get("response", "").strip()
-        except Exception as e:
-            raw_response = (
-                "Sorry, I cannot reach the language model right now. "
-                f"Error: {e}"
-            )
+        data = await _ollama_generate(
+            {
+                "model": req.model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0.7, "num_predict": 512},
+            }
+        )
+        raw_response = data.get("response", "").strip()
 
         # Check ZVS compliance
         zvs_result = check_zvs_compliance(raw_response)
@@ -1324,9 +1321,14 @@ def create_app() -> FastAPI:
             vocabulary=vocabulary,
         )
 
-    @app.post("/chat/gemini", response_model=ZolaiChatResponse)
+    @app.post("/chat/gemini", response_model=ZolaiChatResponse, deprecated=True)
     async def gemini_chat(req: ZolaiChatRequest):
-        """Gemini chat via local gemini-webapi with RAG, ensemble, and validation."""
+        """Gemini chat via local gemini-webapi — **deprecated** (core#20).
+
+        Needs the out-of-tree ``zolai-ai-local`` package; without it the answer
+        is 501, not a 200 carrying the failure text.  Use
+        ``POST /api/v1/assistant/chat``.
+        """
         import sys
         from pathlib import Path as _Path
 
@@ -1408,57 +1410,98 @@ def create_app() -> FastAPI:
                 context_source=context_source,
                 vocabulary=[],
             )
-        except Exception:
+        except Exception as exc:
             # Never echo exception text into a 200 body: it can carry file
             # paths, provider payloads or driver internals. The traceback goes
-            # to the server log; the caller gets a stable literal.
+            # to the server log; the caller gets a stable code (core#20) — and
+            # a 501, because "200 + the words 'is unavailable'" made this look
+            # like an answered chat to every client that branched on status.
             logger.exception("legacy /chat/gemini failed")
-            return ZolaiChatResponse(
-                zolai_response="Gemini chat is unavailable",
-                zvs_compliant=True,
-                context_source="error",
-                vocabulary=[],
-            )
+            raise HTTPException(
+                status_code=501,
+                detail=api_error(
+                    "gemini_unavailable",
+                    "The legacy Gemini bridge (local gemini-webapi) is not "
+                    "installed or reachable on this host. Use "
+                    "POST /api/v1/assistant/chat; GET /api/v1/providers lists "
+                    "the providers it can serve.",
+                ),
+            ) from exc
 
     # === Ollama Chat Endpoints ===
+    #
+    # Deprecated (core#20): this whole family is a local-Ollama proxy from the
+    # desktop app.  The hosted API runs no Ollama, and no consumer in the org
+    # calls these paths (``zolai-web``, ``zolai-tauri``, ``zolai-explorer``,
+    # ``zolai-mcp-server`` all grep clean), so an unreachable daemon now
+    # answers **501 with the replacement route** instead of a bare 500
+    # (``/chat/models``) or an exception string inside a 200 body
+    # (``/chat/zolai``).
 
-    @app.get("/chat/models", response_model=ModelsResponse)
+    def _ollama_unavailable(exc: BaseException) -> HTTPException:
+        """The one honest answer every ``/chat/*`` Ollama route gives (core#20)."""
+        logger.warning("legacy /chat Ollama call failed: %s", type(exc).__name__)
+        return HTTPException(
+            status_code=501,
+            detail=api_error(
+                "ollama_unavailable",
+                "These legacy endpoints proxy a local Ollama daemon, which is "
+                "not running on this host. Use POST /api/v1/assistant/chat; "
+                "GET /api/v1/providers lists the providers it can serve.",
+                backend=OLLAMA_URL,
+            ),
+        )
+
+    async def _ollama_json(path: str, timeout: float = 30) -> dict:
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(f"{OLLAMA_URL}{path}")
+                resp.raise_for_status()
+                return resp.json()
+        except (httpx.HTTPError, OSError) as exc:
+            raise _ollama_unavailable(exc) from exc
+
+    async def _ollama_generate(payload: dict, timeout: float = 120) -> dict:
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(f"{OLLAMA_URL}/api/generate", json=payload)
+                resp.raise_for_status()
+                return resp.json()
+        except (httpx.HTTPError, OSError) as exc:
+            raise _ollama_unavailable(exc) from exc
+
+    @app.get("/chat/models", response_model=ModelsResponse, deprecated=True)
     async def list_models():
-        """List available Ollama models."""
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(f"{OLLAMA_URL}/api/tags")
-            data = resp.json()
-            models = []
-            for m in data.get("models", []):
-                models.append(
-                    ModelInfo(
-                        name=m["name"],
-                        size=m.get("size", 0),
-                        modified_at=m.get("modified_at", ""),
-                    )
+        """List Ollama models — **deprecated**; use ``GET /api/v1/providers``."""
+        data = await _ollama_json("/api/tags")
+        models = []
+        for m in data.get("models", []):
+            models.append(
+                ModelInfo(
+                    name=m["name"],
+                    size=m.get("size", 0),
+                    modified_at=m.get("modified_at", ""),
                 )
-            return ModelsResponse(models=models)
+            )
+        return ModelsResponse(models=models)
 
-    @app.post("/chat/chat", response_model=ChatResponse)
+    @app.post("/chat/chat", response_model=ChatResponse, deprecated=True)
     async def chat(req: ChatRequest):
-        """Chat with Ollama model."""
+        """Chat with an Ollama model — **deprecated**; use ``POST /api/v1/assistant/chat``."""
         # Build prompt from messages
         prompt = build_prompt(req.messages, req.system_prompt)
 
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(
-                f"{OLLAMA_URL}/api/generate",
-                json={
-                    "model": req.model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": req.temperature,
-                        "num_predict": req.max_tokens,
-                    },
+        data = await _ollama_generate(
+            {
+                "model": req.model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": req.temperature,
+                    "num_predict": req.max_tokens,
                 },
-            )
-            data = resp.json()
+            }
+        )
 
         return ChatResponse(
             model=req.model,
@@ -1467,34 +1510,41 @@ def create_app() -> FastAPI:
             total_duration=data.get("total_duration", 0),
         )
 
-    @app.post("/chat/chat/stream")
+    @app.post("/chat/chat/stream", deprecated=True)
     async def chat_stream(req: ChatStreamRequest):
-        """Chat with Ollama model (streaming)."""
+        """Chat with an Ollama model (streaming) — **deprecated**."""
         prompt = build_prompt(req.messages, req.system_prompt)
+        # Fail before the SSE headers go out: once the stream has started there
+        # is no status code left to answer with (core#20).
+        await _ollama_json("/api/tags", timeout=10)
 
         async def generate():
-            async with httpx.AsyncClient(timeout=120) as client:
-                async with client.stream(
-                    "POST",
-                    f"{OLLAMA_URL}/api/generate",
-                    json={
-                        "model": req.model,
-                        "prompt": prompt,
-                        "stream": True,
-                        "options": {
-                            "temperature": req.temperature,
+            try:
+                async with httpx.AsyncClient(timeout=120) as client:
+                    async with client.stream(
+                        "POST",
+                        f"{OLLAMA_URL}/api/generate",
+                        json={
+                            "model": req.model,
+                            "prompt": prompt,
+                            "stream": True,
+                            "options": {
+                                "temperature": req.temperature,
+                            },
                         },
-                    },
-                ) as resp:
-                    async for line in resp.aiter_lines():
-                        if line.strip():
-                            yield f"data: {line}\n\n"
+                    ) as resp:
+                        resp.raise_for_status()
+                        async for line in resp.aiter_lines():
+                            if line.strip():
+                                yield f"data: {line}\n\n"
+            except (httpx.HTTPError, OSError) as exc:
+                yield f"data: {json.dumps(_ollama_unavailable(exc).detail)}\n\n"
 
         return StreamingResponse(generate(), media_type="text/event-stream")
 
-    @app.get("/chat")
+    @app.get("/chat", deprecated=True)
     async def chat_get(q: str, model: str = DEFAULT_MODEL):
-        """Simple GET chat endpoint."""
+        """Simple GET chat endpoint — **deprecated**; use ``POST /api/v1/assistant/chat``."""
         messages = [ChatMessage(role="user", content=q)]
         return await chat(ChatRequest(messages=messages, model=model))
 
