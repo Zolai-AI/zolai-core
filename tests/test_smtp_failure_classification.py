@@ -92,3 +92,66 @@ class TestEmailConfigStillResolvesEnv:
 
         config = svc_mod.EmailConfig(user="explicit@example.com")
         assert config.user == "explicit@example.com"
+
+
+class TestPlaceholderCredentialFailsFast:
+    """core#10: a copied env template is not a credential, and it used to look
+    like one. ``SMTP_PASS="<gmail-app-password>"`` was live in production: the
+    ``password_set`` check passed, every send burned the 30s timeout on the
+    wire, and the log advice sent the operator hunting an IP block that was
+    never there."""
+
+    def _service(self, password: str):
+        from zolai.notifications.service import EmailConfig, NotificationService
+
+        return NotificationService(
+            config=EmailConfig(
+                host="smtp.gmail.com",
+                port=587,
+                user="sender@example.com",
+                password=password,
+                from_email="sender@example.com",
+            )
+        )
+
+    def test_describe_distinguishes_set_from_configured(self):
+        assert self._service('"<gmail-app-password>"').config.describe()["password_is_template"] is True
+        assert self._service("abcdefghijklmnop").config.describe()["password_is_template"] is False
+
+    @pytest.mark.asyncio
+    async def test_send_refuses_the_placeholder_without_touching_the_network(
+        self, monkeypatch
+    ):
+        import zolai.notifications.service as svc_mod
+
+        async def boom(*args, **kwargs):
+            raise AssertionError("an SMTP connection was attempted with a template password")
+
+        monkeypatch.setattr(svc_mod.aiosmtplib, "send", boom)
+        service = self._service("<your-16-char-app-password-here>")
+
+        ok, error = await service.send_email("to@example.com", "subject", "body")
+
+        assert ok is False
+        assert "placeholder" in (error or "").lower()
+        # The advice is the point: an operator reading only this line knows
+        # which file to edit.
+        assert "App Password" in (error or "")
+
+    @pytest.mark.asyncio
+    async def test_a_real_password_still_reaches_the_sender(self, monkeypatch):
+        import zolai.notifications.service as svc_mod
+
+        attempted: dict[str, object] = {}
+
+        async def capture(message, **kwargs):
+            attempted["password"] = kwargs.get("password")
+            return None
+
+        monkeypatch.setattr(svc_mod.aiosmtplib, "send", capture)
+        service = self._service("abcdefghijklmnop")
+
+        ok, error = await service.send_email("to@example.com", "subject", "body")
+
+        assert (ok, error) == (True, None)
+        assert attempted["password"] == "abcdefghijklmnop"
