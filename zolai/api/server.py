@@ -15,6 +15,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 from starlette.routing import Match
 
 from .. import __version__
@@ -769,7 +770,10 @@ def create_app() -> FastAPI:
         """Quick corpus statistics endpoint."""
         try:
             analyzer = CorpusAnalyzer()
-            stats = analyzer.full_stats()
+            # core#24's disease in miniature: ``full_stats`` walks JSONL off
+            # disk. On the event loop it would freeze every request the way
+            # ``/monitor/health`` did.
+            stats = await run_in_threadpool(analyzer.full_stats)
         except Exception as exc:
             raise internal_http_error(
                 exc,
@@ -781,10 +785,23 @@ def create_app() -> FastAPI:
                     "Corpus statistics are unavailable right now. Retry in a few seconds."
                 ),
             ) from exc
-        # CorpusAnalyzer signals "no corpus loaded" with a soft-error dict; that is
-        # a service-availability problem, not a successful stats response.
+        # CorpusAnalyzer signals "no corpus loaded" with a soft-error dict;
+        # core#9 / core#7: in production the corpus lives in SQLite and the
+        # JSONL auto-discovery legitimately finds nothing. A 503 there was a
+        # split-brain — the versioned knowledge surface was healthy — so the
+        # legacy endpoint now reports the same DB-backed counts instead of
+        # calling a populated store empty.
         if isinstance(stats, dict) and stats.get("error"):
-            raise HTTPException(status_code=503, detail=stats["error"])
+            from ..data.database import get_manager
+
+            db = get_manager()
+            counts = await run_in_threadpool(db.counts)
+            return {
+                "source": "sqlite_knowledge",
+                "note": stats["error"],
+                "table_counts": counts,
+                "total_rows": sum(counts.values()),
+            }
         return stats
 
     # --- Trainer ---
@@ -1090,11 +1107,13 @@ def create_app() -> FastAPI:
 
     @app.get("/monitor/health")
     async def monitor_health():
-        """DB health check."""
+        """DB health check — off-loop (core#24: ``counts()`` full-scans every
+        table, ~17s on the 2.4GB prod corpus, and an inline call stalled the
+        whole event loop for other requests)."""
         from ..data.database import get_manager
 
         db = get_manager()
-        return db.health_check()
+        return await run_in_threadpool(db.health_check)
 
     @app.get("/monitor/coverage")
     async def monitor_coverage():
@@ -1102,7 +1121,7 @@ def create_app() -> FastAPI:
         from ..data.database import get_manager
 
         db = get_manager()
-        return db.quality_report()
+        return await run_in_threadpool(db.quality_report)
 
     @app.get("/monitor/audit")
     async def monitor_audit(limit: int = 50):
@@ -1110,7 +1129,7 @@ def create_app() -> FastAPI:
         from ..data.database import get_manager
 
         db = get_manager()
-        return db.get_audit_log(limit=limit)
+        return await run_in_threadpool(db.get_audit_log, limit=limit)
 
     # --- Myanmar / Burmese endpoints ---
 

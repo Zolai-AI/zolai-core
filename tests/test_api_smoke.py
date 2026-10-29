@@ -17,6 +17,7 @@ routes are reachable, not that enforce mode accepts anonymous callers.
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -187,6 +188,78 @@ def test_monitor_health_never_leaks_the_data_path(client: TestClient, seed_db: P
     tail = body["db_url"].split(":///", 1)[-1]
     assert "/" not in tail and "\\" not in tail, body["db_url"]
     assert str(seed_db.parent) not in body["db_url"]
+
+
+def test_monitor_health_is_offloaded_from_the_event_loop(
+    client: TestClient, seed_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """core#24: ``db.health_check()`` UNION-scans every table (~17s on the prod
+    corpus) and ran inline in an ``async def`` — one monitor call froze *all*
+    in-flight requests. The handler must run it off the event loop."""
+    from zolai.data.database import DatabaseManager
+
+    seen: dict[str, bool] = {}
+
+    def fake_health_check(self, *, force: bool = False):  # noqa: ANN001
+        try:
+            asyncio.get_running_loop()
+            seen["inline"] = True  # still on the loop thread — the old bug
+        except RuntimeError:
+            seen["inline"] = False  # a worker thread: no loop, no freeze
+        return {"db_url": "sqlite:///fake.db", "backend": "sqlite"}
+
+    monkeypatch.setattr(DatabaseManager, "health_check", fake_health_check)
+    resp = client.get("/monitor/health")
+    assert resp.status_code == 200, resp.text
+    assert seen.get("inline") is False, "health check ran on the event loop"
+
+
+def test_monitor_health_answers_from_the_ttl_cache(
+    client: TestClient, seed_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The 30s poll must not re-scan the DB every time: within the TTL the
+    snapshot is reused, and ``force=True`` still reads fresh (core#24)."""
+    from zolai.data.database import DatabaseManager, get_manager
+
+    calls: list[bool] = []
+    real_counts = DatabaseManager.counts
+
+    def counting_counts(self):
+        calls.append(True)
+        return real_counts(self)
+
+    monkeypatch.setattr(DatabaseManager, "counts", counting_counts)
+    mgr = get_manager()
+    mgr._health_cache = None  # drop any snapshot an earlier test cached
+
+    first = client.get("/monitor/health")
+    assert first.status_code == 200, first.text
+    second = client.get("/monitor/health")
+    assert second.status_code == 200, second.text
+    assert len(calls) == 1, f"expected one scan inside the TTL, got {len(calls)}"
+
+    assert mgr.health_check(force=True)["table_counts"]
+    assert len(calls) == 2, "force=True must bypass the cache"
+
+
+def test_legacy_stats_falls_back_to_db_counts(
+    client: TestClient, seed_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """core#9 / core#7: the JSONL auto-discovery legitimately finds nothing in
+    production (the corpus lives in SQLite). ``/stats`` answered 503 there —
+    it must report DB-backed counts instead while the store is healthy."""
+    from zolai.analyzer.corpus import CorpusAnalyzer
+
+    monkeypatch.setattr(
+        CorpusAnalyzer, "full_stats", lambda self: {"error": "No data loaded"}
+    )
+    resp = client.get("/stats")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["source"] == "sqlite_knowledge"
+    assert body["note"] == "No data loaded"
+    assert body["table_counts"]["dictionary"] >= 1
+    assert body["total_rows"] == sum(body["table_counts"].values())
 
 
 def test_lexicon_hit_and_miss_contract(client: TestClient, seed_db: Path) -> None:

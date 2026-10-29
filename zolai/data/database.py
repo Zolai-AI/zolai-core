@@ -1993,8 +1993,15 @@ class DatabaseManager:
     # ------------------------------------------------------------------
     # Health check
     # ------------------------------------------------------------------
-    def health_check(self) -> dict[str, Any]:
-        """Return database health metrics.
+    #: core#24: ``counts()`` UNION-ALLs every existing table — ~17s against
+    #: the 2.4GB production corpus. The monitor polls ``/health`` surfaces
+    #: continuously, so an uncached check re-scans the whole DB on every
+    #: poll. A short TTL keeps operator views fresh without the full scan;
+    #: ``force=True`` bypasses it when a write just landed.
+    HEALTH_CACHE_TTL_S = 15.0
+
+    def health_check(self, *, force: bool = False) -> dict[str, Any]:
+        """Return database health metrics (TTL-cached, see above).
 
         Returns dict with:
             db_url: Database URL, **path-redacted** — sqlite directories are
@@ -2010,6 +2017,11 @@ class DatabaseManager:
             query_latency_ms: time for a COUNT query
             tables: list of table names
         """
+        now = time.monotonic()
+        cached = getattr(self, "_health_cache", None)
+        if not force and cached is not None and now - cached[0] < self.HEALTH_CACHE_TTL_S:
+            return cached[1]
+
         backend = "sqlite" if self._db_url.startswith("sqlite") else "postgresql"
         counts = self.counts()
         total = sum(counts.values())
@@ -2037,7 +2049,7 @@ class DatabaseManager:
         if masked_url.startswith("sqlite"):
             masked_url = "sqlite:///" + masked_url.rsplit("/", 1)[-1]
 
-        return {
+        payload = {
             "db_url": masked_url,
             "backend": backend,
             "table_counts": counts,
@@ -2048,6 +2060,8 @@ class DatabaseManager:
             "query_latency_ms": round(latency_ms, 2),
             "tables": self.table_names(),
         }
+        self._health_cache = (now, payload)
+        return payload
 
     def status(self) -> str:
         """Return a human-readable status string."""
