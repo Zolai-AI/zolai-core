@@ -3,11 +3,15 @@
 Covers the P0-1 / ADR-014 done-when:
 
 - enforce: no key 401 · valid 200 · expired 401 · revoked 401 · bad scope 403
-- default warn: accepts but logs unauthenticated ``/api/v1`` (non-admin);
-  admin key-minting routes stay strict (401) in warn
+- default warn: accepts but logs unauthenticated requests outside the
+  documented exemptions (non-admin); admin key-minting routes stay strict
+  (401) in warn
 - verification cache stays bounded under a garbage-token flood
-- ``/health`` and legacy routes byte-identical; ``/metrics`` + ``/api/metrics/*``
-  are admin-gated ops surfaces (401 without a key, strict in warn *and* enforce)
+- ``/health`` is byte-identical; since core#15 the gate is **default-deny**, so
+  a legacy unversioned route is gated like any other and only the ``rbac``
+  allowlist (``/``, ``/oauth/*``, ``/.well-known/*``) stays anonymous;
+  ``/metrics`` + ``/api/metrics/*`` are admin-gated ops surfaces (401 without a
+  key, strict in warn *and* enforce)
 - >rate-limit 429 + Retry-After + X-RateLimit-*
 - 401s are counted by MetricsMiddleware (registration order)
 - **session credentials never weaken the key path**: a ``zolai_ss_*`` token
@@ -280,15 +284,17 @@ def test_key_cache_is_bounded_under_garbage_token_flood(
 # ---------------------------------------------------------------------------
 
 
-def test_exempt_and_legacy_routes_untouched_in_enforce_mode(
+def test_enforce_gates_legacy_routes_and_keeps_the_anonymous_allowlist(
     client: TestClient, auth_db, monkeypatch
 ) -> None:
     """Public routes stay public; the ops surface is admin-gated (core#3).
 
-    Pre-middleware contract held for ``/health`` and legacy routes. ``/metrics``
-    and ``/api/metrics/*`` are no longer exempt — they moved to
+    ``/health`` keeps its pre-middleware contract. ``/metrics`` and
+    ``/api/metrics/*`` are no longer exempt — they moved to
     ``rbac.OPS_ADMIN_PREFIXES``, so anonymous reads 401 and an admin key 200s.
     Neither surface injects rate-limit headers (authorization, not throttling).
+    Since core#15 the gate is default-deny, so a legacy unversioned route 401s
+    anonymously under ``enforce`` unless ``rbac`` declares it public.
     """
     _enforce(monkeypatch)
 
@@ -313,9 +319,34 @@ def test_exempt_and_legacy_routes_untouched_in_enforce_mode(
     assert info.json()["version"]
     assert "x-ratelimit-limit" not in info.headers
 
-    # Legacy unversioned route — same 200 as before the middleware existed.
+    # core#15: a legacy unversioned route is now on the gated surface, so
+    # ``enforce`` refuses it anonymously instead of serving settings-shaped
+    # payloads to whoever asks.
     legacy = client.get("/bible/status")
-    assert legacy.status_code == 200
+    assert legacy.status_code == 401
+    assert legacy.json()["detail"]["reason"] == "missing_api_key"
+
+    # A key gets it back — the route is gated, not deleted.
+    reader = {"X-API-Key": auth.create_api_key(name="reader", scopes=["dataset:read"])["plaintext"]}
+    assert client.get("/bible/status", headers=reader).status_code == 200
+
+    # The declared-anonymous surface keeps answering with no credential.
+    assert client.get("/").status_code == 200
+    discovery = client.get("/.well-known/oauth-authorization-server")
+    assert discovery.status_code == 200
+    assert discovery.json()["authorization_endpoint"].endswith("/oauth/authorize")
+
+
+def test_warn_mode_legacy_still_dual_accepts(client: TestClient, auth_db) -> None:
+    """core#15 changes the *enforce* surface only.
+
+    ``warn`` is the deployed mode, so a legacy route must keep serving
+    anonymous callers byte-for-byte (dual-accept) until #2 flips it; the gate
+    that moved is the one that answers 401.
+    """
+    assert client.get("/bible/status").status_code == 200
+    assert client.get("/monitor/health").status_code == 200
+    assert client.get("/settings").status_code == 200
 
 
 def _http_samples(text: str) -> list[Sample]:

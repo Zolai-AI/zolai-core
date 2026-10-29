@@ -552,9 +552,11 @@ def create_app() -> FastAPI:
     # declaration, same anonymous bucket; also before the catch-all.
     app.include_router(mcp_root_router)
     # W6 OAuth 2.1 for the MCP endpoint — RFC 8414/9728 discovery documents +
-    # /oauth/{register,authorize,token}. Sits outside /api/v1, so
-    # ApiKeyMiddleware never gates it (discovery must answer with no
-    # credential), but it MUST stay registered before the catch-all below:
+    # /oauth/{register,authorize,token}. It sits outside /api/v1, so it is
+    # declared public in ``rbac`` (core#15): the default-deny gate passes it
+    # through rate-limited and never 401s it, because discovery and client
+    # registration are how a connector obtains the credential in the first
+    # place. It MUST stay registered before the catch-all below:
     # /.well-known/* is a GET /{path:path} shape.
     app.include_router(oauth_router)
 
@@ -575,9 +577,10 @@ def create_app() -> FastAPI:
     # ``get_cors_origins`` reads ``ZOLAI_CORS_ORIGINS`` (comma-separated) or the
     # trusted defaults (studio/space/api + localhost dev).
     app.add_middleware(CORSMiddleware, **cors_kwargs(get_cors_origins()))
-    # API-key auth on /api/v1 only (ZOLAI_API_AUTH=warn|enforce|off). Added
-    # after CORS and *before* MetricsMiddleware so the metrics wrapper stays
-    # outermost and 401/429 responses are counted in zolai_http_requests_total.
+    # API-key auth, default-deny outside the documented exemptions
+    # (ZOLAI_API_AUTH=warn|enforce|off; core#15). Added after CORS and *before*
+    # MetricsMiddleware so the metrics wrapper stays outermost and 401/429
+    # responses are counted in zolai_http_requests_total.
     app.add_middleware(ApiKeyMiddleware)
     # HTTP metrics: added last so it wraps everything above; labels are route
     # templates only (never raw paths), so cardinality stays bounded.

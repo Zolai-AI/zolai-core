@@ -82,6 +82,11 @@ PUBLIC_ROUTES: tuple[tuple[str | None, str], ...] = (
     (None, "/api/v1/health"),
     # Identity probe — never 401s, so Studio can gate its own UI.
     ("GET", "/api/v1/auth/me"),
+    # core#15 — the unversioned status echo (``serve_frontend`` in
+    # ``zolai/api/server.py``). Declared rather than inherited: the middleware
+    # gate is now default-deny, so an anonymous ``GET /`` would 401 under
+    # ``enforce`` and take the MCP discovery host's root with it.
+    ("GET", "/"),
     # Username + password sign-in/out. Public by necessity: a login cannot
     # require the credential it is asking for, so under ``enforce`` these two
     # must stay open or sign-in becomes impossible (chicken-and-egg). Both are
@@ -174,6 +179,18 @@ PUBLIC_PREFIXES: tuple[tuple[str | None, str], ...] = (
     ("POST", "/api/v1/learning/consensus"),
     ("GET", "/api/v1/learning/metrics"),
     ("GET", "/api/v1/learning/corpus"),
+    # core#15 — OAuth 2.1 for the MCP connector, which lives outside
+    # ``/api/v1`` (``zolai/api/oauth_router.py``, mounted at the root). Under
+    # the default-deny gate these would 401 anonymously in ``enforce`` and the
+    # flow could never start: RFC 8414 §3 / RFC 9728 discovery must answer with
+    # no credential, and ``POST /oauth/register`` (DCR), ``/oauth/authorize``
+    # and ``/oauth/token`` are how a client *obtains* one.  ``/oauth`` covers the
+    # consent page and its CSP-safe ``/oauth/authorize.css``; the
+    # ``.well-known`` prefixes cover the bare and ``/mcp``-scoped discovery
+    # documents.  Rate limited per IP like every other public path, never 401.
+    (None, "/oauth"),
+    (None, "/.well-known"),
+    (None, "/mcp/.well-known"),
 )
 
 #: Declared authed — everything below needs a key (member class unless admin).
@@ -221,10 +238,12 @@ MEMBER_PREFIXES: tuple[str, ...] = (
 #: keeps ``classify_route`` honest for anything that ever adds an HTTP sibling.
 ADMIN_PREFIXES: tuple[str, ...] = ("/api/v1/admin", "/api/v1/learning/ws")
 
-#: Ops / API-surface paths gated admin at the **middleware** (they sit
-#: outside ``/api/v1``, so ``is_protected_path`` had never covered them and
-#: every one of these answered anonymous HTTP 200 on production when this
-#: gate was added, 2026-10-21):
+#: Ops / API-surface paths gated admin at the **middleware**.  They sit outside
+#: ``/api/v1``, so before core#15 ``is_protected_path`` had never covered them
+#: and every one of these answered anonymous HTTP 200 on production when this
+#: gate was added, 2026-10-21.  Default-deny now covers them too, but the
+#: branch stays: this surface must 401 for anonymous in **warn** as well, which
+#: the dual-accept below would not do:
 #:
 #: - ``/metrics``      — the Prometheus exposition dump (every metric
 #:                       family, process info, per-route labels).

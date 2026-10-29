@@ -3,10 +3,11 @@
 Pure-ASGI (same shape as :mod:`zolai.monitoring.middleware`) so nothing is
 buffered.  Behaviour:
 
-- Gate: ``path == "/api/v1"`` or ``startswith("/api/v1/")``, plus the bare
-  ``/mcp`` alias (:data:`EXTRA_PROTECTED_PATHS`) — legacy unversioned routes,
-  ``/health``, ``/metrics`` and ``/api/metrics/*`` are byte-identical to before
-  this middleware exists.
+- Gate: **default-deny** (core#15) — every path except :data:`EXEMPT_PATHS`
+  (``/health``, ``/api/v1/health``) is on the gated surface, so a route cannot
+  stay public merely because no one ever listed it.  Anonymous callers reach the
+  rest exactly where ``rbac`` declares them public
+  (:func:`zolai.api.rbac.is_public_path`).
 - Mode ``warn`` (default) dual-accepts: a missing/invalid key is logged
   (rate limited) and the request continues unauthenticated.  Mode ``enforce``
   answers **401**.  Mode ``off`` bypasses entirely (rollback).
@@ -39,19 +40,12 @@ from starlette.concurrency import run_in_threadpool
 from . import auth, session_auth
 from .rbac import is_ops_admin_path, is_public_chat_path, is_public_path, role_for
 
-#: Only this prefix is gated (boundary-aware: ``/api/v1x`` is not gated).
-API_PREFIX = "/api/v1"
-
-#: Non-prefixed paths that share the gate. ``/mcp`` is the bare MCP alias the
-#: public host ``mcp.zolai.space`` proxies (``zolai/api/mcp_router.root_router``);
-#: gating it here is what lets a presented key resolve to member/admin — and
-#: brings it onto the anonymous rate-limit buckets — instead of silently
-#: degrading every caller to the public tool set. No pre-existing route changed.
-EXTRA_PROTECTED_PATHS: frozenset[str] = frozenset({"/mcp"})
-
 #: Paths never gated — documented exemptions (ADR-002 / ADR-014).
 #: ``/metrics`` was removed 2026-10-21: it is now on the admin-gated ops
 #: surface (``rbac.OPS_ADMIN_PREFIXES``), so it is no longer "never gated".
+#: This list is the *whole* bypass: :func:`is_protected_path` denies everything
+#: else (core#15), so adding a path here makes it anonymous in every mode and
+#: deserves the same care a ``PUBLIC_ROUTES`` entry gets.
 EXEMPT_PATHS: frozenset[str] = frozenset(
     {
         "/health",
@@ -66,12 +60,19 @@ HeaderList = list[tuple[bytes, bytes]]
 
 
 def is_protected_path(path: str) -> bool:
-    """True when ``path`` sits on the gated surface (``/api/v1`` + the aliases)."""
-    if path in EXEMPT_PATHS:
-        return False
-    if path in EXTRA_PROTECTED_PATHS:
-        return True
-    return path == API_PREFIX or path.startswith(API_PREFIX + "/")
+    """True unless ``path`` is a documented exemption.
+
+    core#15: the gate used to cover ``/api/v1`` plus the bare ``/mcp`` alias,
+    which left every legacy unversioned mount — ``/settings``, ``/providers``,
+    ``/monitor/*``, ``/learning/*``, ``/bible/status``, ``/analyze``,
+    ``/knowledge/search``, ``/chat/*`` — answering with no credential under
+    ``enforce``, because nothing had ever declared them.  Now the default is
+    deny, and the anonymous surface is the allowlist in :mod:`zolai.api.rbac`
+    (:func:`~zolai.api.rbac.is_public_path`) — ``/mcp`` and ``/api/v1/mcp`` ride
+    the same route as everything else.  ``warn`` behaviour is unchanged: a
+    missing key is logged and the request still succeeds.
+    """
+    return path not in EXEMPT_PATHS
 
 
 #: Defaults for the anonymous buckets (P2 — plan §B).
@@ -301,10 +302,12 @@ class ApiKeyMiddleware:
             return
 
         # Ops surface (``/metrics``/``/api/metrics``/``/review``/``/docs``/
-        # ``/redoc``/``/openapi.json``): strict admin, gated here because these
-        # routes sit outside ``/api/v1`` and carry no route-level dependency.
-        # 401 for anonymous in warn *and* enforce, 403 for a resolved non-admin,
-        # only ``ZOLAI_API_AUTH=off`` bypasses (handled above). ``ZOLAI_DEV_DOCS``
+        # ``/redoc``/``/openapi.json``): strict admin. It runs ahead of the
+        # generic gate because these routes carry no route-level dependency to
+        # hang ``require_role`` on, and they must 401 for anonymous in **warn**
+        # too — the dual-accept below would otherwise keep them open until
+        # ``enforce`` flips.  403 for a resolved non-admin, only
+        # ``ZOLAI_API_AUTH=off`` bypasses (handled above). ``ZOLAI_DEV_DOCS``
         # re-opens only the explorer trio via ``is_ops_admin_path``. No new
         # rate-limit bucket: these surfaces were never rate-limited and the fix
         # here is authorization, not throttling.

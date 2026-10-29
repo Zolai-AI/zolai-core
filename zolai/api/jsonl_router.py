@@ -7,11 +7,13 @@ Authentication (2026-10-18 security fix)
 This router used to declare **no** ``require_scope`` dependency at all, while
 sitting on the same ``/desktop`` prefix as
 :mod:`zolai.api.desktop_router` (which requires ``dataset:read``).  Because
-``auth_middleware.is_protected_path`` only gates ``/api/v1``, protection for
-``/desktop/*`` rests entirely on each router's own dependencies — so under
-``ZOLAI_API_AUTH=enforce`` every route below, including the full-corpus write
-(``POST /import/all``) and the full-corpus read (``POST /export/all``), served
-**unauthenticated** callers.  Each route now declares a scope explicitly.
+``auth_middleware.is_protected_path`` used to gate only ``/api/v1``, so
+protection for ``/desktop/*`` rested entirely on each router's own
+dependencies — under ``ZOLAI_API_AUTH=enforce`` every route below, including
+the full-corpus write (``POST /import/all``) and the full-corpus read
+(``POST /export/all``), served **unauthenticated** callers.  Each route now
+declares a scope explicitly; since core#15 the middleware gate is also
+default-deny, so both layers cover this prefix.
 
 Reads and writes deliberately do **not** share one scope, and both scopes come
 from the frozen 33-action vocabulary in :data:`zolai.api.auth.VALID_ACTIONS`
