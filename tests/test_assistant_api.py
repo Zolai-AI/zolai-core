@@ -130,6 +130,7 @@ class TestPublicAssistant:
 
         monkeypatch.setattr(assistant_router, "run_agent_loop", fake_run_agent_loop)
 
+        answers = []
         for forwarded_for in ("198.51.100.1", "198.51.100.2"):
             response = client.post(
                 "/api/v1/assistant/chat",
@@ -137,6 +138,7 @@ class TestPublicAssistant:
                 json={"message": "pasian"},
             )
             assert response.status_code == 200, response.text
+            answers.append(response.json())
 
         blocked = client.post(
             "/api/v1/assistant/chat",
@@ -146,7 +148,12 @@ class TestPublicAssistant:
 
         assert blocked.status_code == 429
         assert blocked.json()["detail"]["scope"] == "public_chat"
-        assert provider_calls == 2
+        # The two survivors reached the handler as real answers; the forged
+        # headers bought them no extra room. Arrival is proven by the reply and
+        # not by a provider call: issue #14 pins the anonymous caller to the
+        # rule path, so a live provider must stay untouched here.
+        assert all(a["answer"].strip() and a["retrieval_only"] for a in answers)
+        assert provider_calls == 0, "anonymous chat must not reach the provider (#14)"
 
     def test_public_never_persists(self, client, data_db, auth_db) -> None:
         resp = client.post(

@@ -13,6 +13,8 @@ from threading import Lock
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from .auth_middleware import client_ip
+
 log = logging.getLogger(__name__)
 
 # Per-scope rate limits (requests per minute)
@@ -152,13 +154,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if api_key:
             return f"apikey:{api_key[:16]}"
 
-        # Fall back to IP
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            ip = forwarded.split(",")[0].strip()
-        else:
-            ip = request.client.host if request.client else "unknown"
-        return f"ip:{ip}"
+        # Fall back to the peer-backed client identity (core#25) — the same rule
+        # the middleware buckets use, so this limiter cannot be dodged with a
+        # forged ``X-Forwarded-For`` while that one is honest.
+        return f"ip:{client_ip(request.scope)}"
 
     def _get_required_scopes(self, request: Request) -> list[str]:
         """Extract required scopes from request path."""
