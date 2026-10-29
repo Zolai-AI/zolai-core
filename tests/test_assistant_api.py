@@ -128,6 +128,69 @@ class TestPublicAssistant:
         assert resp.status_code == 422
 
 
+class TestPublicChatGenerationGate:
+    """Issue #14 — anonymous traffic must never open a live LLM connection."""
+
+    def test_anonymous_pinned_to_rule_even_with_provider(
+        self, client, data_db, auth_db, monkeypatch
+    ) -> None:
+        from zolai.api import assistant_router as ar
+
+        monkeypatch.setenv("ZOLAI_API_AUTH", "warn")
+        monkeypatch.setattr(ar, "llm_allowed", lambda: True)
+        monkeypatch.setenv("ZOLAI_ENGINE_MODE", "hybrid")
+
+        resp = client.post("/api/v1/assistant/chat", json={"message": "pasian"})
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["retrieval_only"] is True
+        assert body["generation_requires_auth"] is True
+
+    def test_resolved_credential_reaches_the_provider_path(
+        self, client, data_db, auth_db, monkeypatch, member_key
+    ) -> None:
+        from zolai.api import assistant_router as ar
+
+        monkeypatch.setenv("ZOLAI_API_AUTH", "warn")
+        monkeypatch.setenv("ZOLAI_ENGINE_MODE", "hybrid")
+        monkeypatch.setattr(ar, "llm_allowed", lambda: True)
+
+        def memory_chat(messages, tools=None):
+            return {"text": "pasian means God."}
+
+        monkeypatch.setattr(
+            ar,
+            "make_chat_fn",
+            lambda **kw: (memory_chat, {"catalog_id": "stub", "model": "stub"}),
+        )
+
+        resp = client.post(
+            "/api/v1/assistant/chat",
+            json={"message": "define pasian"},
+            headers=_headers(member_key),
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        # A real credential resolves on the middleware, so the gate lifts.
+        assert "generation_requires_auth" not in body
+
+    def test_bad_key_stays_anonymous_not_401(
+        self, client, data_db, auth_db, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("ZOLAI_API_AUTH", "warn")
+        monkeypatch.setenv("ZOLAI_ENGINE_MODE", "hybrid")
+        monkeypatch.setattr("zolai.api.assistant_router.llm_allowed", lambda: True)
+
+        resp = client.post(
+            "/api/v1/assistant/chat",
+            json={"message": "pasian"},
+            headers=_headers({"plaintext": "zolai_sk_does_not_exist"}),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["generation_requires_auth"] is True
+
+
 class TestAdminAssistant:
     def test_anonymous_is_401_in_warn_and_enforce(
         self, client, data_db, auth_db, monkeypatch

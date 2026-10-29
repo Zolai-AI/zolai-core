@@ -6,7 +6,10 @@
   (``rag_search``, ``dictionary_lookup``, ``word_evidence``, ``verse_lookup``,
   ``grammar_check``).  Answers always carry ``citations``; with no usable
   provider the response is an honest **``retrieval_only: true``** fallback —
-  never fake generation.
+  never fake generation.  Since issue #14 an *unauthenticated* caller is
+  pinned to that rule path even when a live provider is configured
+  (``generation_requires_auth: true``) — provider budget needs a resolvable
+  identity; the route itself stays open in every auth mode.
 - ``POST /api/v1/admin/assistant/chat`` — ``require_role("admin", strict=True)``
   + ``agent:run`` scope; full tool set and the **tool-call trace** for the
   Studio inspector.
@@ -315,6 +318,7 @@ def run_assistant(
     model: str | None = None,
     api_key: str | None = None,
     user_provider: str | None = None,
+    allow_llm: bool = True,
 ) -> dict[str, Any]:
     """Shared runner: resolve provider → loop (or honest retrieval fallback).
 
@@ -325,6 +329,11 @@ def run_assistant(
 
     ``api_key`` is an optional per-request API key override (user-provided key
     for this request only, not stored server-side).
+
+    ``allow_llm=False`` (issue #14) pins the run to the rule path even when a
+    live provider is configured — the public route sets it for callers whose
+    credential did not resolve, so anonymous traffic never spends provider
+    budget. The response says so with ``generation_requires_auth: true``.
     """
     assistant = "admin" if admin else "public"
     allow = allow_list("admin" if admin else "public")
@@ -333,8 +342,10 @@ def run_assistant(
     # Select role-specific system prompt
     system_prompt = ADMIN_ASSISTANT_PROMPT if admin else PUBLIC_ASSISTANT_PROMPT
 
-    if not llm_allowed():
+    if not allow_llm or not llm_allowed():
         out = _retrieval_only(message, allow)
+        if not allow_llm:
+            out["generation_requires_auth"] = True
         return _finish(
             out, message, admin=admin, persist=persist, started=started,
             requested_provider=provider, requested_model=model,
@@ -517,6 +528,17 @@ def _supplied_credential_fields(body: "ChatIn", request: Request) -> list[str]:
     return sorted(supplied)
 
 
+def _caller_is_authenticated(request: Request) -> bool:
+    """Did the auth middleware resolve a credential for this request?
+
+    Public routes never 401, but the middleware still resolves a presented
+    ``X-API-Key`` / session / OAuth token best-effort and publishes it on
+    ``scope["state"]["api_key"]`` — presence here means a real, attributable
+    caller, not the anonymous one.
+    """
+    return bool(getattr(request.state, "api_key", None))
+
+
 @public_router.post("/chat")
 async def public_chat(body: ChatIn, request: Request) -> dict[str, Any]:
     """Anonymous-safe chat — public in every auth mode (rbac.PUBLIC_ROUTES).
@@ -531,6 +553,15 @@ async def public_chat(body: ChatIn, request: Request) -> dict[str, Any]:
     stable code ``caller_supplied_credentials_forbidden`` — the credential
     value is never echoed, logged or forwarded. Callers who want a per-request
     key use the admin chat, which is gated on the resolved admin role.
+
+    Issue #14: generation is not free to the anonymous caller. When the
+    request carries **no resolvable credential** — the normal MCP/dashboard
+    anonymous case — the run is pinned to the rule path (``allow_llm=False``),
+    so a live provider is never contacted and no budget is spent without an
+    attributable identity. The honest ``retrieval_only`` answer with citations
+    still ships, now flagged ``generation_requires_auth``. A caller whose
+    ``X-API-Key`` / session / OAuth token resolves on the auth middleware is
+    treated as authenticated and gets the full provider path.
     """
     supplied = _supplied_credential_fields(body, request)
     if supplied:
@@ -548,9 +579,11 @@ async def public_chat(body: ChatIn, request: Request) -> dict[str, Any]:
     from .providers_router import validate_selection
 
     validate_selection(body.provider, body.model, assistant="public")
+    authenticated = _caller_is_authenticated(request)
     return run_assistant(
         body.message, admin=False, persist=False,
         provider=body.provider, model=body.model,
+        allow_llm=authenticated,
     )
 
 

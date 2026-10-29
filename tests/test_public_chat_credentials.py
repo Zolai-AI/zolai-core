@@ -130,9 +130,11 @@ class TestBareMessageStillWorks:
         payload = {"message": "pasian"}
         out = _post(assistant_router.ChatIn(message="pasian"), payload)
         assert out == {"ok": True}
+        # The hand-built request has empty ``state`` — no resolved credential —
+        # so issue #14's gate pins it to the rule path (allow_llm=False).
         assert calls == [
             {"message": "pasian", "admin": False, "persist": False,
-             "provider": None, "model": None}
+             "provider": None, "model": None, "allow_llm": False}
         ]
 
 

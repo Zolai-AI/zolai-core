@@ -531,6 +531,23 @@ class ApiKeyMiddleware:
                         + [(b"retry-after", str(retry_after).encode("ascii"))],
                     )
                     return
+                if token:
+                    # Issue #14: a credential presented to a public route is
+                    # still resolved best-effort so the handler can tell *who*
+                    # is asking. Public semantics are unchanged — an
+                    # unresolvable token stays anonymous, never a 401.
+                    record = await run_in_threadpool(auth.resolve_key, token)
+                    if record is None:
+                        record = await run_in_threadpool(self._resolve_session, token)
+                    if record is None:
+                        record = await run_in_threadpool(self._resolve_oauth, token)
+                    if record is not None:
+                        scope.setdefault("state", {})["api_key"] = {
+                            "id": record.get("id"),
+                            "name": record.get("name"),
+                            "key_prefix": record.get("key_prefix"),
+                            "scopes": record.get("scopes") or [],
+                        }
                 await self.app(scope, receive, send)
                 return
 
