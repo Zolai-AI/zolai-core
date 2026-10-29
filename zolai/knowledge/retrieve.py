@@ -105,7 +105,6 @@ def _ensure_index_file(path: Path) -> Path:
             repo_type=HF_REPO_TYPE,
             token=token,
             local_dir=str(path.parent),
-            local_dir_use_symlinks=False,
         )
         src = Path(downloaded)
         if src != path:
@@ -228,7 +227,16 @@ def retrieve(
 
     from sentence_transformers import SentenceTransformer
 
-    model = SentenceTransformer(model_name)
+    # Offline-first (core#12): the embedder already sits in the local HF cache
+    # on the deployment host, so read it from disk and skip the Hub revision
+    # check — that check is what logged "You are sending unauthenticated
+    # requests to the HF Hub" on every embed and burned the anonymous rate
+    # limit.  ``zolai/rag/retrieve.py`` loads the same model this way.
+    try:
+        model = SentenceTransformer(model_name, local_files_only=True)
+    except OSError:
+        model = SentenceTransformer(model_name)  # not cached: one-time download
+
     q = _embed_query(model, query)
     # cosine = dot product since vectors are normalized
     sims = index.vectors @ q
