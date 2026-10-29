@@ -1065,7 +1065,7 @@ class DatabaseManager:
             )
             return result.scalar_one()
 
-    def counts(self) -> dict[str, int]:
+    def counts(self, *, force: bool = False) -> dict[str, int]:
         """Row counts for every table that exists, in a single round trip.
 
         This used to issue one ``SELECT COUNT(*)`` per model table — ~150
@@ -1073,7 +1073,19 @@ class DatabaseManager:
         partially-migrated database (a table in the models but not yet in
         SQLite). One ``UNION ALL`` statement costs one query, and absent
         tables are reported by omission rather than a 500.
+
+        The one query is still ~17s against the 2.4GB production corpus
+        (core#24 measured it), so the result is cached for the same short window
+        as :meth:`health_check`, which is where that TTL lives. Caching *here*
+        rather than there is what covers the legacy ``/stats`` fallback too — it
+        calls this directly (explorer#33 / explorer#35 saw 15s client timeouts).
+        ``force=True`` re-scans, for a caller that just landed a write.
         """
+        now = time.monotonic()
+        cached = getattr(self, "_counts_cache", None)
+        if not force and cached is not None and now - cached[0] < self.HEALTH_CACHE_TTL_S:
+            return dict(cached[1])
+
         names = self._existing_table_names()
         if not names:
             return {}
@@ -1082,7 +1094,9 @@ class DatabaseManager:
         )
         with self.engine.connect() as conn:
             rows = conn.execute(text(union)).fetchall()
-        return {row[0]: int(row[1]) for row in rows}
+        payload = {row[0]: int(row[1]) for row in rows}
+        self._counts_cache = (now, payload)
+        return dict(payload)
 
     def _existing_table_names(self) -> list[str]:
         """Model tables that actually exist in the connected database."""
@@ -2023,7 +2037,7 @@ class DatabaseManager:
             return cached[1]
 
         backend = "sqlite" if self._db_url.startswith("sqlite") else "postgresql"
-        counts = self.counts()
+        counts = self.counts(force=force)
         total = sum(counts.values())
 
         # DB size

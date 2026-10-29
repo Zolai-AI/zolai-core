@@ -224,9 +224,9 @@ def test_monitor_health_answers_from_the_ttl_cache(
     calls: list[bool] = []
     real_counts = DatabaseManager.counts
 
-    def counting_counts(self):
+    def counting_counts(self, *, force: bool = False):
         calls.append(True)
-        return real_counts(self)
+        return real_counts(self, force=force)
 
     monkeypatch.setattr(DatabaseManager, "counts", counting_counts)
     mgr = get_manager()

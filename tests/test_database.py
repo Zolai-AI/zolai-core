@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from types import MethodType
 
 import pytest
 
@@ -575,6 +576,37 @@ class TestHealthCheck:
         assert isinstance(info["table_counts"], dict)
         assert info["total_rows"] >= 1
         assert info["query_latency_ms"] >= 0
+
+    def test_counts_are_ttl_cached_until_forced(self, tmp_db, sample_dict):
+        """The UNION-ALL scan is the ~17s query core#24 measured, so both
+        ``health_check`` and the legacy ``/stats`` fallback share one short cache;
+        a caller that just wrote forces the re-scan."""
+        scans: list[bool] = []
+        real = DatabaseManager._existing_table_names
+
+        def spying(self):
+            scans.append(True)
+            return real(self)
+
+        tmp_db._existing_table_names = MethodType(spying, tmp_db)
+
+        tmp_db.insert_many("dictionary", [sample_dict])
+        first = tmp_db.counts()
+        assert first["dictionary"] == 1
+        assert tmp_db.counts() == first
+        assert len(scans) == 1, "the second read must come from the cache"
+
+        tmp_db.insert_many("dictionary", [{**sample_dict, "zolai": "khla"}])
+        assert tmp_db.counts(force=True)["dictionary"] == 2
+        assert len(scans) == 2
+
+    def test_counts_are_not_the_shared_snapshot(self, tmp_db, sample_dict):
+        """Handing out the cached dict itself would let one caller rewrite what
+        every later caller reads."""
+        tmp_db.insert_many("dictionary", [sample_dict])
+        first = tmp_db.counts()
+        first["dictionary"] = 999
+        assert tmp_db.counts()["dictionary"] == 1
 
     def test_health_check_redacts_the_database_path(self, tmp_db):
         """``/monitor/health`` is public — the data directory must not travel
