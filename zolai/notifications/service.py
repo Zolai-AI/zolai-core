@@ -41,6 +41,19 @@ def _env_bool(*names: str, default: bool = False) -> bool:
     return raw.lower() in {"1", "true", "yes", "on"}
 
 
+#: Markers that mean "this came from an env template, not from a mailbox".
+#: core#10: production ran with ``SMTP_PASS="<gmail-app-password>"`` — a
+#: non-empty value, so the "credentials not configured" check passed, the
+#: sender spent the full timeout on the wire, and the operator got an AUTH
+#: failure that pointed at the wrong cause.  No real credential contains these.
+_TEMPLATE_MARKERS = ("<", ">", "your_", "changeme", "replace_me", "placeholder")
+
+
+def _looks_like_template(value: str) -> bool:
+    lowered = value.strip().strip("'\"").lower()
+    return any(marker in lowered for marker in _TEMPLATE_MARKERS)
+
+
 def classify_smtp_failure(exc: BaseException) -> str:
     """Turn an SMTP exception into something an operator can act on.
 
@@ -149,6 +162,10 @@ class EmailConfig:
             "ssl": bool(self.use_ssl),
             "user_set": bool(self.user),
             "password_set": bool(self.password),
+            # core#10: "password_set" was True while the value was still
+            # "<gmail-app-password>". This says which of the two it is, without
+            # the value ever leaving here.
+            "password_is_template": _looks_like_template(self.password),
             "from_email": self.from_email,
             "admin_email_count": len(self.admin_emails or []),
         }
@@ -275,6 +292,19 @@ class NotificationService:
 
         if not self.config.user or not self.config.password:
             return False, "SMTP credentials not configured"
+
+        if _looks_like_template(self.config.password):
+            # core#10: fail here rather than on the wire, and say what to do.
+            logger.error(
+                "SMTP_PASS is still an env-template placeholder (host=%s); refusing "
+                "to send. Set a real password — for Gmail a 16-character App Password "
+                "with 2FA on — in the environment file the service loads, then restart.",
+                self.config.host,
+            )
+            return False, (
+                "SMTP_PASS is an env-template placeholder, not a credential. "
+                "Set a real password (Gmail: a 16-character App Password) and restart."
+            )
 
         cb = get_circuit_breaker("smtp_email")
 
