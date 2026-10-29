@@ -17,12 +17,13 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from test_agent_runs import _SEED_SQL
 
-from zolai.api import auth, rbac
+from zolai.api import assistant_router, auth, providers_router, rbac
 from zolai.api.auth_middleware import reset_rate_limiter
 from zolai.api.server import create_app
 from zolai.config import config
@@ -106,6 +107,46 @@ class TestPublicAssistant:
 
     def test_public_route_is_declared_public(self) -> None:
         assert ("POST", "/api/v1/assistant/chat") in rbac.PUBLIC_ROUTES
+
+    def test_forged_forwarded_for_cannot_bypass_chat_rate_limit(self, client, data_db, auth_db, monkeypatch) -> None:
+        monkeypatch.setenv("ZOLAI_API_AUTH", "enforce")
+        monkeypatch.setenv("ZOLAI_PUBLIC_CHAT_RATE_LIMIT_RPM", "2")
+        monkeypatch.setattr(assistant_router, "llm_allowed", lambda: True)
+        monkeypatch.setattr(
+            assistant_router,
+            "make_chat_fn",
+            lambda **kwargs: (
+                lambda messages: "unused",
+                {"native": False, "catalog_id": "test", "model": "test-model"},
+            ),
+        )
+        monkeypatch.setattr(providers_router, "validate_selection", lambda *args, **kwargs: None)
+        provider_calls = 0
+
+        def fake_run_agent_loop(**_kwargs: Any) -> dict[str, Any]:
+            nonlocal provider_calls
+            provider_calls += 1
+            return {"reply": "Pasian in leitung a bawl hi.", "tool_calls": [], "turns": 1}
+
+        monkeypatch.setattr(assistant_router, "run_agent_loop", fake_run_agent_loop)
+
+        for forwarded_for in ("198.51.100.1", "198.51.100.2"):
+            response = client.post(
+                "/api/v1/assistant/chat",
+                headers={"X-Forwarded-For": forwarded_for},
+                json={"message": "pasian"},
+            )
+            assert response.status_code == 200, response.text
+
+        blocked = client.post(
+            "/api/v1/assistant/chat",
+            headers={"X-Forwarded-For": "198.51.100.3"},
+            json={"message": "pasian"},
+        )
+
+        assert blocked.status_code == 429
+        assert blocked.json()["detail"]["scope"] == "public_chat"
+        assert provider_calls == 2
 
     def test_public_never_persists(self, client, data_db, auth_db) -> None:
         resp = client.post(
