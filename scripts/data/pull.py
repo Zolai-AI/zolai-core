@@ -95,7 +95,6 @@ def pull_one(name: str) -> int:
         repo_id=spec.repo_id,
         repo_type=spec.repo_type,
         local_dir=str(spec.local_dir),
-        local_dir_use_symlinks=False,
     )
     print(f"Pulled {spec.repo_id} -> {spec.local_dir}")
     return 0
