@@ -38,7 +38,14 @@ from typing import Any
 from starlette.concurrency import run_in_threadpool
 
 from . import auth, session_auth
-from .rbac import is_ops_admin_path, is_public_chat_path, is_public_path, role_for
+from .rbac import (
+    ROLE_ADMIN,
+    has_role,
+    is_ops_admin_path,
+    is_public_chat_path,
+    is_public_path,
+    role_for,
+)
 
 #: Paths never gated — documented exemptions (ADR-002 / ADR-014).
 #: ``/metrics`` was removed 2026-10-21: it is now on the admin-gated ops
@@ -334,7 +341,11 @@ class ApiKeyMiddleware:
                     },
                 )
                 return
-            if role_for(ops_record) != "admin":
+            # Rank, not equality: a superadmin is *at least* an admin.  ``==
+            # "admin"`` here would 403 every role above the one it names, which
+            # is how a 4th role silently locks itself out of /metrics, /review
+            # and /docs on the day it is introduced.
+            if not has_role(ops_record, ROLE_ADMIN):
                 await _send_json(
                     send,
                     403,
@@ -432,6 +443,13 @@ class ApiKeyMiddleware:
                     "key_prefix": oauth_record.get("key_prefix"),
                     "scopes": oauth_record.get("scopes") or [],
                     "auth_source": oauth_record.get("auth_source"),
+                    # The **live** account role, carried through like a session's
+                    # (``session_auth.record_from_user`` sets the same key).
+                    # Without it ``role_for`` falls back to reading scopes, which
+                    # answers the pre-§1.1 question — "what did this grant ask
+                    # for?" — instead of "what role does this person hold?", and
+                    # a narrowed grant would look like a member account.
+                    "role": oauth_record.get("role"),
                 }
                 state["oauth"] = {
                     "user_id": oauth_record.get("user_id"),
@@ -467,6 +485,29 @@ class ApiKeyMiddleware:
 
                 await self.app(scope, receive, send_oauth_wrapper)
                 return
+
+            # A presented-but-unresolvable ``zolai_at_*`` token is still a
+            # credential, not an anonymous visitor.  On an MCP path, answer
+            # 401 + the RFC 6750 challenge so the connector refreshes; falling
+            # through to the public branch would silently hand it the 8-tool
+            # anonymous set and hide the expiry.
+            if token and token.startswith("zolai_at_"):
+                from ..auth import oauth as oauth_as
+
+                if oauth_as.is_mcp_path(path):
+                    challenge = oauth_as.www_authenticate(scope, error="invalid_token")
+                    await _send_json(
+                        send,
+                        401,
+                        {
+                            "detail": {
+                                "error": "unauthorized",
+                                "reason": "invalid_token",
+                            }
+                        },
+                        [(b"www-authenticate", challenge.encode("latin-1"))],
+                    )
+                    return
 
             # C5 strict challenge — ``ZOLAI_MCP_OAUTH_REQUIRED`` (default OFF).
             # Reached only after every credential path above (API key,

@@ -29,6 +29,9 @@ DEFAULT_INDEX = config.paths.data_knowledge / "knowledge_vectors.jsonl"
 HF_REPO = "peterpausianlian/zolai-knowledge-vectors"
 HF_FILENAME = "knowledge_vectors.jsonl"
 HF_REPO_TYPE = "dataset"
+#: Pinned so two machines cannot end up with different vector files under the
+#: same name. Override with ``ZOLAI_KNOWLEDGE_INDEX_REVISION`` (tag or SHA).
+HF_REVISION = os.environ.get("ZOLAI_KNOWLEDGE_INDEX_REVISION", "main")
 
 
 @dataclass
@@ -103,6 +106,7 @@ def _ensure_index_file(path: Path) -> Path:
             repo_id=HF_REPO,
             filename=HF_FILENAME,
             repo_type=HF_REPO_TYPE,
+            revision=HF_REVISION,
             token=token,
             local_dir=str(path.parent),
         )

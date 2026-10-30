@@ -49,6 +49,7 @@ from ..api.rag_router import router as rag_router
 from ..api.rbac import auth_router as auth_info_router
 from ..api.record_review_router import router as record_review_router
 from ..api.records_router import router as records_router
+from ..api.role_requests_router import router as role_requests_router
 from ..api.security import SecurityHeadersMiddleware, cors_kwargs, get_cors_origins
 from ..api.word_engine_router import router as word_engine_router
 from ..cleaner.pipeline import CleanPipeline
@@ -503,6 +504,11 @@ def create_app() -> FastAPI:
     # Admin user accounts (list/create/role/password/revoke-sessions) — strict
     # ``user:manage`` scope + admin role, same rule: BEFORE the catch-all.
     app.include_router(admin_users_router)
+    # Role-request queue — a member session asks, a superadmin decides. Its own
+    # prefix (``/api/v1/role-requests``, declared in rbac.MEMBER_PREFIXES) rather
+    # than a child of ``/api/v1/admin``, so a member can reach ``/mine``: an
+    # admin prefix would 401 them on their own list. BEFORE the catch-all.
+    app.include_router(role_requests_router)
     # Public provider catalog (enabled rows, zero secrets) — rbac.PUBLIC_ROUTES.
     app.include_router(providers_router)
     # UI Routes for review queue
@@ -1752,11 +1758,11 @@ def create_app() -> FastAPI:
         return {"quiz": quiz, "count": len(quiz)}
 
     @app.get("/learning/statistics")
-    def get_learning_statistics():
-        """Get learning statistics."""
+    def get_learning_statistics(user_id: str = "default"):
+        """Get learning statistics — corpus scale plus this learner's reviews."""
         from ..learning.progress import ProgressTracker
         from ..learning.translation import TranslationEngine
-        tracker = ProgressTracker()
+        tracker = ProgressTracker(user_id=user_id)
         translation_engine = TranslationEngine()
         return {
             "progress": tracker.get_statistics(),

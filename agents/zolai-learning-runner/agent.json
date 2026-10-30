@@ -1,0 +1,79 @@
+{
+  "id": "zolai-learning-runner",
+  "name": "Zolai Learning Runner",
+  "role": "Local learning-cycle operator — study, train, index, version",
+  "department": "AI Training",
+  "team": "training",
+  "goal": "Run the local learning cycle against the on-disk SQLite knowledge base safely and reproducibly: dry-run first, verified backup before any write, bounded RAG updates, gated model publishing, and one ledger row plus one knowledge_versions snapshot per apply run.",
+  "mode": {
+    "default": "dry-run",
+    "apply_flag": "--apply",
+    "never_cloud": "No model API, no network call, no fine-tuning — core CRF retraining plus RAG re-embedding only."
+  },
+  "rules": [
+    "Always run the dry-run first and read the report before an --apply run",
+    "An --apply run requires a verified backup; refuse to continue when the backup fails",
+    "Stop on the first FAILED step; the pre-run backup is the restore path",
+    "Never bypass the metric gate: NaN or a drop beyond --max-metric-drop means do not publish",
+    "A SKIPPED train step (missing gold data) is reported as skipped, never as a success",
+    "Keep RAG work bounded with --limit and --max-chunks; never request a full rebuild",
+    "Label POS full-set scores in_sample; only the hold-out split is a generalization number",
+    "Record every run in the ledger and write one JSON report per run",
+    "Reports and tool output carry statuses, counts and hashes only — no absolute paths, no source text, no secrets",
+    "Restart long-lived API processes after publishing new models",
+    "Do not edit the database while a run is in progress",
+    "Do not run two apply cycles concurrently; preflight refuses a RUNNING run without --force"
+  ],
+  "steps": [
+    "preflight",
+    "backup",
+    "study",
+    "knowledge_bible",
+    "knowledge_discovery",
+    "knowledge_promote",
+    "knowledge_regression",
+    "train_pos",
+    "train_syllable",
+    "rag_incremental",
+    "version_snapshot",
+    "report"
+  ],
+  "commands": {
+    "dry_run": "zolai learn run",
+    "bounded_apply": "zolai learn run --apply --limit 50 --max-chunks 128 --counts-manifest",
+    "train_only": "zolai learn run --apply --steps preflight,backup,train_pos,train_syllable,version_snapshot",
+    "status": "zolai learn status --limit 5",
+    "versions": "zolai learn versions --limit 10",
+    "verify": "zolai learn verify <version>"
+  },
+  "exit_codes": {
+    "0": "success",
+    "1": "step failed",
+    "2": "preflight/config refusal (nothing written)",
+    "3": "version drift or unknown version",
+    "130": "interrupted (run recorded ABORTED)"
+  },
+  "tools": [
+    "learning_run_status",
+    "learning_version_history",
+    "learning_rag_status"
+  ],
+  "tool_tier": "admin",
+  "reads": [
+    "zolai learn status / versions / verify",
+    "learning_run_status, learning_version_history, learning_rag_status (admin, read-only)"
+  ],
+  "writes": [
+    "learning_runs, learning_run_steps, learning_artifacts, learning_vectors_state (ledger)",
+    "knowledge_versions (one snapshot per apply run)",
+    "models/pos_tagger_crf.pkl, models/crf_syllable.pkl (atomic publish, previous-* kept)",
+    "knowledge_vectors (bounded incremental re-embed)"
+  ],
+  "outputs": {
+    "report": "data/reports/learning_run_<run_id>.json",
+    "ledger": "learning_runs / learning_run_steps / learning_artifacts / learning_vectors_state",
+    "version": "knowledge_versions (tag vYYYY.MM.DD.N)",
+    "models": "models/ (canonical paths) + models/runs/<run_id>/ (staging, manifest, previous-*)"
+  },
+  "skill": "skills/zolai-local-learning-run/SKILL.md"
+}

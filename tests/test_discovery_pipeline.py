@@ -184,3 +184,24 @@ def test_foundation_evidence_has_method_extractor(db_engine: Engine) -> None:
         if not (row.method or "").strip() or not (row.extractor or "").strip()
     ]
     assert not missing, f"{len(missing)} evidence rows without method/extractor"
+
+
+def test_capability_failure_is_named_and_isolated(db_engine: Engine, monkeypatch) -> None:
+    """One builder raising must not hide behind an OK summary."""
+    import zolai.learning.discovery.pipeline as pipeline_mod
+
+    def boom(engine, **kwargs):
+        raise RuntimeError("cannot open /srv/zolai/private.db with api_key=sk-test-abc123")
+
+    monkeypatch.setattr(pipeline_mod, "build_pos_hypotheses", boom)
+
+    result = build_discovery(db_engine, capabilities=["pos", "collocation"], limit=5)
+
+    assert result["ok"] is False
+    assert result["failed_capabilities"] == ["pos"]
+    assert result["pos"]["ok"] is False
+    assert result["pos"]["error_class"] == "RuntimeError"
+    # The safe message is stored, never the raw exception text.
+    assert "sk-test-abc123" not in result["pos"]["error"]
+    # The other capability still ran and is not flagged.
+    assert result["collocation"].get("ok", True) is not False

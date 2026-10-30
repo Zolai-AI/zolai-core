@@ -24,13 +24,13 @@ import logging
 import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from ...data.repositories import get_engine
+from ...shared.clock import stamp
 from .base_agent import AgentConfig, AgentRole, AgentSkill
 
 logger = logging.getLogger(__name__)
@@ -247,11 +247,6 @@ AGENT_DEFAULTS: dict[str, dict[str, Any]] = {
 }
 
 
-def _now() -> str:
-    """UTC timestamp for the bookkeeping columns."""
-    return datetime.now(timezone.utc).isoformat()
-
-
 def _coerce_role(value: AgentRole | str) -> AgentRole:
     if isinstance(value, AgentRole):
         return value
@@ -430,7 +425,7 @@ class AgentRegistry:
         Uses ``INSERT OR IGNORE`` so admin edits (tuning, renames, disabling)
         survive re-seeding.
         """
-        now = _now()
+        now = stamp()
         created_skills = 0
         created_agents = 0
         with self.engine.begin() as conn:
@@ -598,7 +593,7 @@ class AgentRegistry:
         role_value = _coerce_role(role).value
         skill_values = _coerce_skills(skills)
         config = _normalise_tuning(tuning)
-        now = _now()
+        now = stamp()
         self._execute(
             """
             INSERT INTO agents
@@ -648,7 +643,7 @@ class AgentRegistry:
         new_skills = record.skills if skills is None else [_coerce_skill(s) for s in skills]
         new_config = dict(record.config)
         new_config.update(_normalise_tuning(tuning))
-        now = _now()
+        now = stamp()
 
         self._execute(
             """
@@ -683,7 +678,7 @@ class AgentRegistry:
         record = self.get(agent_id)
         if record is None:
             raise KeyError(f"unknown agent: {agent_id!r}")
-        now = _now()
+        now = stamp()
         self._execute(
             "UPDATE agents SET enabled = :enabled, updated_at = :updated_at WHERE agent_id = :agent_id",
             {"agent_id": agent_id, "enabled": 1 if enabled else 0, "updated_at": now},
@@ -727,7 +722,7 @@ class AgentRegistry:
             raise ValueError("assistant_id is required")
         if self.get(agent_id) is None:
             raise KeyError(f"unknown agent: {agent_id!r}")
-        now = _now()
+        now = stamp()
         self._execute(
             """
             INSERT INTO assistant_agent_bindings
@@ -820,7 +815,7 @@ class AgentRegistry:
         if not key:
             raise ValueError("skill_id is required")
         existing = self._skills.get(key)
-        now = _now()
+        now = stamp()
         schema = dict(config_schema or {})
         self._execute(
             """
@@ -895,7 +890,7 @@ class AgentRegistry:
         team_id: Optional[str] = None,
     ) -> str:
         """Persist a task handed to an agent; returns the task id."""
-        now = _now()
+        now = stamp()
         new_id = task_id or f"task_{uuid.uuid4().hex[:12]}"
         self._execute(
             """
@@ -941,7 +936,7 @@ class AgentRegistry:
         discussion_id: Optional[str] = None,
     ) -> str:
         """Persist a discussion; returns the discussion id."""
-        now = _now()
+        now = stamp()
         new_id = discussion_id or f"disc_{uuid.uuid4().hex[:12]}"
         self._execute(
             """
@@ -991,7 +986,7 @@ class AgentRegistry:
                 "content": content,
                 "metadata": json.dumps(dict(metadata or {})),
                 "reply_to": reply_to,
-                "created_at": _now(),
+                "created_at": stamp(),
             },
         )
         return new_id

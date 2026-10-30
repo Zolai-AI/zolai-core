@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+from zolai.shared.clock import now, stamp
+
 logger = logging.getLogger(__name__)
 
 #: Vote types recognised by the tally (mirrors :class:`VoteType`).
@@ -36,7 +38,7 @@ class Vote:
     confidence: float  # 0.0 to 1.0
     reasoning: str = ""
     conditions: list[str] = field(default_factory=list)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=now)
     weight: float = 1.0  # Calculated weight
 
 
@@ -56,7 +58,7 @@ class ConsensusResult:
     winning_position: str = ""
     conditions: list[str] = field(default_factory=list)
     minority_opinions: list[str] = field(default_factory=list)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=now)
 
 
 class WeightedVotingConsensus:
@@ -77,7 +79,7 @@ class WeightedVotingConsensus:
             "confidence": vote.get("confidence", 0.5),
             "reasoning": vote.get("reasoning", ""),
             "conditions": vote.get("conditions", []),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": stamp(),
         }
         self.votes.append(vote_obj)
         # New votes need weighting before the next tally.

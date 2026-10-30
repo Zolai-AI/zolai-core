@@ -9,6 +9,7 @@ from typing import Any
 from ..config import config
 from ..monitoring import record_operation
 from ..monitoring.metrics import WORDS_TRANSLATED
+from ..shared.clock import stamp
 
 logger = logging.getLogger(__name__)
 
@@ -717,13 +718,14 @@ class TranslationEngine:
             cur.execute(
                 """INSERT INTO data_audit_log
                    (table_name, row_id, field, old_value, new_value, changed_at, reason)
-                   VALUES (?, ?, ?, ?, ?, datetime('now'), ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     "translations",
                     0,
                     "correction",
                     original,
                     corrected,
+                    stamp(),
                     f"Correction by {user_id}: {direction}",
                 ),
             )

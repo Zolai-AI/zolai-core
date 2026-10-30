@@ -7,16 +7,13 @@ two-way adapters between the shapes.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+from zolai.shared.clock import stamp
+
 __all__ = ["Evidence", "Observation"]
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class Evidence(BaseModel):
@@ -39,7 +36,7 @@ class Evidence(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="Source-internal confidence")
     provenance_hash: str = Field(default="", description="SHA256 (truncated) of the source record(s)")
     payload: dict[str, Any] = Field(default_factory=dict, description="Source-specific detail")
-    created_at: str = Field(default_factory=_now)
+    created_at: str = Field(default_factory=stamp)
 
     # --- §11 superset — additive columns on foundation_evidence -------------
     source_id: str | None = None
@@ -108,4 +105,4 @@ class Observation(BaseModel):
     method: str = Field(default="", description="How the unit was observed/extracted")
     extractor: str = Field(default="", description="Tool/version that produced the observation")
     metadata: dict[str, Any] = Field(default_factory=dict)
-    created_at: str = Field(default_factory=_now)
+    created_at: str = Field(default_factory=stamp)

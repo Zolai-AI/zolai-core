@@ -26,13 +26,13 @@ Reads and the audit tail live in :mod:`zolai.api.records_router`.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..config import config
+from ..shared.clock import stamp
 from . import auth
 from .records_router import RECORDS_WHITELIST
 
@@ -137,7 +137,7 @@ def correct_record(
             if row["review_status"] != REVIEWED_STATUS:
                 updates["review_status"] = REVIEWED_STATUS
 
-        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        changed_at = stamp()
         reason = f"record_review by {_actor(request)}: {body.reason}"
 
         try:
@@ -156,7 +156,7 @@ def correct_record(
                         field,
                         _audit_value(row[field]),
                         _audit_value(value),
-                        stamp,
+                        changed_at,
                         reason,
                     ),
                 )

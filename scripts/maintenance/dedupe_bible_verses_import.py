@@ -74,6 +74,14 @@ def _connect(db_path: str | Path) -> sqlite3.Connection:
     return conn
 
 
+def table_present(conn: sqlite3.Connection) -> bool:
+    """A mature DB drops the staging table once the import is merged."""
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bible_verses_import'"
+    ).fetchone()
+    return row is not None
+
+
 def score_columns(conn: sqlite3.Connection) -> list[str]:
     """Plan score columns that exist on this table (intersection, stable order)."""
     existing = {row[1] for row in conn.execute("PRAGMA table_info(bible_verses_import)")}
@@ -85,10 +93,24 @@ def score_columns(conn: sqlite3.Connection) -> list[str]:
 
 def plan_dedupe(conn: sqlite3.Connection) -> dict[str, Any]:
     """Compute keep/delete rowids without writing anything."""
+    if not table_present(conn):
+        # Nothing to dedupe: ``bible_verses_import`` is an import-time staging
+        # table that the live DB no longer carries. Absent is not unreadable —
+        # a present table with none of the score columns still raises below.
+        return {
+            "table_present": False,
+            "score_columns": [],
+            "before": 0,
+            "distinct_refs": 0,
+            "keep_rowids": [],
+            "delete_ids": [],
+            "best_scores": {},
+            "max_score": 0,
+        }
     cols = score_columns(conn)
     if not cols:
         raise RuntimeError(
-            "bible_verses_import has none of the score columns "
+            "bible_verses_import exists but has none of the score columns "
             f"{SCORE_COLUMNS} — refusing to dedupe blind"
         )
     empty_refs = int(
@@ -123,6 +145,7 @@ def plan_dedupe(conn: sqlite3.Connection) -> dict[str, Any]:
     delete_ids = [int(r["_rowid"]) for r in rows if int(r["_rowid"]) not in kept_rowids]
     scores = {ref: -key[0] for ref, key in best_key.items()}
     return {
+        "table_present": True,
         "score_columns": cols,
         "before": len(rows),
         "distinct_refs": len(keep),
@@ -153,8 +176,22 @@ def dedupe(db_path: str | Path, *, dry_run: bool = False) -> dict[str, Any]:
     conn = _connect(db_path)
     try:
         plan = plan_dedupe(conn)
+        if not plan["table_present"]:
+            return {
+                "table_present": False,
+                "skipped": "bible_verses_import is absent — nothing to dedupe",
+                "dry_run": dry_run,
+                "before": 0,
+                "after": 0,
+                "deleted": 0,
+                "would_delete": 0,
+                "distinct_refs": 0,
+                "score_columns": [],
+                "index_created": False,
+            }
         if dry_run:
             return {
+                "table_present": True,
                 "dry_run": True,
                 "before": plan["before"],
                 "after": plan["before"] - len(plan["delete_ids"]),
@@ -199,6 +236,7 @@ def dedupe(db_path: str | Path, *, dry_run: bool = False) -> dict[str, Any]:
             is not None
         )
         return {
+            "table_present": True,
             "dry_run": False,
             "before": plan["before"],
             "after": after,
@@ -242,6 +280,9 @@ def main(argv: list[str] | None = None) -> int:
 
     mode = "DRY-RUN" if summary["dry_run"] else "WROTE"
     print(f"[G2] {mode} bible_verses_import {db_path}")
+    if not summary["table_present"]:
+        print(f"  skipped             : {summary['skipped']}")
+        return 0
     print(f"  rows                : {summary['before']:,} → {summary['after']:,}")
     print(f"  distinct refs       : {summary['distinct_refs']:,}")
     print(f"  would delete        : {summary['would_delete']:,}")

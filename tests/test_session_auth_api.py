@@ -239,7 +239,9 @@ class TestSessionService:
         token = session_auth.login("founder", PASSWORD)["token"]
         assert session_auth.resolve_session(token) is not None
 
-        session_auth.set_user_enabled("founder", enabled=False, actor="test")
+        session_auth.set_user_enabled(
+            "founder", enabled=False, actor="test", actor_role="superadmin"
+        )
 
         assert session_auth.resolve_session(token) is None
         with pytest.raises(session_auth.LoginRejected) as rejected:
@@ -248,8 +250,12 @@ class TestSessionService:
 
     def test_reenabling_does_not_resurrect_a_revoked_session(self, founder) -> None:
         token = session_auth.login("founder", PASSWORD)["token"]
-        session_auth.set_user_enabled("founder", enabled=False, actor="test")
-        session_auth.set_user_enabled("founder", enabled=True, actor="test")
+        session_auth.set_user_enabled(
+            "founder", enabled=False, actor="test", actor_role="superadmin"
+        )
+        session_auth.set_user_enabled(
+            "founder", enabled=True, actor="test", actor_role="superadmin"
+        )
         assert session_auth.resolve_session(token) is None
         assert session_auth.login("founder", PASSWORD)["token"] != token
 
@@ -282,7 +288,7 @@ class TestSessionService:
 
     def test_unknown_user_lookup_raises(self, founder, session_db) -> None:
         with pytest.raises(LookupError):
-            session_auth.set_user_enabled("ghost", enabled=True)
+            session_auth.set_user_enabled("ghost", enabled=True, actor_role="superadmin")
         with pytest.raises(LookupError):
             session_auth.change_password("ghost", "another passphrase")
         with pytest.raises(LookupError):
@@ -335,7 +341,9 @@ class TestSessionService:
                 session_auth.login(username, password)
             reasons.append((str(rejected.value), rejected.value.reason))
 
-        session_auth.set_user_enabled("founder", enabled=False, actor="test")
+        session_auth.set_user_enabled(
+            "founder", enabled=False, actor="test", actor_role="superadmin"
+        )
         with pytest.raises(session_auth.LoginRejected) as disabled:
             session_auth.login("founder", PASSWORD)
         reasons.append((str(disabled.value), disabled.value.reason))
@@ -364,8 +372,12 @@ class TestAudit:
     def test_login_logout_and_user_lifecycle_are_audited(self, founder, session_db) -> None:
         token = session_auth.login("founder", PASSWORD, ip="10.0.0.1")["token"]
         session_auth.revoke_session(token)
-        session_auth.set_user_enabled("founder", enabled=False, actor="test")
-        session_auth.set_user_enabled("founder", enabled=True, actor="test")
+        session_auth.set_user_enabled(
+            "founder", enabled=False, actor="test", actor_role="superadmin"
+        )
+        session_auth.set_user_enabled(
+            "founder", enabled=True, actor="test", actor_role="superadmin"
+        )
         session_auth.login("founder", PASSWORD)
         session_auth.revoke_user_sessions("founder", actor="test")
         session_auth.change_password("founder", "yet another passphrase", actor="test")
@@ -437,7 +449,9 @@ class TestLoginEndpoint:
         wrong = client.post(
             "/api/v1/auth/login", json=_login_body(password="the wrong passphrase")
         )
-        session_auth.set_user_enabled("founder", enabled=False, actor="test")
+        session_auth.set_user_enabled(
+            "founder", enabled=False, actor="test", actor_role="superadmin"
+        )
         disabled = client.post("/api/v1/auth/login", json=_login_body())
 
         for response in (unknown, wrong, disabled):

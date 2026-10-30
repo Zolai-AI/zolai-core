@@ -63,7 +63,14 @@ class TestDriftGuard:
     def test_the_page_follows_the_registry_not_a_copy(self, monkeypatch) -> None:
         """Deleting a tool from the registry removes its row — no stale copy."""
         assert "grammar_check" in landing.documented_tool_names(landing.render_landing())
-        monkeypatch.delitem(SPECS, "grammar_check")
+        # Patch filtered *copies*. ``monkeypatch.delitem`` restores by
+        # re-inserting the key, which appends it to the end of the shared dict
+        # and permanently reorders the process-wide registry for later tests.
+        filtered = {
+            name: spec for name, spec in SPECS.items() if name != "grammar_check"
+        }
+        monkeypatch.setattr(registry_mod, "SPECS", filtered)
+        monkeypatch.setattr(landing, "SPECS", filtered)
         page = landing.render_landing()
         assert "grammar_check" not in landing.documented_tool_names(page)
         assert landing.documented_tool_names(page) == _expected_page_order()

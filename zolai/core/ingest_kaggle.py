@@ -29,7 +29,6 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +36,7 @@ from sqlalchemy import Table, create_engine, text
 from sqlalchemy import inspect as sa_inspect
 
 from ..config import config
+from ..shared.clock import stamp
 
 logger = logging.getLogger(__name__)
 
@@ -63,10 +63,6 @@ def kaggle_root() -> Path:
 
 # Metadata columns every imported row carries.
 _VERSION_COLS = ("import_batch_id", "source_file", "version", "imported_at")
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _batch_id() -> str:
@@ -221,7 +217,7 @@ def _import_dict_freq(
             "import_batch_id": batch_id,
             "source_file": source_label,
             "version": version,
-            "imported_at": _now(),
+            "imported_at": stamp(),
         }
         for w, v in missing
     ]
@@ -273,7 +269,7 @@ def _import_jsonl_table(
                     "import_batch_id": batch_id,
                     "source_file": source_label,
                     "version": version,
-                    "imported_at": _now(),
+                    "imported_at": stamp(),
                 }
             )
             records.append(cols)
@@ -331,7 +327,7 @@ def _import_wordlist(
             "import_batch_id": batch_id,
             "source_file": source_label,
             "version": version,
-            "imported_at": _now(),
+            "imported_at": stamp(),
         }
         for w in words
     ]
@@ -477,7 +473,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Always write the computed gap report (cheap, informative).
     report = {
-        "generated_at": _now(),
+        "generated_at": stamp(),
         "mode": "dry-run" if dry_run else "import",
         "sources": results,
     }

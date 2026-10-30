@@ -1011,8 +1011,8 @@ CREATE TABLE IF NOT EXISTS user_streaks (
     current_streak INTEGER NOT NULL DEFAULT 0,
     longest_streak INTEGER NOT NULL DEFAULT 0,
     last_activity_date TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
     UNIQUE(user_id, streak_type)
 )
 """
@@ -1339,7 +1339,7 @@ CREATE TABLE IF NOT EXISTS monitoring_annotations (
     dashboard_id INTEGER,
     panel_id INTEGER,
     grafana_id INTEGER,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
 )
 """
 
@@ -1366,6 +1366,115 @@ CREATE TABLE IF NOT EXISTS db_integrity_runs (
     duration_ms REAL NOT NULL DEFAULT 0
 )
 """
+
+LEARNING_RUNS_DDL = """
+CREATE TABLE IF NOT EXISTS learning_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL UNIQUE,
+    mode TEXT NOT NULL CHECK (mode IN ('dry_run', 'apply')),
+    status TEXT NOT NULL CHECK (
+        status IN ('RUNNING', 'SUCCEEDED', 'FAILED', 'ABORTED')
+    ),
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    elapsed_seconds REAL NOT NULL DEFAULT 0,
+    git_commit TEXT,
+    db_size_bytes INTEGER,
+    backup_name TEXT,
+    backup_size_bytes INTEGER,
+    backup_sha256 TEXT,
+    quick_check TEXT,
+    version_tag TEXT,
+    knowledge_version_id INTEGER REFERENCES knowledge_versions(id),
+    steps_total INTEGER NOT NULL DEFAULT 0,
+    steps_ok INTEGER NOT NULL DEFAULT 0,
+    steps_failed INTEGER NOT NULL DEFAULT 0,
+    warnings INTEGER NOT NULL DEFAULT 0,
+    options_json TEXT NOT NULL DEFAULT '{}',
+    summary_json TEXT NOT NULL DEFAULT '{}',
+    error_class TEXT,
+    error_message TEXT
+)
+"""
+
+LEARNING_RUN_STEPS_DDL = """
+CREATE TABLE IF NOT EXISTS learning_run_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES learning_runs(run_id) ON DELETE CASCADE,
+    step_no INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('PENDING', 'RUNNING', 'OK', 'WARN', 'SKIPPED', 'FAILED', 'DRY_RUN')
+    ),
+    started_at TEXT,
+    finished_at TEXT,
+    elapsed_seconds REAL NOT NULL DEFAULT 0,
+    metrics_json TEXT NOT NULL DEFAULT '{}',
+    error_class TEXT,
+    error_message TEXT,
+    UNIQUE (run_id, step_no),
+    UNIQUE (run_id, name)
+)
+"""
+
+LEARNING_ARTIFACTS_DDL = """
+CREATE TABLE IF NOT EXISTS learning_artifacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES learning_runs(run_id) ON DELETE CASCADE,
+    engine TEXT NOT NULL CHECK (engine IN ('pos_crf', 'syllable_crf')),
+    artifact_name TEXT NOT NULL,
+    staging_ref TEXT NOT NULL,
+    published_ref TEXT,
+    sha256 TEXT NOT NULL,
+    previous_sha256 TEXT,
+    size_bytes INTEGER,
+    metrics_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL CHECK (
+        status IN ('STAGED', 'PUBLISHED', 'REJECTED', 'ROLLED_BACK')
+    ),
+    created_at TEXT NOT NULL,
+    published_at TEXT,
+    UNIQUE (run_id, engine)
+)
+"""
+
+LEARNING_VECTORS_STATE_DDL = """
+CREATE TABLE IF NOT EXISTS learning_vectors_state (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES learning_runs(run_id) ON DELETE CASCADE,
+    source_table TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action IN ('reembed', 'prune', 'failed', 'skip')),
+    status TEXT NOT NULL CHECK (status IN ('ok', 'failed')),
+    vectors_before INTEGER NOT NULL DEFAULT 0,
+    vectors_after INTEGER NOT NULL DEFAULT 0,
+    chunks INTEGER NOT NULL DEFAULT 0,
+    text_sha256 TEXT,
+    error_class TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (run_id, source_table, source_id)
+)
+"""
+
+LEARNING_RUN_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_learning_runs_started "
+    "ON learning_runs(started_at)",
+    "CREATE INDEX IF NOT EXISTS ix_learning_runs_status "
+    "ON learning_runs(status, started_at)",
+    "CREATE INDEX IF NOT EXISTS ix_learning_steps_run "
+    "ON learning_run_steps(run_id, step_no)",
+    "CREATE INDEX IF NOT EXISTS ix_learning_artifacts_engine "
+    "ON learning_artifacts(engine, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_learning_vectors_run "
+    "ON learning_vectors_state(run_id, source_table)",
+]
+
+#: Expression index used by the incremental RAG diff. SQLite builds it only
+#: when JSON1 is available; a failure is recorded, never fatal.
+LEARNING_VECTOR_SOURCE_INDEX = (
+    "CREATE INDEX IF NOT EXISTS ix_kv_source_source_id "
+    "ON knowledge_vectors(source, json_extract(metadata, '$.source_id'))"
+)
 
 MONITORING_INDEXES = [
     "CREATE INDEX IF NOT EXISTS ix_monitoring_annotations_time "
@@ -1498,7 +1607,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     key_hash TEXT NOT NULL UNIQUE,
     scopes TEXT NOT NULL DEFAULT '[]',
     created_by TEXT NOT NULL DEFAULT 'cli',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
     expires_at TEXT,
     last_used_at TEXT,
     revoked_at TEXT
@@ -1571,8 +1680,8 @@ CREATE TABLE IF NOT EXISTS users (
     display_name TEXT,
     role TEXT NOT NULL DEFAULT 'member',
     enabled INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
     last_login TEXT
 )
 """
@@ -1582,7 +1691,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     token_hash TEXT NOT NULL UNIQUE,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
     expires_at TEXT NOT NULL,
     revoked_at TEXT,
     last_used_at TEXT,
@@ -1631,6 +1740,259 @@ def create_user_session_tables(mgr: DatabaseManager) -> dict[str, Any]:
             return {"created": [], "skipped": skipped, "errors": errors}
 
     return {"created": created, "skipped": skipped, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
+# Role requests + contribution attribution — additive only.
+#
+# ``role_requests`` is the approval queue behind ``zolai user set-role``: a
+# member asks for a higher role, a superadmin decides.  It stores the *ask* and
+# the *decision*, never a credential, and the decision is applied by
+# :func:`zolai.api.session_auth.set_user_role` — the one guarded writer — so a
+# row here can never be a back door around those invariants.
+#
+# ``contributions`` already exists (created inline by its router for years), so
+# the three attribution columns ride on it via guarded ``ADD COLUMN``:
+# ``user_id`` is set only for an account-backed submission (a raw API key is not
+# a person and gets ``submitted_by`` + ``auth_source`` instead), and every
+# existing row keeps NULL — an anonymous contribution stays anonymous
+# retroactively, which is the honest reading of a corpus that was open before
+# attribution existed.
+#
+# No foreign keys — the repo's additive idiom (see ``users``/``sessions``).
+#
+# Reverse (rollback) SQL — safe to run at any time:
+#     DROP INDEX IF EXISTS ux_role_requests_pending;
+#     DROP INDEX IF EXISTS ix_role_requests_status;
+#     DROP TABLE IF EXISTS role_requests;
+#     ALTER TABLE contributions DROP COLUMN user_id;        -- SQLite >= 3.35
+#     ALTER TABLE contributions DROP COLUMN submitted_by;
+#     ALTER TABLE contributions DROP COLUMN auth_source;
+# ---------------------------------------------------------------------------
+
+#: One pending ask per (account, requested role).  The partial unique index is
+#: the durable anti-flood guard: it holds even if the route-level bucket is
+#: misconfigured, and it says nothing about history — an approved or rejected
+#: row leaves the slot free again, so asking twice a year is not blocked.
+ROLE_REQUESTS_DDL = """
+CREATE TABLE IF NOT EXISTS role_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    username TEXT NOT NULL DEFAULT '',
+    requested_role TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'approved', 'rejected')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
+    decided_by TEXT,
+    decided_at TEXT,
+    note TEXT
+)
+"""
+
+ROLE_REQUESTS_INDEXES: tuple[str, ...] = (
+    "CREATE INDEX IF NOT EXISTS ix_role_requests_status "
+    "ON role_requests(status, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_role_requests_user "
+    "ON role_requests(user_id, created_at)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_role_requests_pending "
+    "ON role_requests(user_id, requested_role) WHERE status = 'pending'",
+)
+
+#: (table, column, column DDL) for contribution attribution.  Nullable on
+#: purpose: ``NOT NULL`` without a default is refused by SQLite on a populated
+#: table, and inventing a default would mislabel every historical row.
+#: The table ``contributions_router`` writes and ``agent/tools/learning.py``
+#: inserts into — defined once, here, so the two cannot drift.  Attribution is
+#: part of the fresh-store shape; a pre-existing store gains the same three
+#: columns from :func:`add_contribution_attribution_columns`.
+CONTRIBUTIONS_DDL = """
+CREATE TABLE IF NOT EXISTS contributions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    word TEXT NOT NULL,
+    field TEXT NOT NULL DEFAULT '',
+    current_value TEXT NOT NULL DEFAULT '',
+    suggested_value TEXT NOT NULL,
+    context TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL,
+    reviewed_at TEXT,
+    reviewed_by TEXT,
+    user_id INTEGER,
+    submitted_by TEXT,
+    auth_source TEXT
+)
+"""
+
+
+CONTRIBUTIONS_ATTRIBUTION_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("contributions", "user_id", "INTEGER"),
+    ("contributions", "submitted_by", "TEXT"),
+    ("contributions", "auth_source", "TEXT"),
+)
+
+
+#: ``data_audit_log`` — the append-only trail that :mod:`zolai.api.session_auth`,
+#: :mod:`zolai.llm.provider_settings`, :mod:`zolai.data.corpus_clean` and the
+#: review router all write into, and the record an operator reads to answer
+#: "who changed this role, when, and why".  **No ``CREATE`` for it existed
+#: anywhere in the package**: ``DatabaseManager`` autoloads the table, every
+#: writer assumes it is there, and :func:`zolai.api.session_auth.record_audit`
+#: swallows the failure — so a fresh store driven only through the CLI (before
+#: the API ever ran its startup migrations) lost the audit row for the very
+#: first role change, which is the bootstrap of the whole permission model.
+#: The columns are the shape the fixtures and the live stores already use,
+#: verbatim, so ``IF NOT EXISTS`` is a no-op on an existing database.
+DATA_AUDIT_LOG_DDL = """
+CREATE TABLE IF NOT EXISTS data_audit_log (
+    id INTEGER PRIMARY KEY,
+    table_name TEXT,
+    row_id INTEGER,
+    field TEXT,
+    old_value TEXT,
+    new_value TEXT,
+    changed_at TEXT,
+    reason TEXT
+)
+"""
+
+#: The same two indexes ``FOUNDATION_PERFORMANCE_INDEXES`` names; declared here
+#: so this create path is self-contained whichever order they run in.
+#:
+#: Reverse (rollback) SQL — **destructive**: this table is the trail, so drop it
+#: only on a store you created by mistake and have not used:
+#:     DROP INDEX IF EXISTS idx_audit_reason;
+#:     DROP INDEX IF EXISTS idx_audit_changed_at;
+#:     DROP TABLE IF EXISTS data_audit_log;
+DATA_AUDIT_LOG_INDEXES: tuple[str, ...] = (
+    "CREATE INDEX IF NOT EXISTS idx_audit_changed_at ON data_audit_log(changed_at)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_reason ON data_audit_log(reason)",
+)
+
+
+def create_data_audit_log_table(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create ``data_audit_log`` and its indexes (idempotent, additive).
+
+    Returns:
+        Dict with 'created', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    existing = set(sa_inspect(mgr.engine).get_table_names())
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+    try:
+        with mgr.engine.connect() as conn:
+            if "data_audit_log" in existing:
+                skipped.append("data_audit_log (already exists)")
+            else:
+                conn.execute(text(DATA_AUDIT_LOG_DDL))
+                created.append("data_audit_log")
+            for idx_sql in DATA_AUDIT_LOG_INDEXES:
+                conn.execute(text(idx_sql))
+            conn.commit()
+    except Exception as exc:  # noqa: BLE001 - reported, startup continues
+        errors.append(f"data_audit_log_table: {exc}")
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+def create_role_request_tables(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create ``role_requests`` and its indexes (idempotent, additive).
+
+    Returns:
+        Dict with 'created', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    existing = set(sa_inspect(mgr.engine).get_table_names())
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+    try:
+        with mgr.engine.connect() as conn:
+            if "role_requests" in existing:
+                skipped.append("role_requests (already exists)")
+            else:
+                conn.execute(text(ROLE_REQUESTS_DDL))
+                created.append("role_requests")
+            for idx_sql in ROLE_REQUESTS_INDEXES:
+                conn.execute(text(idx_sql))
+            conn.commit()
+    except Exception as exc:  # noqa: BLE001 - reported, startup continues
+        errors.append(f"role_request_tables: {exc}")
+        return {"created": [], "skipped": skipped, "errors": errors}
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+def ensure_contributions_table(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create ``contributions`` with its attribution columns (idempotent).
+
+    The DDL moved here from ``contributions_router``, where it ran on every
+    POST.  The router keeps a thin wrapper of the same name, because
+    :mod:`zolai.agent.tools.learning` also creates the table through it — that
+    call site is unchanged, it simply now gets the migrated definition.
+
+    A **fresh** store gets the full table including ``user_id`` /
+    ``submitted_by`` / ``auth_source``; a **pre-existing** store keeps its rows
+    and gains the columns via :func:`add_contribution_attribution_columns`.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    existing = set(sa_inspect(mgr.engine).get_table_names())
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+    try:
+        with mgr.engine.connect() as conn:
+            if "contributions" in existing:
+                skipped.append("contributions (already exists)")
+            else:
+                conn.execute(text(CONTRIBUTIONS_DDL))
+                created.append("contributions")
+            conn.commit()
+    except Exception as exc:  # noqa: BLE001 - reported, startup continues
+        errors.append(f"contributions_table: {exc}")
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+def add_contribution_attribution_columns(mgr: DatabaseManager) -> dict[str, Any]:
+    """Add the three attribution columns to ``contributions`` if they are absent.
+
+    Guarded per column, so it is a no-op on a store created by
+    :func:`ensure_contributions_table` and on a second run of either.
+
+    Returns:
+        Dict with 'added', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+    added: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+    if "contributions" not in existing_tables:
+        return {"added": added, "skipped": ["contributions (table missing)"], "errors": errors}
+
+    columns = {c["name"] for c in inspector.get_columns("contributions")}
+    with mgr.engine.connect() as conn:
+        for table_name, col_name, col_def in CONTRIBUTIONS_ATTRIBUTION_COLUMNS:
+            if col_name in columns:
+                skipped.append(f"{table_name}.{col_name} (already exists)")
+                continue
+            try:
+                conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def}"))
+                conn.commit()
+            except Exception as exc:  # noqa: BLE001 - collect and continue
+                errors.append(f"{table_name}.{col_name}: {exc}")
+                continue
+            columns.add(col_name)
+            added.append(f"{table_name}.{col_name}")
+    return {"added": added, "skipped": skipped, "errors": errors}
 
 
 # ---------------------------------------------------------------------------
@@ -1721,8 +2083,8 @@ CREATE TABLE IF NOT EXISTS hypotheses (
     extras TEXT NOT NULL DEFAULT '{}',
     status TEXT NOT NULL DEFAULT 'OBSERVED',
     version INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
 )
 """
 
@@ -1740,8 +2102,8 @@ CREATE TABLE IF NOT EXISTS knowledge_claims (
     source_ids TEXT NOT NULL DEFAULT '[]',
     notes TEXT NOT NULL DEFAULT '',
     version INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
 )
 """
 
@@ -1752,7 +2114,7 @@ CREATE TABLE IF NOT EXISTS claim_evidence (
     claim_id INTEGER NOT NULL REFERENCES knowledge_claims(id) ON DELETE CASCADE,
     evidence_id INTEGER NOT NULL REFERENCES foundation_evidence(id),
     role TEXT NOT NULL DEFAULT 'supports',
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
 )
 """
 
@@ -1773,7 +2135,7 @@ CREATE TABLE IF NOT EXISTS knowledge_versions (
     manifest_hash TEXT,
     status TEXT NOT NULL DEFAULT 'OBSERVED',
     row_version INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
 )
 """
 
@@ -1993,7 +2355,7 @@ CREATE TABLE IF NOT EXISTS observations (
     method TEXT NOT NULL DEFAULT '',
     extractor TEXT NOT NULL DEFAULT '',
     metadata TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
 )
 """
 
@@ -2018,7 +2380,7 @@ CREATE TABLE IF NOT EXISTS word_observation_stats (
     first_seen TEXT,
     last_seen TEXT,
     pipeline_version TEXT,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
 )
 """
 
@@ -2029,7 +2391,7 @@ ATTESTATION_INDEX_DDL = """
 CREATE TABLE IF NOT EXISTS attestation_index (
     word TEXT NOT NULL,
     source TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
     PRIMARY KEY (word, source)
 )
 """
@@ -2196,6 +2558,123 @@ def create_eval_tables(mgr: DatabaseManager) -> dict[str, Any]:
     return {"created": created, "skipped": skipped, "errors": errors}
 
 
+def create_learning_run_tables(target: Any) -> dict[str, Any]:
+    """Create the local-learning ledger tables (idempotent).
+
+    Accepts a :class:`DatabaseManager` or a bare SQLAlchemy ``Engine`` so the
+    ``zolai learn`` CLI can ensure the ledger without running every migration.
+    The optional expression index on ``knowledge_vectors`` is best-effort: a
+    build without JSON1 records an error instead of failing the migration.
+
+    Returns:
+        Dict with ``created`` / ``skipped`` / ``errors`` lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    engine = getattr(target, "engine", target)
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+
+    if not str(engine.url).startswith("sqlite"):
+        return {
+            "created": [],
+            "skipped": [],
+            "errors": ["learning_run tables are SQLite-only for now"],
+        }
+
+    inspector = sa_inspect(engine)
+    existing = set(inspector.get_table_names())
+
+    statements: tuple[tuple[str, str], ...] = (
+        ("learning_runs", LEARNING_RUNS_DDL),
+        ("learning_run_steps", LEARNING_RUN_STEPS_DDL),
+        ("learning_artifacts", LEARNING_ARTIFACTS_DDL),
+        ("learning_vectors_state", LEARNING_VECTORS_STATE_DDL),
+    )
+
+    try:
+        with engine.begin() as conn:
+            for name, ddl in statements:
+                conn.execute(text(ddl))
+                if name in existing:
+                    skipped.append(f"{name} (already exists)")
+                else:
+                    created.append(name)
+            for idx_sql in LEARNING_RUN_INDEXES:
+                conn.execute(text(idx_sql))
+    except Exception as exc:  # noqa: BLE001 - reported, startup continues
+        errors.append(f"learning_run_tables: {exc}")
+        return {"created": created, "skipped": skipped, "errors": errors}
+
+    if "knowledge_vectors" in existing:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(LEARNING_VECTOR_SOURCE_INDEX))
+        except Exception as exc:  # noqa: BLE001 - JSON1 optional
+            errors.append(f"ix_kv_source_source_id: {exc}")
+
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+# ── Hierarchical corpus learning (line → paragraph → document → corpus) ──────
+#
+# Additive only: one derived table, upserted by (source, level, unit_id).
+# Reverse SQL: DROP TABLE IF EXISTS corpus_learning_layers;
+
+CORPUS_LEARNING_LAYERS_DDL = """
+CREATE TABLE IF NOT EXISTS corpus_learning_layers (
+    source TEXT NOT NULL,
+    level TEXT NOT NULL CHECK (level IN ('line', 'paragraph', 'document', 'corpus')),
+    unit_id TEXT NOT NULL,
+    doc_id TEXT NOT NULL DEFAULT '',
+    group_id TEXT NOT NULL DEFAULT '',
+    ref TEXT NOT NULL DEFAULT '',
+    features TEXT NOT NULL DEFAULT '{}',
+    confidence REAL NOT NULL DEFAULT 0.0,
+    source_hash TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
+    PRIMARY KEY (source, level, unit_id)
+)
+"""
+
+CORPUS_LEARNING_LAYER_INDEXES: tuple[str, ...] = (
+    "CREATE INDEX IF NOT EXISTS ix_cll_source_level "
+    "ON corpus_learning_layers(source, level)",
+    "CREATE INDEX IF NOT EXISTS ix_cll_doc "
+    "ON corpus_learning_layers(source, doc_id)",
+)
+
+
+def create_corpus_learning_tables(target: Any) -> dict[str, Any]:
+    """Create ``corpus_learning_layers`` (idempotent, additive).
+
+    Accepts a :class:`DatabaseManager` or a bare SQLAlchemy ``Engine`` so the
+    ``zolai learn levels`` CLI can ensure the table without a full migration.
+
+    Returns:
+        Dict with ``created`` / ``skipped`` / ``errors`` lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    engine = getattr(target, "engine", target)
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+    try:
+        existing = set(sa_inspect(engine).get_table_names())
+        with engine.begin() as conn:
+            conn.execute(text(CORPUS_LEARNING_LAYERS_DDL))
+            (skipped if "corpus_learning_layers" in existing else created).append(
+                "corpus_learning_layers"
+            )
+            for idx_sql in CORPUS_LEARNING_LAYER_INDEXES:
+                conn.execute(text(idx_sql))
+    except Exception as exc:  # noqa: BLE001 - reported, startup continues
+        errors.append(f"corpus_learning_tables: {exc}")
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
 def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
     """Run all constraint and index migrations including Foundation tables.
 
@@ -2205,6 +2684,10 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
     constraint_results = apply_constraints(mgr)
     index_results = apply_indexes(mgr)
     foundation_constraint_results = apply_foundation_constraints(mgr)
+    # Before the foundation indexes: two of them are ``ON data_audit_log(...)``,
+    # and this is the migration that makes that table exist on a fresh store —
+    # ordered the other way they would report an error every first startup.
+    audit_log_table = create_data_audit_log_table(mgr)
     foundation_index_results = apply_foundation_indexes(mgr)
     cost_tracking_table = create_foundation_cost_tracking_table(mgr)
     cost_tracking_indexes = apply_foundation_cost_tracking_indexes(mgr)
@@ -2214,6 +2697,7 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "indexes": index_results,
         "foundation_constraints": foundation_constraint_results,
         "foundation_indexes": foundation_index_results,
+        "data_audit_log_table": audit_log_table,
         "cost_tracking_table": cost_tracking_table,
         "cost_tracking_indexes": cost_tracking_indexes,
         "sm2_columns": add_sm2_columns_to_vocabulary(mgr),
@@ -2225,6 +2709,9 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "monitoring_tables": create_monitoring_tables(mgr),
         "api_keys_table": create_api_keys_table(mgr),
         "user_session_tables": create_user_session_tables(mgr),
+        "role_requests_table": create_role_request_tables(mgr),
+        "contributions_table": ensure_contributions_table(mgr),
+        "contribution_attribution_columns": add_contribution_attribution_columns(mgr),
         "contract_columns": add_contract_columns(mgr),
         "contract_indexes": create_contract_indexes(mgr),
         "knowledge_tables": create_knowledge_tables(mgr),
@@ -2234,6 +2721,8 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "assistant_chat_feedback_table": create_assistant_chat_feedback_table(mgr),
         "notification_tables": create_notification_tables(mgr),
         "eval_tables": create_eval_tables(mgr),
+        "learning_run_tables": create_learning_run_tables(mgr),
+        "corpus_learning_tables": create_corpus_learning_tables(mgr),
         "oauth_tables": create_oauth_tables(mgr),
     }
 
@@ -2298,8 +2787,8 @@ def create_kg_tables(engine: Engine) -> list[str]:
                     source_id TEXT,                    -- PK in source table
                     confidence REAL DEFAULT 0.0,
                     version INTEGER DEFAULT 1,
-                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
+                    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
                     UNIQUE(node_type, label, source, source_id)
                 )
             """))
@@ -2320,8 +2809,8 @@ def create_kg_tables(engine: Engine) -> list[str]:
                     confidence REAL DEFAULT 0.0,
                     source TEXT,                       -- 'auto_discovery' | 'human' | 'bible_parallel' | 'dictionary'
                     version INTEGER DEFAULT 1,
-                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
+                    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
                     FOREIGN KEY (source_id) REFERENCES kg_nodes(id),
                     FOREIGN KEY (target_id) REFERENCES kg_nodes(id),
                     UNIQUE(source_id, target_id, relation)
@@ -2360,8 +2849,8 @@ CREATE TABLE IF NOT EXISTS ai_providers (
     tier TEXT NOT NULL DEFAULT 'standard',
     timeout_s INTEGER NOT NULL DEFAULT 60,
     metadata TEXT NOT NULL DEFAULT '{}',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
 )
 """
 
@@ -2439,7 +2928,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     error TEXT NOT NULL DEFAULT '',
     mode TEXT NOT NULL DEFAULT 'rule',
     created_by TEXT NOT NULL DEFAULT 'system',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
     finished_at TEXT
 )
 """
@@ -2489,7 +2978,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     status TEXT NOT NULL DEFAULT 'pending',
     error_message TEXT,
     sent_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
 )
 """
 
@@ -2500,8 +2989,8 @@ CREATE TABLE IF NOT EXISTS notification_preferences (
     event_type TEXT NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1,
     email_enabled INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
     UNIQUE(user_id, event_type)
 )
 """
@@ -2516,8 +3005,8 @@ CREATE TABLE IF NOT EXISTS notification_templates (
     event_type TEXT NOT NULL,
     description TEXT,
     is_active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
 )
 """
 
@@ -2571,7 +3060,7 @@ CREATE TABLE IF NOT EXISTS assistant_chat_feedback (
     provider TEXT NOT NULL DEFAULT '',
     model TEXT NOT NULL DEFAULT '',
     score INTEGER NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
     ip_hash TEXT
 )
 """
@@ -2632,8 +3121,8 @@ CREATE TABLE IF NOT EXISTS oauth_clients (
     client_name TEXT NOT NULL,
     redirect_uris TEXT NOT NULL DEFAULT '[]',
     token_endpoint_auth_method TEXT NOT NULL DEFAULT 'client_secret_post',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
 )
 """
 
@@ -2649,7 +3138,7 @@ CREATE TABLE IF NOT EXISTS oauth_authorization_codes (
     scopes TEXT NOT NULL DEFAULT '[]',
     expires_at TEXT NOT NULL,
     consumed_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
 )
 """
 
@@ -2664,7 +3153,7 @@ CREATE TABLE IF NOT EXISTS oauth_tokens (
     access_expires_at TEXT NOT NULL,
     refresh_expires_at TEXT,
     revoked_at TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
     last_used_at TEXT
 )
 """

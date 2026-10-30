@@ -11,10 +11,11 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+
+from zolai.shared.clock import stamp
 
 from ...data.repositories import get_engine
 
@@ -477,7 +478,7 @@ class CorpusValidator:
             json.dumps(data, sort_keys=True, default=str).encode("utf-8")
         ).hexdigest()[:16]
         report_id = f"qr_{digest}"
-        now = datetime.utcnow().isoformat()
+        now = stamp()
 
         with self.engine.begin() as conn:
             conn.execute(text("""

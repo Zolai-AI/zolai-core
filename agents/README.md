@@ -3,7 +3,7 @@
 Specialized AI agents for the Zolai data pipeline and language processing tasks.
 Each agent is defined as a JSON file with a role, goal, rules, tools, and workflows.
 
-**Total agents: 34** | Last Updated: 2026-04-20
+**Total agents: 36** | Last Updated: 2026-10-29
 
 ## Data Pipeline Agents
 
@@ -46,6 +46,7 @@ Each agent is defined as a JSON file with a role, goal, rules, tools, and workfl
 | `zolai-lesson-tutor` | Lesson delivery and feedback |
 | `zolai-grammar-learner` | Grammar lesson generation |
 | `zolai-dpo-builder` | Build DPO preference pairs for RLHF |
+| `zolai-learning-runner` | Local learning cycle — study, retrain CRFs, re-index RAG, snapshot a version |
 
 ## Data Publishing Agents
 

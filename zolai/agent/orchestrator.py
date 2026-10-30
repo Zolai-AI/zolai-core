@@ -15,12 +15,14 @@ Emits system_event notifications on agent run failures.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import Iterable
 from typing import Any
 
 from ..engines import engine_mode, llm_allowed
 from ..notifications import get_notification_service
+from ..shared.clock import stamp
 from . import store
 from .loop import run_agent_loop
 from .synthesis import make_chat_fn, rule_draft
@@ -37,26 +39,6 @@ DEFAULT_RUN_SCOPE = "admin"
 RESEARCH_TOOLS: tuple[str, ...] = ("rag_search", "kb_research")
 
 # ── Phase-specific system prompts ─────────────────────────────────────────────
-
-RESEARCH_PHASE_PROMPT = (
-    "You are the Zolai Research Agent. Your task: gather comprehensive evidence "
-    "for the given goal using the available tools.\n\n"
-    "Tools:\n"
-    "- rag_search: Hybrid search across dictionary, Bible, phrases, grammar patterns\n"
-    "- kb_research: Search stored hypotheses/claims for prior knowledge\n"
-    "- word_evidence: Multi-source attestation for a Zolai word\n"
-    "- word_related: Related words (family + same-POS neighbours)\n"
-    "- dictionary_lookup: Exact/prefix lookup in Zolai↔English dictionary\n"
-    "- verse_lookup: Fetch parallel Bible verse by reference (e.g. 'GEN 1:1')\n"
-    "- analyze_text: Word-by-word analysis (interlinear glossing)\n"
-    "- grammar_check: Validate against ZVS 2018 orthography and SOV/grammar rules\n\n"
-    "Rules:\n"
-    "1. Use ONE tool per turn. Max 3 turns total.\n"
-    "2. Start with rag_search for broad coverage, then narrow with specific tools.\n"
-    "3. Never invent results. Report exactly what tools return.\n"
-    "4. Keep ZVS 2018: pasian/gam/tapa/topa, SOV, ergative 'in'.\n"
-    "5. Output tool calls ONLY. No prose until the build phase."
-)
 
 BUILD_PHASE_PROMPT = (
     "You are the Zolai Build Agent. Your task: synthesize a comprehensive answer "
@@ -231,20 +213,12 @@ def run_agent_goal(
     used_model = ""
     turns = 0
     outcome = ""
+    stop_reason = ""
 
     try:
         # ── research ────────────────────────────────────────────────────
         t0 = time.monotonic()
 
-        # Run research with phase-specific prompt (result not needed here)
-        run_agent_loop(
-            system_prompt=RESEARCH_PHASE_PROMPT,
-            user_message=f"Research goal: {goal}",
-            allow=frozenset(allow),
-            chat=lambda m, t=None: {"text": "", "tool_calls": []},  # We use _research directly
-            max_turns=3,
-            native=False,
-        )
         trace, evidence_rows = _research(goal, frozenset(allow))
         flat_evidence: list[dict[str, Any]] = []
         for res in evidence_rows:
@@ -254,8 +228,9 @@ def run_agent_goal(
             elif isinstance(data, dict):
                 flat_evidence.append(data)
         phases["research"] = {
-            "status": "ok",
+            "status": "ok" if any(r.get("status") == "completed" for r in trace) else "empty",
             "tools": [r["name"] for r in trace],
+            "failed_tools": sum(1 for r in trace if r.get("status") == "failed"),
             "evidence_count": len(flat_evidence),
             "latency_ms": round((time.monotonic() - t0) * 1000, 2),
         }
@@ -288,23 +263,32 @@ def run_agent_goal(
                     used_provider = str(meta.get("catalog_id") or "")
                     used_model = str(meta.get("model") or "")
                     outcome = "generated"
+                    stop_reason = str(loop_result.get("stop_reason") or "")
                     trace.extend(loop_result.get("tool_calls") or [])
                 else:
                     answer = rule_draft(goal, flat_evidence)
                     outcome = "rule_draft_fallback"
+                    stop_reason = str(loop_result.get("stop_reason") or "")
                     error = str(loop_result.get("error") or "")
             except Exception as exc:  # ProviderError or transport failure → degrade
                 logger.warning("agent build degraded to rule draft: %s", exc)
                 answer = rule_draft(goal, flat_evidence)
                 outcome = "rule_draft_fallback"
+                stop_reason = "provider_unavailable"
                 error = f"provider_unavailable: {exc}"
         else:
             answer = rule_draft(goal, flat_evidence)
             turns = 0
             outcome = "rule_draft"
+            stop_reason = "rule_draft"
         phases["build"] = {
             "status": "ok",
             "outcome": outcome,
+            # The loop's own terminal state rides along: "turn budget spent"
+            # and "provider timed out" both fall back to rule drafts and must
+            # stay distinguishable after the fact.
+            "stop_reason": stop_reason,
+            "turns": turns,
             "latency_ms": round((time.monotonic() - t0) * 1000, 2),
         }
 
@@ -339,32 +323,12 @@ def run_agent_goal(
             latency_ms=round((finished - started) * 1000, 2),
             outcome=outcome,
             error=error,
-            finished_at=_utc_now(),
+            finished_at=stamp(),
         )
         return updated or run
     except Exception as exc:
         logger.exception("agent run %s failed", run_id)
-        # Emit system event notification for agent run failure
-        try:
-            service = get_notification_service()
-            import asyncio
-
-            exc_type = type(exc).__name__
-            exc_msg = str(exc)
-
-            async def _emit() -> None:
-                context = {
-                    "timestamp": "2026-01-01T00:00:00Z",
-                    "event_type": "agent_run_failed",
-                    "details": f"Agent run {run_id} failed: {exc_type}: {exc_msg}",
-                    "app_name": "Zolai AI",
-                    "environment": "production",
-                }
-                await service.send_admin_alert("system_event", context, dedup=False)
-
-            asyncio.create_task(_emit())
-        except Exception:
-            pass
+        _notify_failure(run_id, exc)
         phases["shipped"] = {"status": "failed"}
         updated = store.update_run(
             run_id,
@@ -374,12 +338,37 @@ def run_agent_goal(
             answer=answer,
             error=classify_failure(exc).message,
             latency_ms=round((time.monotonic() - started) * 1000, 2),
-            finished_at=_utc_now(),
+            finished_at=stamp(),
         )
         return updated or run
 
 
-def _utc_now() -> str:
-    from datetime import datetime, timezone
+def _notify_failure(run_id: int, exc: BaseException) -> None:
+    """Best-effort system event for a failed run.
 
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    ``run_agent_goal`` is synchronous and may be called off the event loop
+    (CLI, threadpool), where ``create_task`` raises ``RuntimeError`` and the
+    notification would vanish silently — so the loop is probed first and a
+    miss is logged at debug, never raised.
+    """
+    import asyncio
+
+    service = get_notification_service()
+    context = {
+        "timestamp": stamp(),
+        "event_type": "agent_run_failed",
+        "details": f"Agent run {run_id} failed: {type(exc).__name__}: {exc}",
+        "app_name": "Zolai AI",
+        "environment": os.environ.get("ZOLAI_ENV", "production"),
+    }
+
+    async def _emit() -> None:
+        try:
+            await service.send_admin_alert("system_event", context, dedup=False)
+        except Exception:  # notification loss must never mask the run failure
+            logger.debug("agent failure notification dropped", exc_info=True)
+
+    try:
+        asyncio.get_running_loop().create_task(_emit())
+    except RuntimeError:
+        logger.debug("agent failure notification skipped: no running event loop")

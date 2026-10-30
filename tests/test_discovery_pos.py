@@ -1,18 +1,76 @@
-"""Tests for POS Discovery."""
+"""Tests for POS Discovery.
+
+These run against a throwaway database: discovery writes ``foundation_evidence``
+and ``hypotheses`` rows, and doing that through ``get_engine()`` mutated the
+canonical corpus on every suite run (the ``no_canonical_db_writes`` fence now
+fails it).
+"""
 
 from __future__ import annotations
+
+import os
+import tempfile
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from zolai.data.repositories import get_engine
+from zolai.data.database import DatabaseManager
 from zolai.learning.discovery.pos import POSDiscovery
+
+#: Extractors POS discovery stamps on the evidence it writes.
+_POS_EXTRACTORS = {
+    "pos_normalize_backfill",
+    "ZolaiPOSTagger",
+    "word_usage_table",
+    "observation_pipeline",
+    "bible_verses",
+}
 
 
 @pytest.fixture(scope="module")
 def db_engine() -> Engine:
-    return get_engine()
+    """A fresh schema seeded with a tiny lexicon and attested sentences."""
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as handle:
+        path = handle.name
+
+    manager = DatabaseManager(f"sqlite:///{path}")
+    manager.init_db()
+    with manager.engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO dictionary (zolai, english, pos, pos_canonical, source) VALUES "
+                "('pasian', 'God', 'n', 'NOUN', 'test'), "
+                "('piangsak', 'to create', 'v', 'VERB', 'test'), "
+                "('gam', 'earth, land', 'n', 'NOUN', 'test'), "
+                "('leh', 'and, then', 'conj', 'CCONJ', 'test'), "
+                "('in', 'we (inclusive)', 'pron', 'PRON', 'test')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO bible_verses (ref, book, chapter, verse, zo_tdb77) VALUES "
+                "('GEN 1:1', 'GEN', 1, 1, 'Pasian in leitung a piangsak hi.'), "
+                "('JHN 1:1', 'JHN', 1, 1, 'Pasian in gam a piangsak hi.')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO word_usage "
+                "(word, book, total_freq, meaning_shifts, co_occurring_words) VALUES "
+                "('pasian', 'GEN', 40, '[]', '[]'), "
+                "('gam', 'JHN', 25, '[]', '[]'), "
+                "('piangsak', 'JHN', 18, '[]', '[]')"
+            )
+        )
+
+    yield manager.engine
+    manager.dispose()
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            os.unlink(path + suffix)
+        except FileNotFoundError:
+            pass
 
 
 def test_pos_discovery_runs(db_engine: Engine) -> None:
@@ -87,14 +145,17 @@ def test_pos_evidence_rows_created(db_engine: Engine) -> None:
         rows = conn.execute(
             text(
                 "SELECT id, fact_type, fact_key, tier, source, method, "
-                "extractor FROM foundation_evidence WHERE extractor = 'discovery'"
+                "extractor FROM foundation_evidence WHERE fact_type = 'word'"
             )
         ).fetchall()
 
     assert len(rows) > 0
     for row in rows:
         assert row.fact_type in ("word", "grammar")
+        assert row.fact_key.startswith("word:")
         assert row.tier in (1, 2, 3, 4, 5)
         assert row.source
         assert row.method
-        assert row.extractor == "discovery"
+        # Each evidence row records which source produced it; the extractor is
+        # that source (there is no generic ``discovery`` extractor).
+        assert row.extractor in _POS_EXTRACTORS

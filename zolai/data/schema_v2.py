@@ -60,8 +60,8 @@ _EXTRA_TABLES: dict[str, list[str]] = {
         "source TEXT",
         "source_id TEXT",
         "confidence REAL DEFAULT 0.0",
-        "created_at TEXT NOT NULL DEFAULT (datetime('now'))",
-        "updated_at TEXT NOT NULL DEFAULT (datetime('now'))",
+        "created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))",
+        "updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))",
     ],
     "kg_edges": [
         "id INTEGER PRIMARY KEY AUTOINCREMENT",
@@ -71,8 +71,8 @@ _EXTRA_TABLES: dict[str, list[str]] = {
         "properties TEXT NOT NULL DEFAULT '{}'",
         "confidence REAL DEFAULT 0.0",
         "source TEXT",
-        "created_at TEXT NOT NULL DEFAULT (datetime('now'))",
-        "updated_at TEXT NOT NULL DEFAULT (datetime('now'))",
+        "created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))",
+        "updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))",
     ],
     "ngram": [
         "id INTEGER PRIMARY KEY AUTOINCREMENT",

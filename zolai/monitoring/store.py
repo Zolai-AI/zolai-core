@@ -22,6 +22,7 @@ from typing import Any
 
 from ..config import config
 from ..data.database import DatabaseManager, get_manager
+from ..shared.clock import stamp
 
 logger = logging.getLogger(__name__)
 
@@ -50,10 +51,6 @@ __all__ = [
     "push_annotation_to_grafana",
     "update_annotation",
 ]
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _manager() -> DatabaseManager:
@@ -161,7 +158,7 @@ def create_annotation(data: dict[str, Any]) -> dict[str, Any]:
             kind=payload["kind"],
             dashboard_id=payload["dashboard_id"],
             panel_id=payload["panel_id"],
-            created_at=_now(),
+            created_at=stamp(),
         )
         session.add(row)
         session.flush()

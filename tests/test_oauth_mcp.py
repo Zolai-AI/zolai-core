@@ -14,6 +14,7 @@ lifespan) and monkeypatched ``_get_manager`` seams are the pattern here.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from typing import Any
 
@@ -160,6 +161,18 @@ class TestProtectedResourceMetadata:
         assert doc["bearer_methods_supported"] == ["header"]
         scopes = doc["scopes_supported"]
         assert scopes and all(s in auth.VALID_ACTIONS for s in scopes)
+
+    def test_versioned_alias_has_its_own_protected_resource_document(
+        self, client: TestClient
+    ) -> None:
+        """The ``/api/v1/mcp`` mount resolves well-known against its own path."""
+        for path in (
+            "/.well-known/oauth-protected-resource/api/v1/mcp",
+            "/api/v1/mcp/.well-known/oauth-protected-resource",
+        ):
+            doc = client.get(path).json()
+            assert doc["resource"] == "http://testserver/api/v1/mcp", path
+            assert doc["authorization_servers"] == ["http://testserver"], path
 
     def test_www_authenticate_challenge_targets_this_document(self) -> None:
         """The header the strict flag emits must be a well-formed absolute URL."""
@@ -486,6 +499,55 @@ class TestAuthorizeEndpoint:
         assert 'action="/oauth/authorize"' in body
 
     @pytest.mark.parametrize(
+        "resource",
+        [
+            "http://testserver/mcp",
+            "http://testserver/api/v1/mcp",
+            "http://testserver",
+            "http://testserver/mcp/",
+        ],
+    )
+    def test_get_accepts_a_resource_this_server_serves(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        registered: dict,
+        resource: str,
+    ) -> None:
+        """RFC 8707: the MCP endpoint, and its bare origin, are this AS's audience."""
+        query = _authorize_query(
+            registered["client_id"],
+            registered["redirect_uris"][0],
+            resource=resource,
+        )
+        response = client.get(f"/oauth/authorize?{query}")
+        assert response.status_code == 200, response.text
+        # Carried through consent verbatim, so the POST and the token request
+        # see the same audience the client asked for.
+        assert f'name="resource" value="{resource}"' in response.text
+
+    @pytest.mark.parametrize(
+        "resource",
+        ["https://attacker.example/mcp", "http://testserver/other", "http://testserver:8080/mcp"],
+    )
+    def test_get_refuses_a_foreign_resource(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        registered: dict,
+        resource: str,
+    ) -> None:
+        query = _authorize_query(
+            registered["client_id"],
+            registered["redirect_uris"][0],
+            resource=resource,
+        )
+        response = client.get(f"/oauth/authorize?{query}")
+        assert response.status_code == 400, response.text
+        assert response.json()["error"] == "invalid_target"
+        assert "username" not in response.text
+
+    @pytest.mark.parametrize(
         "overrides, error",
         [
             ({"code_challenge_method": "plain"}, "invalid_request"),
@@ -598,7 +660,9 @@ class TestAuthorizeEndpoint:
         """A requested scope can only narrow — never widen."""
         from urllib.parse import parse_qs
 
-        session_auth.set_user_role("founder", role="member", actor="test")
+        session_auth.set_user_role(
+            "founder", role="member", actor="test", actor_role="superadmin"
+        )
         query = _authorize_query(
             registered["client_id"],
             registered["redirect_uris"][0],
@@ -773,7 +837,9 @@ class TestTokenEndpoint:
         """A member's token resolves to member scope — no admin vocabulary."""
         from zolai.api import rbac
 
-        session_auth.set_user_role("founder", role="member", actor="test")
+        session_auth.set_user_role(
+            "founder", role="member", actor="test", actor_role="superadmin"
+        )
         code, verifier = _authorize_and_get_code(client, registered)
         response = _exchange_code(client, registered, code, verifier)
         assert response.status_code == 200, response.text
@@ -789,6 +855,51 @@ class TestTokenEndpoint:
         record = oauth.resolve_access_token(response.json()["access_token"])
         assert record is not None
         assert rbac.role_for(record) == "member"
+
+    def test_demotion_shrinks_a_live_token_on_the_next_request(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+    ) -> None:
+        """The account, not the minted grant, decides what a token can do now.
+
+        Deliberate behaviour change (plan §1.9): an access token still valid in
+        ``oauth_tokens`` resolves to the **live** ``users.role`` and its stored
+        grant is intersected with that role's scopes.  So demoting a founder
+        takes effect on the next request, without waiting for the TTL or
+        revoking anything, and promoting one does **not** widen a grant nobody
+        re-consented to — the intersection only ever removes.
+        """
+        from zolai.api import rbac
+
+        code, verifier = _authorize_and_get_code(client, registered)
+        body = _exchange_code(client, registered, code, verifier).json()
+        token = body["access_token"]
+
+        before = oauth.resolve_access_token(token)
+        assert before is not None and rbac.role_for(before) == "admin"
+        assert set(before["scopes"]) >= set(session_auth.ADMIN_SCOPES) - set(
+            session_auth.MEMBER_SCOPES
+        )
+
+        session_auth.set_user_role(
+            "founder", role="member", actor="test", actor_role="superadmin"
+        )
+
+        after = oauth.resolve_access_token(token)
+        assert after is not None, "the token itself is still valid — only its power shrank"
+        assert after["role"] == "member"
+        assert rbac.role_for(after) == "member"
+        assert set(after["scopes"]) <= set(session_auth.MEMBER_SCOPES)
+        # Nothing in the row was rewritten by the demotion.
+        with oauth_db.engine.connect() as conn:
+            stored = conn.execute(
+                text("SELECT scopes FROM oauth_tokens WHERE access_token_hash = :h"),
+                {"h": oauth.hash_token(token)},
+            ).scalar_one()
+        assert sorted(json.loads(stored)) == sorted(before["scopes"])
 
     def test_plaintext_tokens_never_reach_the_database(
         self,
@@ -1046,6 +1157,47 @@ class TestTokenEndpoint:
         )
         assert denied.status_code == 401
         assert denied.json()["error"] == "invalid_client"
+        # RFC 6749 §5.2 — a Basic attempt's 401 MUST name the scheme.
+        assert denied.headers["www-authenticate"].startswith("Basic")
+
+    def test_a_post_registered_client_may_also_use_basic(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+    ) -> None:
+        """RFC 6749 §2.3.1: both secret-bearing methods reach the same check."""
+        import base64
+        from urllib.parse import quote
+
+        registered = client.post(
+            "/oauth/register",
+            json={
+                "client_name": "Post Connector",
+                "redirect_uris": ["https://post.example/cb"],
+                "token_endpoint_auth_method": "client_secret_post",
+            },
+        ).json()
+        code, verifier = _authorize_and_get_code(client, registered)
+        cred = base64.b64encode(
+            f"{quote(registered['client_id'], safe='')}:"
+            f"{quote(registered['client_secret'], safe='')}".encode()
+        ).decode()
+        response = client.post(
+            "/oauth/token",
+            data={
+                "grant_type": "authorization_code",
+                "redirect_uri": registered["redirect_uris"][0],
+                "code": code,
+                "code_verifier": verifier,
+            },
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Authorization": f"Basic {cred}",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["access_token"].startswith(oauth.ACCESS_TOKEN_PREFIX)
 
     def test_token_requires_urlencoded_form(
         self, client: TestClient, oauth_db: DatabaseManager
@@ -1066,10 +1218,14 @@ class TestTokenEndpoint:
         tokens = _exchange_code(client, registered, code, verifier).json()
         assert oauth.resolve_access_token(tokens["access_token"]) is not None
 
-        session_auth.set_user_enabled("founder", enabled=False, actor="test")
+        session_auth.set_user_enabled(
+            "founder", enabled=False, actor="test", actor_role="superadmin"
+        )
         assert oauth.resolve_access_token(tokens["access_token"]) is None
 
-        session_auth.set_user_enabled("founder", enabled=True, actor="test")
+        session_auth.set_user_enabled(
+            "founder", enabled=True, actor="test", actor_role="superadmin"
+        )
         assert oauth.resolve_access_token(tokens["access_token"]) is not None
 
     def test_expired_or_revoked_access_token_resolves_to_none(
@@ -1099,7 +1255,7 @@ class TestTokenEndpoint:
                 ),
                 {
                     "future": oauth._now_plus(3600),
-                    "now": oauth._stamp(),
+                    "now": oauth._clock_stamp(),
                     "h": oauth.hash_token(tokens["access_token"]),
                 },
             )
@@ -1126,6 +1282,68 @@ class TestTokenEndpoint:
         assert last_used is not None
         # Key/display prefix discipline: never enough to reconstruct.
         assert record["key_prefix"] == tokens["access_token"][:16]
+
+
+class TestResourceIndicator:
+    """RFC 8707 at the token endpoint — a foreign audience burns no code."""
+
+    ENDPOINT = "http://testserver/mcp"
+
+    def test_token_request_echoing_the_endpoint_is_accepted(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+    ) -> None:
+        code, verifier = _authorize_and_get_code(client, registered)
+        form = {
+            "grant_type": "authorization_code",
+            "client_id": registered["client_id"],
+            "redirect_uri": registered["redirect_uris"][0],
+            "code": code,
+            "code_verifier": verifier,
+            "resource": self.ENDPOINT,
+        }
+        if registered.get("client_secret"):
+            form["client_secret"] = registered["client_secret"]
+        with_resource = client.post(
+            "/oauth/token",
+            data=form,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert with_resource.status_code == 200, with_resource.text
+        assert with_resource.json()["access_token"].startswith(oauth.ACCESS_TOKEN_PREFIX)
+        assert with_resource.json()["token_type"] == "Bearer"
+
+    def test_a_foreign_resource_is_invalid_target_and_consumes_nothing(
+        self,
+        client: TestClient,
+        oauth_db: DatabaseManager,
+        user_db: dict,
+        registered: dict,
+    ) -> None:
+        code, verifier = _authorize_and_get_code(client, registered)
+        form = {
+            "grant_type": "authorization_code",
+            "client_id": registered["client_id"],
+            "redirect_uri": registered["redirect_uris"][0],
+            "code": code,
+            "code_verifier": verifier,
+            "resource": "https://attacker.example/mcp",
+        }
+        if registered.get("client_secret"):
+            form["client_secret"] = registered["client_secret"]
+        refused = client.post(
+            "/oauth/token",
+            data=form,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert refused.status_code == 400, refused.text
+        assert refused.json()["error"] == "invalid_target"
+        # The refusal happens before the grant is touched — same code still redeems.
+        redeemed = _exchange_code(client, registered, code, verifier)
+        assert redeemed.status_code == 200, redeemed.text
 
 
 class TestMiddlewareBearerPath:
@@ -1315,6 +1533,33 @@ class TestStrictChallenge:
         # registry's public allow-list (8 today), not an error shell.
         assert len(tools) == len(allow_list("public"))
         assert len(tools) > 0
+
+    @pytest.mark.parametrize("mcp_path", sorted(oauth.MCP_PATHS))
+    def test_flag_off_dead_bearer_is_401_not_anonymous(
+        self,
+        mcp_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+        mcp_path: str,
+    ) -> None:
+        """A presented ``zolai_at_*`` token is a credential even when dead.
+
+        Falling through to the public branch would hand the connector the
+        8-tool anonymous set and hide the expiry, so it gets RFC 6750 401 +
+        ``invalid_token`` (and the client knows to refresh).
+        """
+        monkeypatch.delenv("ZOLAI_MCP_OAUTH_REQUIRED", raising=False)
+        response = mcp_client.post(
+            mcp_path,
+            json=_TOOLS_LIST,
+            headers={"Authorization": "Bearer zolai_at_deadbeef"},
+        )
+        assert response.status_code == 401, response.text
+        header = response.headers["www-authenticate"]
+        assert header.startswith("Bearer resource_metadata=")
+        assert 'error="invalid_token"' in header
+        assert response.json() == {
+            "detail": {"error": "unauthorized", "reason": "invalid_token"},
+        }
 
     @pytest.mark.parametrize("mcp_path", sorted(oauth.MCP_PATHS))
     def test_strict_flag_challenges_keyless_mcp_with_absolute_resource_metadata(

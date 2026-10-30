@@ -75,7 +75,7 @@ def ensure_agent_runs_table(engine: Engine | None = None) -> None:
                     error TEXT NOT NULL DEFAULT '',
                     mode TEXT NOT NULL DEFAULT 'rule',
                     created_by TEXT NOT NULL DEFAULT 'system',
-                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
                     finished_at TEXT
                 )
                 """

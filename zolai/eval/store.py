@@ -39,11 +39,11 @@ import json
 import os
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, cast
 
 from ..config import config
+from ..shared.clock import stamp
 
 #: Lanes scored by :func:`zolai.eval.evaluate`.
 METRIC_LANES: tuple[str, ...] = ("zvs", "qa", "translation")
@@ -82,6 +82,12 @@ GOLD_SETS: dict[str, tuple[str, str]] = {
     "grammar_gold_v0": ("grammar_gold_v0", "Grammar error detection gold set v0"),
     "tokenization_gold_v0": ("tokenization_gold_v0", "Tokenization gold set v0"),
 }
+
+#: Gold *tasks* only. ``GOLD_SETS`` is deliberately keyed twice over — by task
+#: (``"pos"``) and by set name (``"pos_gold_v0"``) — so iterating its keys lists
+#: every gold set twice, which is what made ``zolai eval list`` print 8 rows for
+#: 4 sets. Anything that enumerates tasks iterates this instead.
+GOLD_TASKS: tuple[str, ...] = GOLD_LANES
 
 #: ``eval set name -> gold lane``, so a legacy call that carries no lane still
 #: lands on a valid one.
@@ -164,11 +170,6 @@ def legacy_store_path() -> Path:
     if override:
         return Path(override).expanduser()
     return Path(config.paths.db).parent / "zolai_eval.db"
-
-
-def _now() -> str:
-    """UTC timestamp (second precision) for the bookkeeping columns."""
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _table_sql(conn: sqlite3.Connection, table: str) -> str | None:
@@ -416,7 +417,7 @@ def _upsert_set(
 ) -> None:
     """Insert or refresh the ``eval_sets`` bookkeeping row."""
     existing = conn.execute("SELECT * FROM eval_sets WHERE set_name = ?", (set_name,)).fetchone()
-    created_at = existing["created_at"] if existing and existing["created_at"] else _now()
+    created_at = existing["created_at"] if existing and existing["created_at"] else stamp()
     conn.execute(
         "INSERT INTO eval_sets (set_name, version, description, case_count, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?) "
@@ -430,7 +431,7 @@ def _upsert_set(
             description or (existing["description"] if existing else None),
             case_count,
             created_at,
-            _now(),
+            stamp(),
         ),
     )
 
@@ -444,7 +445,7 @@ def _replace_lane(
 ) -> None:
     """Rewrite one lane of one set from ``records`` (replace, not append)."""
     conn.execute("DELETE FROM eval_cases WHERE set_name = ? AND kind = ?", (set_name, lane))
-    created_at = _now()
+    created_at = stamp()
     for ordinal, record in enumerate(records):
         conn.execute(
             "INSERT INTO eval_cases "
@@ -604,7 +605,7 @@ def create_eval_set(
         description=description,
         version=version,
         item_count=0,
-        created_at=_now(),
+        created_at=stamp(),
     )
 
 
@@ -640,7 +641,7 @@ def add_eval_item(
             "INSERT INTO eval_cases "
             "(set_name, kind, payload, source_table, ordinal, is_active, created_at) "
             "VALUES (?, ?, ?, ?, ?, 1, ?)",
-            (eval_set, lane, json.dumps(payload, ensure_ascii=False), "api", int(ordinal_row[0]), _now()),
+            (eval_set, lane, json.dumps(payload, ensure_ascii=False), "api", int(ordinal_row[0]), stamp()),
         )
         total = conn.execute(
             "SELECT COUNT(*) FROM eval_cases WHERE set_name = ? AND is_active = 1",

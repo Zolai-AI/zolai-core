@@ -205,6 +205,13 @@ def start_sampler() -> MetricsSampler:
             _SAMPLER = MetricsSampler()
         sampler = _SAMPLER
     if not sampler.is_alive():
+        # Eager synchronous first sample: the module promises gauges are
+        # populated before the first scrape, but the daemon thread could lose
+        # the race against a request that arrives right after startup.
+        try:
+            sample_now(force=True, mgr=sampler._mgr)
+        except Exception:  # noqa: BLE001 — a gauge must never block startup
+            logger.exception("initial metrics sample failed")
         sampler.start()
     return sampler
 

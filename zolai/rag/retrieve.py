@@ -41,6 +41,12 @@ MAX_SEARCH_TOKENS = 6
 #: Per-table LIMIT for every lexical pass (one LIMIT per table, not per token).
 SEARCH_PASS_LIMIT = 10
 
+#: FTS5 score mapping.  ``bm25()`` is negative and lower is better; ``-bm25``
+#: is mapped monotonically into [floor, floor + span] so FTS hits outrank the
+#: token-OR pass (0.6) and sit below whole-string exact matches (1.0).
+FTS_SCORE_FLOOR = 0.75
+FTS_SCORE_SPAN = 0.2
+
 #: Vector fallback: minimum cosine for a hit, and the process-level cache.
 #: The matrix is ~380 MB over the full corpus, so it is loaded lazily and only
 #: when lexical results are thin; ``ZOLAI_VECTOR_SEARCH=0`` disables it.
@@ -355,6 +361,7 @@ class UnifiedRetriever:
         4. ``contains`` (0.7) — primary column contains the whole query
         5. ``token_or`` (0.6) — any token (stopwords dropped, max
            :data:`MAX_SEARCH_TOKENS`) matches any matchable column via LIKE
+        6. ``fts5`` (0.75–0.95) — wiki content ranked by ``bm25()``
 
         A query with no usable tokens skips the token-OR pass and keeps the
         whole-string behaviour above.
@@ -480,24 +487,35 @@ class UnifiedRetriever:
             #    shipped database; the old ``dictionary_fts``/``phrases_fts``
             #    targets were never created, so this pass silently did nothing.
             #    Its schema is (title, content) over ``content=wiki_content``.
+            #    Every row used to get a constant 0.95, and the final stable
+            #    sort then kept rowid order — FTS relevance was thrown away.
+            #    ``bm25()`` is negative (more negative = better); it is negated
+            #    and scaled against the best hit in this pass, because its
+            #    absolute magnitude depends on corpus size (tiny on small
+            #    corpora) and a fixed transform would flatten every score.
             if not source_filter or {"wiki", "wiki_content"} & set(source_filter):
                 try:
                     rows = conn.execute(
                         text(
-                            "SELECT rowid, title, content FROM wiki_content_fts "
-                            f"WHERE wiki_content_fts MATCH :q LIMIT {SEARCH_PASS_LIMIT}"
+                            "SELECT rowid, title, content, bm25(wiki_content_fts) AS rank "
+                            "FROM wiki_content_fts "
+                            f"WHERE wiki_content_fts MATCH :q ORDER BY rank LIMIT {SEARCH_PASS_LIMIT}"
                         ),
                         {"q": query},
                     ).fetchall()
-                    for r in rows:
-                        if not any(res.id == f"wiki:{r[0]}" for res in results):
-                            results.append(SearchResult(
-                                id=f"wiki:{r[0]}",
-                                text=r[1] or "",
-                                score=0.95,  # FTS5 = very high relevance
-                                source="wiki",
-                                metadata={"match_type": "fts5", "content": r[2]},
-                            ))
+                    relevance = [max(-float(r[3] or 0.0), 0.0) for r in rows]
+                    best = max(relevance, default=0.0) or 1.0
+                    for r, rel in zip(rows, relevance):
+                        if any(res.id == f"wiki:{r[0]}" for res in results):
+                            continue
+                        score = FTS_SCORE_FLOOR + FTS_SCORE_SPAN * (rel / best)
+                        results.append(SearchResult(
+                            id=f"wiki:{r[0]}",
+                            text=r[1] or "",
+                            score=round(score, 4),
+                            source="wiki",
+                            metadata={"match_type": "fts5", "content": r[2]},
+                        ))
                 except Exception:
                     pass  # FTS5 table may not exist, that's OK
 

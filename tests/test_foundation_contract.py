@@ -261,7 +261,16 @@ _STUBBED_MODULES = (
 
 
 def _install_stubs(seen: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """Replace the engines with sentinels that record what the handler passed."""
+    """Replace the engines with sentinels that record what the handler passed.
+
+    Returns the modules that were in ``sys.modules`` *before* the swap, so the
+    fixture can restore them.  Taking the snapshot after installing (the old
+    behaviour) returned the stubs themselves and left every later test in the
+    session importing ``ProgressTracker`` as a sentinel that answers
+    ``{"category": "orthographic"}`` — the full suite failed 24 learning-engine
+    and 29 online-search cases that pass in isolation.
+    """
+    saved = {name: sys.modules.get(name) for name in _STUBBED_MODULES}
 
     class _Result:
         def __init__(self) -> None:
@@ -346,7 +355,7 @@ def _install_stubs(seen: dict[str, dict[str, Any]]) -> dict[str, Any]:
         for attr, value in attrs.items():
             setattr(module, attr, value)
         sys.modules[name] = module
-    return {name: sys.modules.get(name) for name in _STUBBED_MODULES}
+    return saved
 
 
 @pytest.fixture()

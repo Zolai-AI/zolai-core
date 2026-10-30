@@ -35,6 +35,7 @@ from ..agent.tools.executor import execute_tool
 from ..agent.tools.registry import allow_list
 from ..agent.tools.types import ToolCall
 from ..engines import engine_mode, llm_allowed
+from ..shared.clock import stamp
 from . import auth, rbac
 from .errors import api_error
 
@@ -489,7 +490,7 @@ def _finish(
             turns=int(out.get("turns") or 0),
             latency_ms=float(out.get("latency_ms") or 0.0),
             outcome="chat",
-            finished_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+            finished_at=stamp(),
         )
         out["persisted_run_id"] = int(run["id"])
     return out
@@ -661,7 +662,7 @@ def assistant_feedback(body: ChatFeedbackIn, request: Request) -> dict[str, Any]
                     provider TEXT NOT NULL DEFAULT '',
                     model TEXT NOT NULL DEFAULT '',
                     score INTEGER NOT NULL,
-                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
                     ip_hash TEXT
                 )
             """)
@@ -718,7 +719,7 @@ def admin_feedback_stats(
                     provider TEXT NOT NULL DEFAULT '',
                     model TEXT NOT NULL DEFAULT '',
                     score INTEGER NOT NULL,
-                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
                     ip_hash TEXT
                 )
             """)

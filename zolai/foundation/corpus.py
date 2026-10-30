@@ -203,9 +203,9 @@ class CorpusAnalyzer:
                     if clean:
                         freq[clean] += 1
 
-            # Vocab (use frequency column if available)
+            # Vocabulary (canonical table; the legacy ``vocab`` name is gone)
             cur.execute(
-                "SELECT headword, frequency FROM vocab WHERE frequency > 0 LIMIT 5000"
+                "SELECT headword, frequency FROM vocabulary WHERE frequency > 0 LIMIT 5000"
             )
             for row in cur.fetchall():
                 if row["headword"]:

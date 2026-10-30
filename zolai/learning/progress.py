@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from ..config import config
+from ..shared.clock import now, stamp
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,18 @@ _FREQ_TIERS: dict[str, int] = {
     "low": 10,
 }
 
+#: Quiz-pool frequency floor per CEFR level (higher frequency = easier, so a
+#: level selects words at or below it).  C1/C2 cannot be separated by
+#: frequency, so both leave the pool unfiltered.
+_CEFR_FREQUENCY_FLOOR: dict[str, int] = {
+    "A1": _FREQ_TIERS["high"],
+    "A2": _FREQ_TIERS["medium"],
+    "B1": _FREQ_TIERS["low"],
+    "B2": 1,
+    "C1": 0,
+    "C2": 0,
+}
+
 
 class ProgressTracker:
     """Track learning progress with SM-2 spaced repetition and adaptive difficulty.
@@ -57,9 +70,29 @@ class ProgressTracker:
 
     def _get_connection(self) -> sqlite3.Connection:
         """Get database connection."""
-        conn = sqlite3.connect(str(self._db_path))
+        conn = sqlite3.connect(str(self._db_path), timeout=60.0)
+        conn.execute("PRAGMA busy_timeout = 60000")
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _latest_review(
+        self, conn: sqlite3.Connection, word: str, user_id: str | None = None
+    ) -> sqlite3.Row | None:
+        """This learner's most recent SM-2 state for ``word``, if any.
+
+        State lives in ``user_reviews`` (one row per review, keyed by
+        ``user_id``), never in the corpus ``vocabulary`` table: the SM-2
+        columns that table carries are a shared-corpus surface with no user
+        column, so writing there made two learners overwrite each other.
+        """
+        return conn.execute(
+            """SELECT ease_factor, interval, repetitions, next_review
+               FROM user_reviews
+               WHERE user_id = ? AND word = ?
+               ORDER BY reviewed_at DESC, id DESC
+               LIMIT 1""",
+            (user_id or self.user_id, word),
+        ).fetchone()
 
     def get_next_review(self, word: str) -> dict[str, Any]:
         """Get next review date for a word using SM-2.
@@ -68,22 +101,13 @@ class ProgressTracker:
             Dict with word, next_review, interval, ease_factor.
         """
         conn = self._get_connection()
-        cur = conn.cursor()
 
         try:
-            # Check if word has review data
-            cur.execute(
-                """SELECT * FROM vocabulary
-                   WHERE headword = ?
-                   LIMIT 1""",
-                (word,),
-            )
-            row = cur.fetchone()
-
-            if not row:
+            row = self._latest_review(conn, word)
+            if row is None:
                 return {
                     "word": word,
-                    "next_review": datetime.now().isoformat(),
+                    "next_review": stamp(),
                     "interval": 0,
                     "ease_factor": 2.5,
                     "repetitions": 0,
@@ -92,18 +116,18 @@ class ProgressTracker:
 
             return {
                 "word": word,
-                "next_review": row.get("next_review", datetime.now().isoformat()),
-                "interval": row.get("interval", 0),
-                "ease_factor": row.get("ease_factor", 2.5),
-                "repetitions": row.get("repetitions", 0),
+                "next_review": row["next_review"],
+                "interval": row["interval"],
+                "ease_factor": row["ease_factor"],
+                "repetitions": row["repetitions"],
                 "status": "review",
             }
 
-        except Exception as e:
+        except sqlite3.Error as e:
             logger.debug("Get next review failed: %s", e)
             return {
                 "word": word,
-                "next_review": datetime.now().isoformat(),
+                "next_review": stamp(),
                 "interval": 0,
                 "ease_factor": 2.5,
                 "repetitions": 0,
@@ -118,6 +142,11 @@ class ProgressTracker:
         quality: int,
     ) -> dict[str, Any]:
         """Update review using SM-2 algorithm.
+
+        Appends one ``user_reviews`` row for this learner and returns the new
+        state.  The corpus ``vocabulary`` table is never written: a review is
+        learner data, and previously a review of an unknown word inserted a
+        bare headword row into the corpus.
 
         Args:
             word: The word reviewed.
@@ -135,29 +164,12 @@ class ProgressTracker:
             raise ValueError("Quality must be between 0 and 5")
 
         conn = self._get_connection()
-        cur = conn.cursor()
 
         try:
-            # Get current review data — use try/except for missing SM-2 columns
-            ease_factor = 2.5
-            interval = 0
-            repetitions = 0
-            row = None
-            try:
-                cur.execute(
-                    """SELECT * FROM vocabulary
-                       WHERE headword = ?
-                       LIMIT 1""",
-                    (word,),
-                )
-                row = cur.fetchone()
-                if row:
-                    ease_factor = float(row["ease_factor"]) if "ease_factor" in row.keys() else 2.5
-                    interval = int(row["interval"]) if "interval" in row.keys() else 0
-                    repetitions = int(row["repetitions"]) if "repetitions" in row.keys() else 0
-            except Exception:
-                # SM-2 columns not yet added to vocabulary table
-                pass
+            row = self._latest_review(conn, word)
+            ease_factor = float(row["ease_factor"]) if row else 2.5
+            interval = int(row["interval"]) if row else 0
+            repetitions = int(row["repetitions"]) if row else 0
 
             # Update ease factor
             ease_factor = ease_factor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02))
@@ -177,35 +189,35 @@ class ProgressTracker:
                 else:
                     interval = math.ceil(interval * ease_factor)
 
-            # Calculate next review date
-            next_review = datetime.now() + timedelta(days=interval)
+            # The due instant, in UTC.  It used to be machine-local, which made
+            # the same card due six-and-a-half hours apart depending on where the
+            # server ran, and left ``next_review`` a naive string sitting next to
+            # a UTC ``updated_at`` in the same row.
+            reviewed_at = now()
+            next_review = reviewed_at + timedelta(days=interval)
 
-            # Try to persist SM-2 state (graceful fallback if columns missing)
-            try:
-                if row and "ease_factor" in row.keys():
-                    cur.execute(
-                        """UPDATE vocabulary
-                           SET ease_factor = ?, interval = ?, repetitions = ?,
-                               next_review = ?, updated_at = datetime('now')
-                           WHERE headword = ?""",
-                        (ease_factor, interval, repetitions, next_review.isoformat(), word),
-                    )
-                else:
-                    cur.execute(
-                        """INSERT INTO vocabulary
-                           (headword, english, frequency, books, examples)
-                           VALUES (?, ?, 0, '', '')""",
-                        (word,),
-                    )
-            except Exception:
-                # SM-2 columns not available; skip persistence
-                pass
-
+            conn.execute(
+                """INSERT INTO user_reviews
+                   (user_id, word, quality, reviewed_at, next_review,
+                    ease_factor, interval, repetitions)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    self.user_id,
+                    word,
+                    quality,
+                    stamp(reviewed_at),
+                    stamp(next_review),
+                    ease_factor,
+                    interval,
+                    repetitions,
+                ),
+            )
+            self._touch_streak(conn, reviewed_at)
             conn.commit()
 
             return {
                 "word": word,
-                "next_review": next_review.isoformat(),
+                "next_review": stamp(next_review),
                 "interval": interval,
                 "ease_factor": round(ease_factor, 2),
                 "repetitions": repetitions,
@@ -217,6 +229,39 @@ class ProgressTracker:
             raise
         finally:
             conn.close()
+
+    def _touch_streak(self, conn: sqlite3.Connection, reviewed_at: datetime) -> None:
+        """Record today's activity in ``user_streaks`` (type ``daily``).
+
+        Same row as :meth:`get_streak` reads by default, so a review is what
+        makes the streak non-zero.  Dates are UTC calendar days, matching
+        ``stamp()``.
+        """
+        day = reviewed_at.date().isoformat()
+        row = conn.execute(
+            "SELECT current_streak, longest_streak, last_activity_date "
+            "FROM user_streaks WHERE user_id = ? AND streak_type = 'daily'",
+            (self.user_id,),
+        ).fetchone()
+        if row is None:
+            conn.execute(
+                "INSERT INTO user_streaks "
+                "(user_id, streak_type, current_streak, longest_streak, last_activity_date) "
+                "VALUES (?, 'daily', 1, 1, ?)",
+                (self.user_id, day),
+            )
+            return
+        if row["last_activity_date"] == day:
+            return
+        yesterday = (reviewed_at.date() - timedelta(days=1)).isoformat()
+        current = int(row["current_streak"]) + 1 if row["last_activity_date"] == yesterday else 1
+        longest = max(current, int(row["longest_streak"]))
+        conn.execute(
+            "UPDATE user_streaks SET current_streak = ?, longest_streak = ?, "
+            "last_activity_date = ?, updated_at = ? "
+            "WHERE user_id = ? AND streak_type = 'daily'",
+            (current, longest, day, stamp(reviewed_at), self.user_id),
+        )
 
     # ── Morphology-aware difficulty ────────────────────────────────────────
     def _compute_morphology_complexity(self, word: str) -> float:
@@ -354,32 +399,23 @@ class ProgressTracker:
         cur = conn.cursor()
 
         try:
-            # Get user's recent performance — SM-2 columns may not exist yet
-            recent = []
-            has_review_history = False
+            # Review state lives in user_reviews (see _latest_review); the
+            # vocabulary table carries no per-learner columns.
+            recent: list[sqlite3.Row] = []
             try:
-                # Check if SM-2 columns exist on vocabulary table
-                cur.execute("PRAGMA table_info(vocabulary)")
-                columns = {row[1] for row in cur.fetchall()}
-                if "ease_factor" not in columns:
-                    # SM-2 columns not yet added — no review history
-                    pass
-                else:
-                    # Check user-specific review history from user_reviews table
-                    cur.execute(
-                        """SELECT word, quality as review_quality
-                           FROM user_reviews
-                           WHERE user_id = ?
-                           ORDER BY reviewed_at DESC LIMIT 50""",
-                        (user_id or self.user_id,),
-                    )
-                    recent = cur.fetchall()
-                    has_review_history = len(recent) > 0
-            except Exception:
-                # Tables/columns not yet added; no review history available
-                pass
+                cur.execute(
+                    """SELECT word, quality, ease_factor
+                       FROM user_reviews
+                       WHERE user_id = ?
+                       ORDER BY reviewed_at DESC, id DESC
+                       LIMIT 50""",
+                    (user_id or self.user_id,),
+                )
+                recent = cur.fetchall()
+            except sqlite3.Error:
+                recent = []
 
-            if not has_review_history:
+            if not recent:
                 return {
                     "difficulty": "beginner",
                     "frequency_tier": "high",
@@ -389,9 +425,15 @@ class ProgressTracker:
                     "reason": "No history — starting with high-frequency simple words",
                 }
 
-            # Compute error rate — default to 0 if SM-2 columns missing
-            error_rate = 0.0
-            avg_ease = 2.5
+            # Compute error rate and mean ease from the learner's own history.
+            # Ease is card state, so only each word's latest review counts —
+            # weighting a word by how often it was reviewed would let one
+            # difficult card drag the whole profile.
+            error_rate = sum(1 for r in recent if int(r["quality"]) < 3) / len(recent)
+            latest_ease: dict[str, float] = {}
+            for r in recent:
+                latest_ease.setdefault(r["word"], float(r["ease_factor"]))
+            avg_ease = sum(latest_ease.values()) / len(latest_ease)
 
             # Compute average complexity
             avg_complexity = sum(
@@ -467,16 +509,25 @@ class ProgressTracker:
             cur.execute("SELECT COUNT(*) FROM vocabulary")
             total = cur.fetchone()[0]
 
-            # Count words with good review — SM-2 columns may not exist
+            # "Known" is this learner's mastered cards, not corpus frequency:
+            # a word is mature once its latest review is past the SM-2
+            # 21-day interval (repetitions >= 3, interval >= 21).  Counting
+            # frequency > 100 marked words as known before they were studied.
             known = 0
             try:
                 cur.execute(
-                    """SELECT COUNT(DISTINCT headword) FROM vocabulary
-                       WHERE frequency > 100""",
+                    """SELECT COUNT(*) FROM (
+                           SELECT interval, repetitions,
+                                  ROW_NUMBER() OVER (
+                                      PARTITION BY word
+                                      ORDER BY reviewed_at DESC, id DESC
+                                  ) AS rn
+                           FROM user_reviews WHERE user_id = ?
+                       ) WHERE rn = 1 AND repetitions >= 3 AND interval >= 21""",
+                    (self.user_id,),
                 )
                 known = cur.fetchone()[0]
-            except Exception:
-                # Columns not yet added
+            except sqlite3.Error:
                 known = 0
 
             # Calculate level using thresholds
@@ -484,7 +535,7 @@ class ProgressTracker:
                 level = "A1"
                 progress = 0.0
             else:
-                ratio = known / total
+                ratio = min(1.0, known / total)
                 level = "A1"
                 for level_label, threshold in sorted(_CEFR_THRESHOLDS.items(), key=lambda x: x[1], reverse=True):
                     if ratio >= threshold:
@@ -521,7 +572,9 @@ class ProgressTracker:
         Args:
             quiz_type: Type of quiz ("vocabulary", "translation", "reverse").
             count: Number of questions.
-            level: CEFR level filter.
+            level: CEFR ceiling (A1-C2, case-insensitive). Words at or below
+                the level are eligible; an unknown value leaves the pool
+                unfiltered rather than silently applying a different rule.
 
         Returns:
             List of quiz questions.
@@ -532,7 +585,12 @@ class ProgressTracker:
         try:
             # Get words for quiz
             query = "SELECT headword, english, frequency FROM vocabulary"
-            params = []
+            params: list[Any] = []
+
+            target = level.strip().upper() if level else None
+            if target in _CEFR_FREQUENCY_FLOOR:
+                query += " WHERE frequency >= ?"
+                params.append(_CEFR_FREQUENCY_FLOOR[target])
 
             query += " ORDER BY RANDOM() LIMIT ?"
             params.append(count * 2)  # Get extra for variety
@@ -594,33 +652,47 @@ class ProgressTracker:
         finally:
             conn.close()
 
-    def get_due_reviews(self, limit: int = 20) -> list[dict[str, Any]]:
-        """Get words due for review."""
+    def get_due_reviews(self, limit: int = 20, user_id: str | None = None) -> list[dict[str, Any]]:
+        """This learner's cards whose SM-2 due instant has passed.
+
+        Uses each word's most recent ``user_reviews`` row; a word reviewed
+        again takes the new schedule.  It used to return the newest rows of the
+        corpus ``vocabulary`` table — the same 20 words for every learner,
+        reviewed or not.
+        """
+        uid = user_id or self.user_id
         conn = self._get_connection()
-        cur = conn.cursor()
 
         try:
-            cur.execute(
-                """SELECT headword
-                   FROM vocabulary
-                   ORDER BY id DESC
+            rows = conn.execute(
+                """SELECT ur.word, ur.next_review, ur.interval,
+                          ur.ease_factor, ur.repetitions
+                   FROM user_reviews ur
+                   WHERE ur.user_id = ?
+                     AND ur.next_review <= ?
+                     AND ur.id = (SELECT MAX(u2.id) FROM user_reviews u2
+                                  WHERE u2.user_id = ur.user_id AND u2.word = ur.word)
+                   ORDER BY ur.next_review ASC, ur.word ASC
                    LIMIT ?""",
-                (limit,),
-            )
-            return [dict(row) for row in cur.fetchall()]
-        except Exception as e:
+                (uid, stamp(), limit),
+            ).fetchall()
+            return [dict(row) for row in rows]
+        except sqlite3.Error as e:
             logger.debug("Get due reviews failed: %s", e)
             return []
         finally:
             conn.close()
 
 
-    def get_statistics(self) -> dict[str, Any]:
-        """Get learning statistics.
+    def get_statistics(self, user_id: str | None = None) -> dict[str, Any]:
+        """Corpus scale plus this learner's review figures.
 
-        Returns:
-            Dict with learning statistics.
+        ``total_vocab`` and friends describe the corpus the learner studies;
+        the ``reviews`` block is the learner's own progress, read from
+        ``user_reviews`` — the same table ``get_error_breakdown`` reads and
+        :meth:`update_review` writes.
         """
+        uid = user_id or self.user_id
         conn = self._get_connection()
         cur = conn.cursor()
 
@@ -663,6 +735,24 @@ class ProgressTracker:
             """)
             freq_distribution = {row[0]: row[1] for row in cur.fetchall()}
 
+            cur.execute(
+                """SELECT COUNT(*) AS reviews,
+                          COUNT(DISTINCT word) AS words,
+                          AVG(CASE WHEN quality >= 3 THEN 1.0 ELSE 0.0 END) AS success_rate,
+                          SUM(CASE WHEN quality >= 3 THEN 1 ELSE 0 END) AS passed
+                   FROM user_reviews WHERE user_id = ?""",
+                (uid,),
+            )
+            totals = cur.fetchone()
+            cur.execute(
+                """SELECT COUNT(*) FROM user_reviews ur
+                   WHERE ur.user_id = ? AND ur.next_review <= ?
+                     AND ur.id = (SELECT MAX(u2.id) FROM user_reviews u2
+                                  WHERE u2.user_id = ur.user_id AND u2.word = ur.word)""",
+                (uid, stamp()),
+            )
+            due_now = cur.fetchone()[0]
+
             return {
                 "total_vocab": total_vocab,
                 "total_grammar": total_grammar,
@@ -674,6 +764,14 @@ class ProgressTracker:
                     total_exercises / total_vocab
                     if total_vocab > 0 else 0
                 ),
+                "reviews": {
+                    "user_id": uid,
+                    "total": int(totals["reviews"] or 0),
+                    "words_reviewed": int(totals["words"] or 0),
+                    "passed": int(totals["passed"] or 0),
+                    "success_rate": round(float(totals["success_rate"] or 0.0), 3),
+                    "due_now": int(due_now or 0),
+                },
             }
 
         except Exception as e:
@@ -686,6 +784,14 @@ class ProgressTracker:
                 "total_corrections": 0,
                 "freq_distribution": {},
                 "completion_rate": 0,
+                "reviews": {
+                    "user_id": uid,
+                    "total": 0,
+                    "words_reviewed": 0,
+                    "passed": 0,
+                    "success_rate": 0.0,
+                    "due_now": 0,
+                },
             }
         finally:
             conn.close()
@@ -733,12 +839,15 @@ class ProgressTracker:
             current = row["current_streak"]
             longest = row["longest_streak"]
 
-            # Check if streak is still active (last activity was today or yesterday)
+            # Check if streak is still active (last activity was today or
+            # yesterday, in UTC — ``last_activity_date`` may be a date or a
+            # full canonical stamp, so parse rather than strptime a fixed
+            # shape, and never compare against machine-local time).
             is_active = False
             if last_date:
-                last_dt = datetime.strptime(last_date, "%Y-%m-%d")
-                diff = (datetime.now() - last_dt).days
-                is_active = diff <= 1
+                last_day = datetime.fromisoformat(last_date.replace("Z", "+00:00")).date()
+                diff = (now().date() - last_day).days
+                is_active = 0 <= diff <= 1
 
             return {
                 "user_id": uid,
@@ -799,8 +908,8 @@ class ProgressTracker:
                     """INSERT INTO user_streaks
                        (user_id, streak_type, current_streak, longest_streak,
                         last_activity_date, created_at, updated_at)
-                       VALUES (?, ?, 1, 1, ?, datetime('now'), datetime('now'))""",
-                    (uid, streak_type, today),
+                       VALUES (?, ?, 1, 1, ?, ?, ?)""",
+                    (uid, streak_type, today, stamp(), stamp()),
                 )
                 conn.commit()
                 return {
@@ -844,9 +953,9 @@ class ProgressTracker:
             cur.execute(
                 """UPDATE user_streaks
                    SET current_streak = ?, longest_streak = ?,
-                       last_activity_date = ?, updated_at = datetime('now')
+                       last_activity_date = ?, updated_at = ?
                    WHERE id = ?""",
-                (new_current, new_longest, today, row["id"]),
+                (new_current, new_longest, today, stamp(), row["id"]),
             )
             conn.commit()
 

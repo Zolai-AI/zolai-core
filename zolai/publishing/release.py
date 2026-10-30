@@ -18,6 +18,7 @@ from zolai.config import config
 from zolai.learning.incremental.regression import run_regression_checks
 from zolai.publishing.artifact import ArtifactManifest, build_knowledge_artifact
 from zolai.publishing.sync import SyncResult, sync_to_d1, sync_to_r2
+from zolai.shared.clock import stamp
 
 log = logging.getLogger(__name__)
 
@@ -118,7 +119,7 @@ def _create_knowledge_version_row(
                 INSERT INTO knowledge_versions
                 (version, git_commit, source_versions, pipeline_version, schema_version,
                  row_counts, quality, eval_run_id, manifest_hash, status, created_at)
-                VALUES (:v, :gc, :sv, :pv, :sc, :rc, :q, NULL, :mh, 'VERIFIED', datetime('now'))
+                VALUES (:v, :gc, :sv, :pv, :sc, :rc, :q, NULL, :mh, 'VERIFIED', :now)
             """),
             {
                 "v": version,
@@ -128,6 +129,7 @@ def _create_knowledge_version_row(
                 "sc": manifest.schema_version,
                 "rc": json.dumps(manifest.record_counts),
                 "q": json.dumps(manifest.quality_metrics),
+                "now": stamp(),
                 "mh": manifest.file_hashes.get("manifest.json", ""),
             },
         )

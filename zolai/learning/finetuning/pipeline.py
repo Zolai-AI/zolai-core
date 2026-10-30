@@ -20,6 +20,8 @@ from enum import Enum
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from zolai.shared.clock import now, stamp
+
 from ...data.repositories import get_engine
 from ..feedback_store import FeedbackStore, FeedbackType
 from .model_manager import ModelManager
@@ -80,7 +82,7 @@ class TrainingJob:
     status: TrainingStatus = TrainingStatus.PENDING
     dataset_id: str = ""
     feedback_signals: list = field(default_factory=list)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=now)
     started_at: datetime | None = None
     completed_at: datetime | None = None
     metrics: dict = field(default_factory=dict)
@@ -215,7 +217,7 @@ class FineTuningPipeline:
             })
 
         dataset_id = self._dataset_id_for(rows)
-        now = datetime.utcnow().isoformat()
+        now = stamp()
         metadata = json.dumps(
             {"min_confidence": min_confidence, "status_filter": status_filter},
             sort_keys=True,
@@ -318,7 +320,7 @@ class FineTuningPipeline:
     async def _execute_job(self, job: TrainingJob):
         """Execute a training job."""
         job.status = TrainingStatus.RUNNING
-        job.started_at = datetime.utcnow()
+        job.started_at = now()
         self.current_job = job
 
         try:
@@ -332,13 +334,13 @@ class FineTuningPipeline:
                 await self._run_continuous_training(job)
 
             job.status = TrainingStatus.COMPLETED
-            job.completed_at = datetime.utcnow()
+            job.completed_at = now()
             logger.info(f"Training job {job.job_id} completed successfully")
 
         except Exception as e:
             job.status = TrainingStatus.FAILED
             job.error = str(e)
-            job.completed_at = datetime.utcnow()
+            job.completed_at = now()
             logger.error(f"Training job {job.job_id} failed: {e}")
         finally:
             self.current_job = None

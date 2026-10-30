@@ -3,6 +3,7 @@
 from .auth_session_router import router as auth_session_router
 from .session_auth import (
     LoginRejected,
+    RoleGuardRejected,
     authenticate,
     change_password,
     create_user,
@@ -33,6 +34,7 @@ from .session_auth import (
 
 __all__ = [
     "LoginRejected",
+    "RoleGuardRejected",
     "auth_session_router",
     "authenticate",
     "change_password",

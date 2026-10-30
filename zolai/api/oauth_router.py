@@ -111,8 +111,12 @@ async def mcp_relative_oauth_authorization_server(request: Request) -> JSONRespo
 # ── RFC 9728 — protected-resource metadata ──────────────────────────────────
 
 
-def _pr_metadata(request: Request) -> JSONResponse:
-    return _json(oauth.protected_resource_metadata(oauth.public_origin(request.scope)))
+def _pr_metadata(request: Request, resource_path: str = "/mcp") -> JSONResponse:
+    return _json(
+        oauth.protected_resource_metadata(
+            oauth.public_origin(request.scope), resource_path
+        )
+    )
 
 
 @router.get("/.well-known/oauth-protected-resource")
@@ -127,10 +131,22 @@ async def well_known_oauth_protected_resource_mcp(request: Request) -> JSONRespo
     return _pr_metadata(request)
 
 
+@router.get("/.well-known/oauth-protected-resource/api/v1/mcp")
+async def well_known_oauth_protected_resource_api_mcp(request: Request) -> JSONResponse:
+    """Inserted-path form for the versioned alias (``<origin>/api/v1/mcp``)."""
+    return _pr_metadata(request, "/api/v1/mcp")
+
+
 @router.get("/mcp/.well-known/oauth-protected-resource")
 async def mcp_relative_oauth_protected_resource(request: Request) -> JSONResponse:
     """Path-relative form — the variant MCP clients probe next to the endpoint."""
     return _pr_metadata(request)
+
+
+@router.get("/api/v1/mcp/.well-known/oauth-protected-resource")
+async def api_mcp_relative_oauth_protected_resource(request: Request) -> JSONResponse:
+    """Path-relative form next to the versioned alias."""
+    return _pr_metadata(request, "/api/v1/mcp")
 
 
 # ---------------------------------------------------------------------------
@@ -164,13 +180,30 @@ class RegistrationIn(BaseModel):
     software_version: str | None = Field(default=None, max_length=100)
 
 
-def _oauth_error(status: int, error: str, description: str) -> JSONResponse:
+def _oauth_error(
+    status: int,
+    error: str,
+    description: str,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
     """RFC 6749 §5.2 error envelope: top-level ``error`` fields, never cached."""
+    merged = {"Cache-Control": "no-store", **(headers or {})}
     return JSONResponse(
         status_code=status,
         content={"error": error, "error_description": description},
-        headers={"Cache-Control": "no-store"},
+        headers=merged,
     )
+
+
+def _invalid_client(description: str, *, basic: bool) -> JSONResponse:
+    """``invalid_client`` 401.
+
+    RFC 6749 §5.2: when the client authenticated with the ``Authorization``
+    header, the 401 MUST carry a ``WWW-Authenticate`` challenge for the scheme
+    it used.  A body credential (``client_secret_post``) gets no challenge.
+    """
+    headers = {"WWW-Authenticate": 'Basic realm="zolai"'} if basic else None
+    return _oauth_error(401, "invalid_client", description, headers)
 
 
 def _invalid_metadata(description: str) -> JSONResponse:
@@ -258,8 +291,9 @@ async def oauth_register(body: RegistrationIn, request: Request) -> JSONResponse
 # ---------------------------------------------------------------------------
 
 
-def _validate_authorize_params(
+async def _validate_authorize_params(
     form: dict[str, str],
+    origin: str,
 ) -> tuple[dict[str, Any] | None, JSONResponse | None]:
     """Shared validation for GET (query) and POST (form).
 
@@ -268,8 +302,12 @@ def _validate_authorize_params(
     (RFC 6749 §4.1.2.1: never redirect to an unvalidated URI), and PKCE
     violations are refused before any credential is asked for, so a lazy
     client sees the error instead of a login form it cannot complete.
+
+    ``get_client`` is awaited in a worker thread: a CIMD ``client_id``
+    (draft-ietf-oauth-client-id-metadata-document) is an https URL, and
+    resolving it performs a bounded network fetch — never on the event loop.
     """
-    client = oauth.get_client(form.get("client_id"))
+    client = await run_in_threadpool(oauth.get_client, form.get("client_id"))
     if client is None:
         return None, _oauth_error(400, "invalid_client", "unknown client_id")
     redirect_uri = str(form.get("redirect_uri") or "")
@@ -282,6 +320,13 @@ def _validate_authorize_params(
     if str(form.get("response_type") or "") != "code":
         return None, _oauth_error(
             400, "unsupported_response_type", "only response_type=code is supported"
+        )
+    # RFC 8707 resource indicator: a client may name the audience it wants a
+    # token for. This AS serves exactly one (the MCP endpoint), so a foreign
+    # value is refused instead of minting a token for the wrong audience.
+    if not oauth.resource_is_served(form.get("resource"), origin):
+        return None, _oauth_error(
+            400, "invalid_target", "resource must be this server's MCP endpoint"
         )
     try:
         challenge, method = oauth.validate_code_challenge(
@@ -322,6 +367,8 @@ _HIDDEN_FIELDS = (
     "code_challenge_method",
     "scope",
     "state",
+    # RFC 8707 — carried through consent so the token request sees the audience.
+    "resource",
 )
 
 
@@ -477,7 +524,7 @@ async def oauth_authorize_css() -> Response:
 
 
 @router.get("/oauth/authorize")
-def oauth_authorize_get(
+async def oauth_authorize_get(
     request: Request,
     response_type: str | None = None,
     client_id: str | None = None,
@@ -486,6 +533,7 @@ def oauth_authorize_get(
     code_challenge_method: str | None = None,
     scope: str | None = None,
     state: str | None = None,
+    resource: str | None = None,
 ) -> Response:
     """Authorization-code request → the login + consent form (PKCE checked first)."""
     form = {
@@ -496,8 +544,12 @@ def oauth_authorize_get(
         "code_challenge_method": code_challenge_method or "",
         "scope": scope or "",
         "state": state or "",
+        # RFC 8707 — echoed through the consent form so the POST carries it too.
+        "resource": resource or "",
     }
-    params, error = _validate_authorize_params(form)
+    params, error = await _validate_authorize_params(
+        form, oauth.public_origin(request.scope)
+    )
     if error is not None:
         return error
     assert params is not None  # narrowed by the tuple contract above
@@ -522,7 +574,9 @@ async def oauth_authorize_post(request: Request) -> Response:
     parsed = parse_qs(raw.decode("utf-8", errors="replace"), keep_blank_values=True)
     form = {key: values[0] for key, values in parsed.items() if values}
 
-    params, error = _validate_authorize_params(form)
+    params, error = await _validate_authorize_params(
+        form, oauth.public_origin(request.scope)
+    )
     if error is not None:
         return error
     assert params is not None
@@ -684,10 +738,20 @@ async def _token_rate_limit(scope: Any) -> None:
         )
 
 
-def _token_client_auth(request: Request, form: dict[str, str]) -> tuple[dict[str, Any] | None, JSONResponse | None]:
-    """Authenticate the caller against its registered method (§2.3). One method
-    per request: ``client_secret_basic`` wins if the header is present, else
-    ``client_secret_post`` (body secret), else ``none`` (public client)."""
+async def _token_client_auth(
+    request: Request, form: dict[str, str]
+) -> tuple[dict[str, Any] | None, JSONResponse | None]:
+    """Authenticate the caller against its registered method (§2.3).
+
+    One method per request: ``client_secret_basic`` wins if the header is
+    present, else ``client_secret_post`` (body secret), else ``none`` (public
+    client).  A confidential client may use either secret-bearing method
+    (RFC 6749 §2.3.1 does not require the registered spelling), but the
+    secret itself must match and a public client can never present one.
+
+    ``get_client`` runs in a worker thread for the same reason as the
+    authorize endpoint: a CIMD client_id is an https URL.
+    """
     header = request.headers.get("authorization", "")
     if header.lower().startswith("basic "):
         cid, secret = _parse_basic(header)
@@ -698,20 +762,26 @@ def _token_client_auth(request: Request, form: dict[str, str]) -> tuple[dict[str
     else:
         cid, secret = form.get("client_id"), None
         method = "none"
-    client = oauth.get_client(cid)
+    client = await run_in_threadpool(oauth.get_client, cid)
     if client is None:
-        return None, _oauth_error(401, "invalid_client", "unknown client_id")
+        return None, _invalid_client("unknown client_id", basic=method == "client_secret_basic")
     registered = str(client.get("token_endpoint_auth_method") or "none")
-    if registered != method:
-        # A public client cannot present a secret; a confidential one cannot
-        # downgrade to anonymous. Method confusion is refused outright.
-        return None, _oauth_error(
-            401,
-            "invalid_client",
-            f"client must authenticate with {registered}",
+    if method == "none":
+        # A confidential client cannot downgrade to anonymous.
+        if client.get("client_secret_hash"):
+            return None, _invalid_client(
+                f"client must authenticate with {registered}", basic=False
+            )
+    elif not client.get("client_secret_hash"):
+        # A public client cannot present (or fabricate) a secret.
+        return None, _invalid_client(
+            "a public client cannot present a client secret",
+            basic=method == "client_secret_basic",
         )
-    if not oauth.verify_client_secret(client, secret):
-        return None, _oauth_error(401, "invalid_client", "client authentication failed")
+    elif not oauth.verify_client_secret(client, secret):
+        return None, _invalid_client(
+            "client authentication failed", basic=method == "client_secret_basic"
+        )
     return client, None
 
 
@@ -735,10 +805,17 @@ async def oauth_token(request: Request) -> Response:
     parsed = parse_qs(raw.decode("utf-8", errors="replace"), keep_blank_values=True)
     form = {key: values[0] for key, values in parsed.items() if values}
 
-    client, error = _token_client_auth(request, form)
+    client, error = await _token_client_auth(request, form)
     if error is not None:
         return error
     assert client is not None
+
+    # RFC 8707 §2.2 — a foreign audience is refused *before* any code is
+    # consumed, so a misdirected request cannot burn a single-use grant.
+    if not oauth.resource_is_served(form.get("resource"), oauth.public_origin(request.scope)):
+        return _oauth_error(
+            400, "invalid_target", "resource must be this server's MCP endpoint"
+        )
 
     grant_type = str(form.get("grant_type") or "")
     if grant_type == "authorization_code":

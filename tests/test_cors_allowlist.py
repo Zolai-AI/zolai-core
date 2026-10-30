@@ -20,6 +20,7 @@ read cross-origin, so the response is invisible to the hostile page.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -59,8 +60,13 @@ PROBE_PATH = "/api/v1/health"
 
 
 @pytest.fixture()
-def client() -> Iterator[TestClient]:
-    """App without lifespan — CORS is pure middleware."""
+def client(scratch_db: Path) -> Iterator[TestClient]:
+    """App on a throwaway DB — ``create_app``'s lifespan runs migrations.
+
+    Without the redirect the lifespan migrates ``config.paths.db``, i.e. the
+    canonical corpus; the ``no_canonical_db_writes`` fence correctly fails the
+    test for it, and CORS never needed the real store anyway.
+    """
     with TestClient(create_app()) as test_client:
         yield test_client
 
@@ -146,6 +152,27 @@ def test_allowlisted_preflight_is_echoed(client: TestClient, origin: str) -> Non
     assert response.status_code == 200
     assert response.headers.get("access-control-allow-origin") == origin
     assert response.headers.get("access-control-allow-credentials") == "true"
+
+
+def test_mcp_binding_headers_pass_preflight(client: TestClient) -> None:
+    """Browser MCP clients (studio.zolai.space) send these on tools/call."""
+    response = client.options(
+        PROBE_PATH,
+        headers={
+            "Origin": "https://studio.zolai.space",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": (
+                "authorization,content-type,mcp-protocol-version,mcp-method,mcp-name"
+            ),
+        },
+    )
+    assert response.status_code == 200, response.text
+    allowed = {
+        h.strip().lower()
+        for h in response.headers["access-control-allow-headers"].split(",")
+    }
+    assert {"mcp-method", "mcp-name", "mcp-protocol-version"} <= allowed
+    assert response.headers["access-control-allow-origin"] == "https://studio.zolai.space"
 
 
 # ---------------------------------------------------------------------------

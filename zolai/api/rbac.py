@@ -1,12 +1,30 @@
-"""Public/member/admin RBAC (P2) — roles, ``PUBLIC_ROUTES``, route classes.
+"""Public/member/admin/superadmin RBAC (P2) — roles, ``PUBLIC_ROUTES``, route classes.
 
-Three roles, derived per request from the resolved API-key record (a future
-session token slots into :func:`role_for` without touching call sites):
+Four roles. :func:`role_for` is the **one** resolver every route, middleware
+check and tool tier consults, and it reads two different things depending on
+what the record is:
 
-- ``anonymous`` — no key (or a key that did not resolve)
-- ``member``    — a valid key without identity/settings power
-- ``admin``     — a key granting ``apikey:manage`` / ``settings:write`` /
-  ``user:manage`` / ``role:manage`` / ``*``
+- ``anonymous``   — no credential (or one that did not resolve)
+- ``member``      — a credential without admin power
+- ``admin``       — an account whose ``users.role`` is ``admin``, or a key
+  granting ``apikey:manage`` / ``settings:write`` / ``user:manage``
+- ``superadmin``  — an account whose ``users.role`` is ``superadmin``, or a key
+  granting ``role:manage`` / ``*``
+
+**Accounts are read from the row, keys from their scopes.** A session or OAuth
+record carries the ``role`` field built from ``users.role``
+(:func:`zolai.api.session_auth.record_from_user`), and that value is
+authoritative for it — which is what makes "promote this account" mean
+something. A raw API key has no account behind it, so its role is the widest
+scope it holds. ``user:manage`` deliberately tops out at ``admin``: managing
+accounts is not the same power as granting roles.
+
+Granting a role is rank-ordered and guarded in exactly one writer,
+:func:`zolai.api.session_auth.set_user_role` — see
+``docs/admin/permissions.md`` §5 for the invariants (no self-demotion, no
+removing the last superadmin, nothing below superadmin may touch an admin).
+The first superadmin cannot come from the HTTP surface by construction; it is
+made by ``zolai user set-role … superadmin``.
 
 ``PUBLIC_ROUTES`` is the **single source consulted by both**
 :func:`zolai.api.auth_middleware.ApiKeyMiddleware` **and**
@@ -37,30 +55,85 @@ from . import auth
 ROLE_ANONYMOUS = "anonymous"
 ROLE_MEMBER = "member"
 ROLE_ADMIN = "admin"
+ROLE_SUPERADMIN = "superadmin"
 
 #: Ordered least → greatest privilege.
-ROLES: tuple[str, ...] = (ROLE_ANONYMOUS, ROLE_MEMBER, ROLE_ADMIN)
+ROLES: tuple[str, ...] = (ROLE_ANONYMOUS, ROLE_MEMBER, ROLE_ADMIN, ROLE_SUPERADMIN)
 _RANK = {name: idx for idx, name in enumerate(ROLES)}
 
-#: Scopes whose holder is treated as an admin (docs/admin/permissions.md §3).
+#: Scopes whose holder may grant, revoke and approve roles
+#: (docs/admin/permissions.md §3).  ``*`` subsumes ``role:manage``, so a
+#: wildcard key is a superadmin key — and both are refused at the minting
+#: surface for anyone below superadmin.
+SUPERADMIN_SCOPES: frozenset[str] = frozenset({"*", "role:manage"})
+
+#: Scopes whose holder is an admin but **not** a superadmin
+#: (docs/admin/permissions.md §3).  Account management, key minting and
+#: provider settings stop here: none of them may change who is an admin.
 ADMIN_SCOPES: frozenset[str] = frozenset(
-    {"*", "apikey:manage", "settings:write", "user:manage", "role:manage"}
+    {"apikey:manage", "settings:write", "user:manage"}
 )
 
 
 def role_for(record: dict[str, Any] | None) -> str:
-    """Role for a resolved key record (``None`` ⇒ anonymous)."""
+    """Role for a resolved credential record (``None`` ⇒ anonymous).
+
+    Two sources of truth, in this order, because they describe two different
+    kinds of credential:
+
+    1. ``record["role"]`` — the ``users.role`` value carried by a session or
+       OAuth record.  An account's role is what its row says; a promotion takes
+       effect on the holder's next request, and a demotion likewise.
+    2. The record's scopes — an API key has no account behind it, so the widest
+       scope it holds *is* its role.
+
+    An unrecognised explicit role is ignored rather than trusted: the scope
+    reading then applies, and a record with no admin scope is a member.  Never
+    raises — a hand-edited row must not 500 the API.
+    """
     if not record:
         return ROLE_ANONYMOUS
-    scopes = list(record.get("scopes") or [])
-    if any(s in ADMIN_SCOPES for s in scopes):
+    explicit = str(record.get("role") or "").strip().lower()
+    if explicit in ROLES:
+        return explicit
+    scopes = set(record.get("scopes") or [])
+    if scopes & SUPERADMIN_SCOPES:
+        return ROLE_SUPERADMIN
+    if scopes & ADMIN_SCOPES:
         return ROLE_ADMIN
     return ROLE_MEMBER
+
+
+def rank_of(record: dict[str, Any] | None) -> int:
+    """Privilege rank of a credential record (0 = anonymous)."""
+    return _RANK[role_for(record)]
 
 
 def has_role(record: dict[str, Any] | None, minimum: str) -> bool:
     """Whether ``record`` meets the ``minimum`` role rank."""
     return _RANK[role_for(record)] >= _RANK[minimum]
+
+
+def person_identity(record: dict[str, Any] | None) -> tuple[int, str, str] | None:
+    """``(user_id, username, role)`` when the credential is a **signed-in account**.
+
+    ``None`` otherwise — for an anonymous caller, and, just as importantly, for
+    a machine credential.  An API key has no account behind it (``user_id`` is
+    ``None``), and an OAuth access token is held by a client process rather than
+    the human who consented.  Routes that attribute a row to a person (the
+    role-request queue, "my contributions") consult this one predicate and raise
+    their own 403 sentence, so *what makes a person* is defined once while each
+    surface keeps its own wording.
+    """
+    if not isinstance(record, dict) or not record:
+        return None
+    if str(record.get("auth_source") or "") != "session":
+        return None
+    user_id = record.get("user_id")
+    if user_id is None:
+        return None
+    username = str(record.get("username") or record.get("name") or "")
+    return int(user_id), username, role_for(record)
 
 
 # ── Public routes ────────────────────────────────────────────────────────────
@@ -115,6 +188,15 @@ PUBLIC_ROUTES: tuple[tuple[str | None, str], ...] = (
     ("DELETE", "/api/v1/mcp"),
     ("GET", "/mcp"),
     ("DELETE", "/mcp"),
+    # RFC 9728 protected-resource metadata for the versioned MCP path.  Public
+    # by definition: it is what a ``401 WWW-Authenticate: resource_metadata=…``
+    # points a client at *before* it holds any token, so gating it would make
+    # discovery circular.  Returns the issuer URL and audience — no data, no
+    # credential, nothing writable.  The bare and ``/mcp``-relative siblings are
+    # the same handler and fall outside this table because they are not
+    # ``/api/v1``-prefixed (``test_every_api_v1_route_is_classified`` only walks
+    # that prefix).
+    ("GET", "/api/v1/mcp/.well-known/oauth-protected-resource"),
     # Anonymous Studio reads (plan §B table).
     ("GET", "/api/v1/search"),
     ("POST", "/api/v1/search"),
@@ -227,6 +309,21 @@ MEMBER_PREFIXES: tuple[str, ...] = (
     # completeness guard in tests/test_rbac_public_matrix.py fails — "unclassified"
     # is documented above as a bug, not a fourth class.
     "/api/v1/bible",
+    # ``/api/v1/role-requests`` — the ask/decide queue
+    # (``zolai/api/role_requests_router.py``).  Declared **member**, never admin,
+    # and that distinction is load-bearing: ``is_admin_path`` prefix-matches, so
+    # an entry in ``ADMIN_PREFIXES`` or ``ADMIN_METHOD_ROUTES`` would 401 a
+    # member on ``GET /role-requests/mine`` — their own list.  The two queue
+    # routes are admin *at the route* (``role:manage`` +
+    # ``require_role("superadmin", strict=True)``); this table records only the
+    # "a credential is required" half, exactly as it does for ``/desktop``.
+    "/api/v1/role-requests",
+    # ``/api/v1/contributions`` is public for the **submit** half (the exact
+    # ``("POST", …)`` entry in PUBLIC_ROUTES above, which ``classify_route``
+    # consults before this list). The prefix is here for ``GET /mine`` — reading
+    # back your own submissions needs a resolved account, so "a key is required"
+    # is the honest class for the sub-resource.
+    "/api/v1/contributions",
 )
 
 #: Strict admin surface (401 anon in warn *and* enforce + scope-gated).
@@ -461,21 +558,35 @@ def auth_me(request: Request) -> dict[str, Any]:
     """Who am I?  Public, never 401 — powers Studio role gating.
 
     The original four keys (``role``, ``key_prefix``, ``scopes``, ``mode``) are
-    unchanged — additive only.  When the caller authenticated with a username
-    session (``Authorization: Bearer zolai_ss_*``) the response also carries
-    ``auth_source="session"`` with ``username`` / ``display_name`` / ``user_id``
-    / ``expires_at``; ``key_prefix`` stays ``None`` because a session has no key
-    prefix (D7).  With ``ZOLAI_AUTH_SESSIONS=off`` the response is the original
-    four keys plus ``auth_source`` set to ``"api_key"``/``"anonymous"``.
+    unchanged — additive only, and ``role`` gains a fourth value
+    (``superadmin``) rather than replacing any existing one.  A Studio build
+    that predates it reads an unknown role as its least-privileged answer, so
+    clients widen with the enum, they do not guess.  When the caller
+    authenticated with a username session (``Authorization: Bearer zolai_ss_*``)
+    the response also carries ``auth_source="session"`` with ``username`` /
+    ``display_name`` / ``user_id`` / ``expires_at``; ``key_prefix`` stays
+    ``None`` because a session has no key prefix (D7).  With
+    ``ZOLAI_AUTH_SESSIONS=off`` the response is the original four keys plus
+    ``auth_source`` set to ``"api_key"``/``"anonymous"``.
+
+    ``auth_source`` reports **the credential that was actually resolved**, so it
+    takes four values: ``anonymous``, ``api_key``, ``session`` and ``oauth`` (an
+    MCP access token, ``zolai_at_*``).  Saying ``api_key`` for the fourth was a
+    small lie that Studio then had to design around — "which of my identity keys
+    should I expect?" cannot be answered from a label that merges a person's
+    OAuth grant with a machine's key.  An ``api_keys`` record carries no marker
+    of its own (only sessions and grants do), so an *absent* marker means a key,
+    not an unknown source.
     """
     record: dict[str, Any] | None = getattr(request.state, "api_key", None)
     is_session = bool(record) and record.get("auth_source") == "session"
+    declared = str((record or {}).get("auth_source") or "")
     body: dict[str, Any] = {
         "role": role_for(record),
         "key_prefix": (record or {}).get("key_prefix"),
         "scopes": list((record or {}).get("scopes") or []),
         "mode": auth.api_auth_mode(),
-        "auth_source": "session" if is_session else ("api_key" if record else "anonymous"),
+        "auth_source": declared or ("api_key" if record else "anonymous"),
     }
     if is_session:
         body["username"] = record.get("username")

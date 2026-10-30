@@ -41,6 +41,9 @@ def build(
         force=force,
     )
     print(json.dumps(result, indent=2, ensure_ascii=False))
+    if result.get("errors"):
+        # A caller scripting the build must not read a partial index as success.
+        raise typer.Exit(code=1)
 
 
 @app.command("word")

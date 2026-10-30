@@ -13,6 +13,13 @@ proves each half separately:
 Happy paths: create (optional ``role``) / list / enable / disable / role change
 / password / revoke-sessions — every response sanitized (no ``password_hash``,
 no token), real timestamps, and a ``data_audit_log`` row for every mutation.
+
+Since the 4-role model the surface is **split**, and this file proves the split:
+``user:manage`` creates members and enables/disables members, while writing a
+role — or touching an account ranked at admin or above — needs ``role:manage``,
+which is what makes a credential a superadmin
+(:func:`zolai.api.rbac.role_for`).  The refusals are 403s naming their reason,
+never a silently disabled control.
 """
 
 from __future__ import annotations
@@ -74,6 +81,18 @@ def _clean_state(monkeypatch) -> Iterator[None]:
 def admin_key(admin_db: DatabaseManager) -> dict:
     """``admin_db`` is requested first so ``auth`` is wired to the throwaway DB."""
     return auth.create_api_key(name="user-admin", scopes=["user:manage"], created_by="test")
+
+
+@pytest.fixture()
+def superadmin_key(admin_db: DatabaseManager) -> dict:
+    """A key holding ``role:manage`` — which is what makes a *key* a superadmin.
+
+    The whole point of the fixture: ``user:manage`` can create accounts and
+    disable members, and only ``role:manage`` reaches above that.
+    """
+    return auth.create_api_key(
+        name="role-admin", scopes=["user:manage", "role:manage"], created_by="test"
+    )
 
 
 @pytest.fixture()
@@ -149,12 +168,12 @@ class TestGates:
 
 class TestHappyPaths:
     def test_create_returns_201_without_hash_and_with_timestamps(
-        self, client, admin_key, admin_db
+        self, client, superadmin_key, admin_db
     ) -> None:
         response = client.post(
             "/api/v1/admin/users",
             json={"username": "Ada", "password": PASSWORD, "role": "admin"},
-            headers=_headers(admin_key),
+            headers=_headers(superadmin_key),
         )
         assert response.status_code == 201
         user = response.json()["user"]
@@ -167,6 +186,27 @@ class TestHappyPaths:
         raw = response.text
         assert PASSWORD not in raw
         assert "$argon2" not in raw
+
+    def test_create_above_member_needs_superadmin(self, client, admin_key) -> None:
+        """``user:manage`` creates **members**; starting someone at admin is a
+        role grant, and a role grant is ``role:manage``."""
+        response = client.post(
+            "/api/v1/admin/users",
+            json={"username": "frank", "password": PASSWORD, "role": "admin"},
+            headers=_headers(admin_key),
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"]["error"] == "role_change_requires_superadmin"
+        assert session_auth.get_user("frank") is None
+
+    def test_create_member_needs_only_user_manage(self, client, admin_key) -> None:
+        response = client.post(
+            "/api/v1/admin/users",
+            json={"username": "grace", "password": PASSWORD, "role": "member"},
+            headers=_headers(admin_key),
+        )
+        assert response.status_code == 201
+        assert response.json()["user"]["role"] == "member"
 
     def test_create_defaults_to_member_role(self, client, admin_key) -> None:
         response = client.post(
@@ -239,12 +279,12 @@ class TestHappyPaths:
         assert any("enabled" in reason for reason in reasons)
 
     def test_role_change_updates_row_and_writes_audit(
-        self, client, admin_key, founder, admin_db
+        self, client, superadmin_key, founder, admin_db
     ) -> None:
         response = client.put(
             "/api/v1/admin/users/founder",
             json={"role": "member"},
-            headers=_headers(admin_key),
+            headers=_headers(superadmin_key),
         )
         assert response.status_code == 200
         assert response.json()["user"]["role"] == "member"
@@ -254,6 +294,34 @@ class TestHappyPaths:
         assert role_rows, "a role change must be audited"
         assert role_rows[0][2:4] == ("admin", "member")
         assert "founder" in role_rows[0][4]
+
+    def test_role_change_by_an_admin_credential_is_403(
+        self, client, admin_key, founder, admin_db
+    ) -> None:
+        """The escalation path this whole change exists to close: a
+        ``user:manage`` key used to be able to write any role into ``users``."""
+        before = session_auth.get_user("founder")["role"]
+        response = client.put(
+            "/api/v1/admin/users/founder",
+            json={"role": "member"},
+            headers=_headers(admin_key),
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"]["error"] == "role_change_requires_superadmin"
+        assert session_auth.get_user("founder")["role"] == before
+        assert not [row for row in _audit_rows(admin_db) if row[1] == "role"]
+
+    def test_disabling_an_admin_account_needs_superadmin(
+        self, client, admin_key, founder
+    ) -> None:
+        response = client.put(
+            "/api/v1/admin/users/founder",
+            json={"enabled": False},
+            headers=_headers(admin_key),
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"]["error"] == "target_requires_superadmin"
+        assert session_auth.get_user("founder")["enabled"] == 1
 
     def test_role_change_unknown_user_is_404(self, client, admin_key) -> None:
         response = client.put(

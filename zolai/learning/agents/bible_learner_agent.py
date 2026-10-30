@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
 from typing import Any, Optional
+
+from zolai.shared.clock import stamp
 
 from ..bible_pattern_learner import get_bible_learner
 from .agent_registry import resolve_agent_config
@@ -86,7 +87,7 @@ class BibleLearnerAgent(BaseAgent):
                 }
                 for p in patterns
             ],
-            "learned_at": datetime.utcnow().isoformat(),
+            "learned_at": stamp(),
         }
 
         # Store in knowledge cache

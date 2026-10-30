@@ -34,13 +34,14 @@ import os
 import secrets
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any
 
 from fastapi import HTTPException, Request
 from sqlalchemy import text
 
 from ..config import config
+from ..shared.clock import now, parse, stamp
 
 logger = logging.getLogger("zolai.api.auth")
 
@@ -233,6 +234,18 @@ def ensure_api_keys_table() -> dict[str, Any]:
     return create_api_keys_table(_get_manager())
 
 
+def ensure_audit_log_table() -> dict[str, Any]:
+    """Idempotently create ``data_audit_log`` on this service's manager.
+
+    Issue/rotate/revoke append audit rows through :func:`record_audit`, which
+    resolves the same manager — so the table must be created on *this* seam,
+    not a sibling service's, or a caller-supplied store gets no audit trail.
+    """
+    from ..data.migrations import create_data_audit_log_table
+
+    return create_data_audit_log_table(_get_manager())
+
+
 # ---------------------------------------------------------------------------
 # Verification cache + throttled bookkeeping
 # ---------------------------------------------------------------------------
@@ -302,18 +315,18 @@ def touch_last_used(record: dict[str, Any]) -> None:
     key_id = record.get("id")
     if key_id is None:
         return
-    now = time.monotonic()
+    now_mono = time.monotonic()
     with _used_lock:
         last = _LAST_USED.get(int(key_id))
-        if last is not None and now - last < LAST_USED_THROTTLE_S:
+        if last is not None and now_mono - last < LAST_USED_THROTTLE_S:
             return
-        _LAST_USED[int(key_id)] = now
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        _LAST_USED[int(key_id)] = now_mono
+    last_used = stamp()
     try:
         with _get_manager().engine.begin() as conn:
             conn.execute(
                 text("UPDATE api_keys SET last_used_at = :stamp WHERE id = :id"),
-                {"stamp": stamp, "id": int(key_id)},
+                {"stamp": last_used, "id": int(key_id)},
             )
     except Exception:
         # Bookkeeping must never fail a request.
@@ -351,8 +364,12 @@ def _lookup_by_hash(key_hash: str) -> dict[str, Any] | None:
     if record.get("revoked_at"):
         return None
     expires_at = record.get("expires_at")
-    if expires_at and str(expires_at) <= datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"):
-        return None
+    if expires_at:
+        try:
+            if parse(str(expires_at)) <= now():
+                return None
+        except ValueError:
+            return None
     return record
 
 
@@ -405,7 +422,7 @@ def record_audit(
 ) -> None:
     """Append an ``api_keys`` event to ``data_audit_log`` (never a secret)."""
     mgr = manager or _get_manager()
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    changed = stamp()
     try:
         with mgr.engine.begin() as conn:
             conn.execute(
@@ -419,7 +436,7 @@ def record_audit(
                     "field": field,
                     "old_value": old_value,
                     "new_value": new_value,
-                    "changed_at": stamp,
+                    "changed_at": changed,
                     "reason": reason,
                 },
             )
@@ -451,9 +468,7 @@ def create_api_key(
     prefix = derive_prefix(plain)
     expires_at = None
     if expires_days:
-        expires_at = (
-            datetime.now(timezone.utc) + timedelta(days=int(expires_days))
-        ).strftime("%Y-%m-%d %H:%M:%S")
+        expires_at = stamp(now() + timedelta(days=int(expires_days)))
     params = {
         "name": name,
         "key_prefix": prefix,
@@ -586,7 +601,7 @@ def rotate_api_key(key_id: int, *, actor: str = "cli") -> dict[str, Any]:
         row = conn.execute(
             text("SELECT * FROM api_keys WHERE key_hash = :h"), {"h": key_hash}
         ).first()
-        revoked_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        revoked_at = stamp()
         conn.execute(
             text("UPDATE api_keys SET revoked_at = :revoked_at WHERE id = :id"),
             {"revoked_at": revoked_at, "id": int(key_id)},
@@ -625,7 +640,7 @@ def revoke_api_key(key_id: int, *, actor: str = "cli") -> dict[str, Any]:
         raise LookupError(f"API key {key_id} not found")
     if record.get("revoked_at"):
         raise ValueError(f"API key {key_id} is already revoked")
-    revoked_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    revoked_at = stamp()
     with _get_manager().engine.begin() as conn:
         conn.execute(
             text("UPDATE api_keys SET revoked_at = :revoked_at WHERE id = :id"),

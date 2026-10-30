@@ -24,9 +24,11 @@ rendered from them (see :mod:`zolai.agent.tools.render`).  Classification:
   (registry-extension §5.7) and was not taken here.
 - **admin extras** — knowledge-base introspection + proposal surfaces:
   ``knowledge_stats``, ``kb_research``, ``review_queue_submit``,
-  ``provider_status`` (names/enabled/model — **never keys**), and the
+  ``provider_status`` (names/enabled/model — **never keys**), the
   ``learning`` write-back channels (``study_record_review``,
-  ``contribute_word``, ``submit_usage_example``)
+  ``contribute_word``, ``submit_usage_example``) and the read-only learning
+  ledger reads (``learning_run_status``, ``learning_version_history``,
+  ``learning_rag_status`` — see :mod:`zolai.agent.tools.learning_runs`).
 - **optional** — ``web_search`` (only when ``ZOLAI_AGENT_WEB_SEARCH=1`` and
   the engine mode allows network; the handler enforces both gates)
 """
@@ -43,6 +45,7 @@ from .learning import (
     LEARNING_SPECS,
     LEARNING_TOOL_NAMES,
 )
+from .learning_runs import LEARNING_RUN_SPECS, LEARNING_RUN_TOOL_NAMES
 from .render import render_many
 from .types import ToolSpec, ToolSpecError
 
@@ -177,13 +180,14 @@ ANONYMOUS_TOOLS: frozenset[str] = frozenset(
     }
 )
 
-#: Admin extras — knowledge-base introspection + proposal surfaces.
+#: Admin extras — knowledge-base introspection + proposal surfaces, plus the
+#: read-only local-learning ledger (runs, versions, vector index).
 ADMIN_TOOLS: tuple[str, ...] = (
     "knowledge_stats",
     "kb_research",
     "review_queue_submit",
     "provider_status",
-)
+) + LEARNING_RUN_TOOL_NAMES
 
 #: Optional network tool (handler-gated on env + engine mode).
 OPTIONAL_TOOLS: tuple[str, ...] = ("web_search",)
@@ -299,6 +303,9 @@ SPECS: dict[str, ToolSpec] = {
     # SM-2 and corpus contribution write-back channels, which are admin-only
     # specs (zolai/agent/tools/learning.py) — the member list stays read-only.
     **LEARNING_SPECS,
+    # Admin-only reads over the local learning cycle — run ledger, knowledge
+    # versions, RAG index state (zolai/agent/tools/learning_runs.py).
+    **LEARNING_RUN_SPECS,
 }
 
 
@@ -400,6 +407,19 @@ def allow_list(scope: str, *, granted: Iterable[str] | None = None) -> frozenset
     return frozenset(kept)
 
 
+#: Role → tool tier.  Three tiers serve four roles: ``superadmin`` earns the
+#: ``admin`` inventory (its extra power is *granting roles*, which is a route
+#: guard, not a tool) and an unknown role earns ``member`` — never a tier that
+#: :func:`allow_list` would raise on, and never the anonymous set for a caller
+#: the server just identified.
+ROLE_TO_TIER: dict[str, str] = {
+    "anonymous": "public",
+    "member": "member",
+    "admin": "admin",
+    "superadmin": "admin",
+}
+
+
 def tool_tier_for_record(record: dict[str, Any] | None) -> str:
     """The tool tier for an auth record, via the **one** role resolver.
 
@@ -412,11 +432,16 @@ def tool_tier_for_record(record: dict[str, Any] | None) -> str:
     A record carrying no readable ``scopes`` list yields ``None`` grants, which
     :func:`allow_list` treats as "no narrowing" — the key stays usable and only
     the tier decides, exactly as before this field existed.
-    """
-    from ...api.rbac import ROLE_ANONYMOUS, role_for  # lazy: no import cycle
 
-    role = role_for(record)
-    return "public" if role == ROLE_ANONYMOUS else role
+    **Roles are four, tool tiers are three, and that is the whole design.**
+    ``superadmin`` is an *authorization* concept — the power to grant roles —
+    not a larger inventory of tools.  It therefore maps onto the ``admin`` set,
+    and :data:`ROLE_TO_TIER` is the only place that mapping is written, so no
+    caller can hand :func:`allow_list` a tier it would raise on.
+    """
+    from ...api.rbac import role_for  # lazy: no import cycle
+
+    return ROLE_TO_TIER.get(role_for(record), "member")
 
 
 def allow_list_for_record(record: dict[str, Any] | None) -> frozenset[str]:

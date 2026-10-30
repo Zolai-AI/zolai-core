@@ -18,10 +18,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
+
+from ..shared.clock import stamp
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +73,6 @@ def ensure_provider_tables() -> dict[str, Any]:
     from ..data.migrations import create_ai_provider_tables
 
     return create_ai_provider_tables(_get_manager())
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _row_dict(row: Any) -> dict[str, Any]:
@@ -219,7 +216,7 @@ def encode_secret_ref(plaintext: str, manager: Any = None) -> str:
 def _audit(catalog_id: str, field: str, old: str | None, new: str | None, reason: str) -> None:
     """Append an ``ai_providers`` event to ``data_audit_log`` (never a secret)."""
     mgr = _get_manager()
-    stamp = _utc_now()
+    now_ts = stamp()
     try:
         with mgr.engine.begin() as conn:
             row = conn.execute(
@@ -239,7 +236,7 @@ def _audit(catalog_id: str, field: str, old: str | None, new: str | None, reason
                     "field": field,
                     "old_value": old,
                     "new_value": new,
-                    "changed_at": stamp,
+                    "changed_at": now_ts,
                     "reason": reason,
                 },
             )
@@ -322,7 +319,7 @@ def upsert_provider(
     if not updates:
         return dict(current)
 
-    updates["updated_at"] = _utc_now()
+    updates["updated_at"] = stamp()
     assignments = ", ".join(f"{k} = :{k}" for k in updates)
     params = {**updates, "cid": catalog_id}
     try:
@@ -359,7 +356,7 @@ def activate_provider(catalog_id: str, manager: Any = None) -> dict[str, Any]:
     mgr = manager or _get_manager()
     if get_provider_row(catalog_id, mgr) is None:
         raise LookupError(f"unknown provider {catalog_id!r}")
-    now = _utc_now()
+    now = stamp()
     with mgr.engine.begin() as conn:
         conn.execute(text("UPDATE ai_providers SET is_active = 0"))
         conn.execute(

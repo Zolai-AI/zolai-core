@@ -19,6 +19,11 @@ is deliberately built so that **API-key auth is not weakened**:
   revoke-sessions) appends a ``data_audit_log`` row with **no secret in it**.
 - Scope sets are strict subsets of the frozen 33-action vocabulary in
   :mod:`zolai.api.auth` — there is no ``*`` wildcard in either set.
+- An account's role is ``member`` / ``admin`` / ``superadmin``, and
+  :func:`set_user_role` is the **only** writer of ``users.role``.  It refuses,
+  before touching the database, a role change by anyone below superadmin, a
+  self-demotion, and the removal of the last enabled superadmin — so the first
+  superadmin can only come from the CLI, which asserts its own rank out loud.
 - argon2 is CPU-bound (~200ms per verify here), so :func:`verify_login` is meant
   to be called from a thread pool by the router, and login is rate limited
   twice (per IP and per username) before any hash work happens.
@@ -37,12 +42,24 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
+
+from ..shared.clock import now as _clock_now
+from ..shared.clock import parse as _clock_parse
+from ..shared.clock import stamp as _clock_stamp
+
+# The role hierarchy belongs to :mod:`zolai.api.rbac` — that is where every
+# route reads it, so importing ``ROLES`` here (rather than re-listing the
+# order) is what keeps "superadmin outranks admin" true in exactly one place.
+# Safe at module level: rbac imports ``auth``, and neither imports this module.
+from .rbac import ROLE_ADMIN, ROLE_SUPERADMIN
+from .rbac import ROLES as _ROLE_ORDER
 
 logger = logging.getLogger("zolai.api.session_auth")
 
@@ -101,26 +118,50 @@ DEFAULT_LOGIN_RATE_LIMIT_USER_RPM = 10
 
 #: Roles a ``users.role`` value may hold.  Unknown values degrade to
 #: ``member`` (never raise — a hand-edited row must not 500 the API).
-VALID_ROLES: frozenset[str] = frozenset({"member", "admin"})
+#: The hierarchy (``anonymous < member < admin < superadmin``) is owned by
+#: :data:`zolai.api.rbac.ROLES`; this is the subset an *account* may hold.
+VALID_ROLES: frozenset[str] = frozenset({"member", "admin", "superadmin"})
 
 #: Scope sets — strict subsets of the frozen 33-action vocabulary in
 #: :mod:`zolai.api.auth` (asserted by tests).  Deliberately no ``*``.
+#:
+#: The set is chosen by one rule, and ``TestTierScopeParity`` in
+#: tests/test_role_hierarchy.py enforces it: **a role holds the action behind
+#: every tool and every REST read its tier advertises.** A per-tool ``scope`` and
+#: a ``require_scope`` action narrow against exactly these lists, so an action no
+#: role holds is a feature only a hand-minted key can reach — a signed-in person
+#: would be weaker than the bot on the same tier.  (That was true of
+#: ``pos:read`` until this task: ``POST /api/v1/linguistics/pos`` and the
+#: member-tier ``pos_tag`` tool were unreachable from any account.)
 MEMBER_SCOPES: tuple[str, ...] = (
     "dataset:read",
     "rag:read",
     "catalog:read",
     "agent:read",
     "agent:run",
+    "pos:read",
 )
+#: What an ``admin`` account holds.  ``role:manage`` is **not** here — granting
+#: a role is a superadmin power, and an admin that can hand out roles is only
+#: one misclick away from being able to hand out ``superadmin``.
+#: ``pipeline:read`` / ``eval:read`` are the two learning-pipeline reads behind
+#: the admin-tier ``learning_run_status`` and ``learning_version_history`` tools.
 ADMIN_EXTRA_SCOPES: tuple[str, ...] = (
     "apikey:manage",
     "settings:read",
     "settings:write",
     "user:manage",
-    "role:manage",
     "audit:read",
+    "dataset:edit",
+    "pos:review",
+    "annotation:review",
+    "quality:read",
+    "pipeline:read",
+    "eval:read",
 )
+SUPERADMIN_EXTRA_SCOPES: tuple[str, ...] = ("role:manage",)
 ADMIN_SCOPES: tuple[str, ...] = MEMBER_SCOPES + ADMIN_EXTRA_SCOPES
+SUPERADMIN_SCOPES: tuple[str, ...] = ADMIN_SCOPES + SUPERADMIN_EXTRA_SCOPES
 
 #: Usernames are 1–64 chars of ``[a-z0-9._-]`` (lowercased) — filesystem-safe,
 #: URL-safe, and unambiguous in logs.
@@ -150,11 +191,6 @@ _CACHE: dict[str, tuple[float, dict[str, Any] | None]] = {}
 _used_lock = threading.Lock()
 #: session id -> monotonic time of the last last_used_at write
 _LAST_USED: dict[int, float] = {}
-
-
-def _stamp(moment: datetime | None = None) -> str:
-    """UTC ``YYYY-MM-DD HH:MM:SS`` stamp — the format every table here uses."""
-    return (moment or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +350,36 @@ def ensure_user_session_tables() -> dict[str, Any]:
     return create_user_session_tables(_get_manager())
 
 
+def ensure_audit_log_table() -> dict[str, Any]:
+    """Idempotently create ``data_audit_log`` — the trail :func:`record_audit` appends to.
+
+    :func:`record_audit` deliberately does not create it: that would put a
+    ``CREATE`` on every audited write, and the DDL has one home
+    (:mod:`zolai.data.migrations`).  The API gets the table from its startup
+    migrations; a **CLI-only flow on a brand-new store** had no such step, so
+    ``zolai user create`` logged ``no such table: data_audit_log``, swallowed it,
+    and dropped the audit row for the very first role — the one entry a later
+    "who bootstrapped this deployment?" question reads.  Callers that write an
+    audited change outside the server call this first.
+    """
+    from ..data.migrations import create_data_audit_log_table
+
+    return create_data_audit_log_table(_get_manager())
+
+
+def ensure_role_request_tables() -> dict[str, Any]:
+    """Idempotently create ``role_requests`` (used by the router on first ask).
+
+    Lives here rather than in ``role_requests_router`` for the same reason
+    :func:`ensure_user_session_tables` does: the DDL has one home
+    (:mod:`zolai.data.migrations`) and every caller — API, CLI, tests — reaches
+    it through the service.
+    """
+    from ..data.migrations import create_role_request_tables
+
+    return create_role_request_tables(_get_manager())
+
+
 # ---------------------------------------------------------------------------
 # Roles + scopes
 # ---------------------------------------------------------------------------
@@ -323,8 +389,12 @@ def role_scopes(role: str | None) -> list[str]:
     """Scope set for a role. Unknown/empty role degrades to ``member``.
 
     Never raises: a hand-edited ``users.role`` must not be able to 500 the API.
+    ``superadmin`` is ``admin`` plus ``role:manage`` — it is a *superset*, so
+    anything an admin can reach a superadmin can reach.
     """
     normalized = str(role or "").strip().lower()
+    if normalized == "superadmin":
+        return list(SUPERADMIN_SCOPES)
     if normalized == "admin":
         return list(ADMIN_SCOPES)
     return list(MEMBER_SCOPES)
@@ -405,7 +475,7 @@ def _touch_last_used(session_id: Any) -> None:
         with _get_manager().engine.begin() as conn:
             conn.execute(
                 text("UPDATE sessions SET last_used_at = :stamp WHERE id = :id"),
-                {"stamp": _stamp(), "id": int(session_id)},
+                {"stamp": _clock_stamp(), "id": int(session_id)},
             )
     except Exception:
         logger.debug("sessions.last_used_at update skipped for session %s", session_id)
@@ -445,7 +515,7 @@ def record_audit(
                     "field": field,
                     "old_value": old_value,
                     "new_value": new_value,
-                    "changed_at": _stamp(),
+                    "changed_at": _clock_stamp(),
                     "reason": reason,
                 },
             )
@@ -559,25 +629,165 @@ def sanitize_users(users: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [sanitize_user(user) for user in users]
 
 
-def set_user_enabled(username: str, *, enabled: bool, actor: str = "cli") -> dict[str, Any]:
-    """Enable/disable an account.
+def _rank(role: str) -> int:
+    """Position in the role hierarchy — :data:`zolai.api.rbac.ROLES` is the one
+    ordering, so nothing here re-invents it."""
+    return _ROLE_ORDER.index(role)
+
+
+def _enabled_superadmin_count(conn: Any) -> int:
+    """How many accounts can actually grant a role right now, on ``conn``.
+
+    Runs inside the caller's transaction, so the last-superadmin check and the
+    ``UPDATE`` cannot be separated by a concurrent write.
+    """
+    return int(
+        conn.execute(
+            text("SELECT COUNT(*) FROM users WHERE role = :role AND enabled = 1"),
+            {"role": ROLE_SUPERADMIN},
+        ).scalar_one()
+    )
+
+
+class RoleGuardRejected(ValueError):
+    """A role/enablement invariant refused the write **before** anything changed.
+
+    Subclasses :class:`ValueError` on purpose: a caller that has not been
+    prepared for it still answers 400 rather than a 500, and either way the
+    database is untouched.  Callers read ``reason`` and map it through
+    :data:`GUARD_STATUS` for the code and :func:`guard_message` for the body.
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+#: Guard ``reason`` → the HTTP status that answers it.  A rank or self
+#: violation is a *permission* answer (403); the last superadmin is a *state*
+#: conflict (409) — the caller could legally do it after promoting someone
+#: else.  Two surfaces refuse with this exception (``admin_users_router`` and
+#: the role-request queue), so the table lives here rather than in either
+#: caller: they must not disagree on what the same violation costs.
+GUARD_STATUS: dict[str, int] = {
+    "role_change_requires_superadmin": 403,
+    "target_requires_superadmin": 403,
+    "self_role_change": 403,
+    "self_disable": 403,
+    "last_superadmin": 409,
+}
+
+#: Guard ``reason`` → the sentence an API caller reads.  Same reasoning as
+#: :data:`GUARD_STATUS`: two HTTP surfaces (``admin_users_router`` and the
+#: role-request queue) refuse these violations, and a body written per-surface
+#: drifts.  Authored here, in prose that names no account, role or actor,
+#: because the exception's own ``str()`` carries those — and an error body is
+#: readable by whoever holds the credential that triggered it, which is not
+#: necessarily the person the sentence is about.  The detailed variant stays on
+#: the exception for logs and the audit row.
+GUARD_MESSAGE: dict[str, str] = {
+    "role_change_requires_superadmin": (
+        "Applying a role needs role:manage, which is the superadmin tier."
+    ),
+    "target_requires_superadmin": (
+        "That account ranks at admin or above, so only a superadmin may change it."
+    ),
+    "self_role_change": (
+        "A superadmin cannot decide their own promotion — a peer must decide it."
+    ),
+    "self_disable": "An account cannot disable itself.",
+    "last_superadmin": (
+        "That account is the only enabled superadmin; promote a second one before removing it."
+    ),
+}
+
+#: The fallback for a reason neither table knows: a future guard must never
+#: answer 200, and must never echo the exception text either.
+GUARD_FALLBACK_MESSAGE = "The role change was refused by an account-integrity guard."
+
+
+def guard_message(reason: str) -> str:
+    """The caller-facing sentence for a guard ``reason``."""
+    return GUARD_MESSAGE.get(reason, GUARD_FALLBACK_MESSAGE)
+
+
+def _checked_actor(
+    actor_role: str, *, actor: str, actor_user_id: int | None
+) -> tuple[str, str, int | None]:
+    """Validate the *caller* half of a guarded write.
+
+    ``actor_role`` is required, not optional: a caller that does not say who it
+    is gets ``TypeError`` at the call site, which is a loud failure, while a
+    default of "superadmin" would be a silent one.  The CLI is the only caller
+    that asserts its own superadmin rank, and it does so out loud.
+    """
+    caller = str(actor_role or "").strip().lower()
+    if caller not in VALID_ROLES:
+        raise ValueError(
+            f"unknown actor role {actor_role!r}; expected one of {sorted(VALID_ROLES)}"
+        )
+    return caller, str(actor or caller or "actor"), actor_user_id
+
+
+def set_user_enabled(
+    username: str,
+    *,
+    enabled: bool,
+    actor: str = "cli",
+    actor_role: str,
+    actor_user_id: int | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Enable/disable an account — the only place that writes ``users.enabled``.
 
     Disabling revokes that user's live sessions in the same transaction, so a
     disabled account cannot keep using a token it already holds.
 
+    Guards, all of them before any ``UPDATE``:
+
+    - an actor below ``superadmin`` may not touch an ``admin`` or ``superadmin``
+      account **in either direction** (they may enable/disable members — that is
+      what ``user:manage`` is for);
+    - nobody disables their **own** account (``actor_user_id``);
+    - the **last enabled superadmin** is not disabled.
+
     Raises:
         LookupError: no such user.
+        RoleGuardRejected: a guard refused; nothing was written.
     """
     name = normalize_username(username)
+    caller, actor_name, actor_uid = _checked_actor(
+        actor_role, actor=actor, actor_user_id=actor_user_id
+    )
     user = get_user(name)
     if user is None:
         raise LookupError(f"user '{name}' not found")
+    target_role = str(user.get("role") or "member").strip().lower()
+    target_id = int(user["id"])
+
+    if _rank(target_role) >= _rank(ROLE_ADMIN) and caller != ROLE_SUPERADMIN:
+        raise RoleGuardRejected(
+            "target_requires_superadmin",
+            f"role '{caller}' may not {'enable' if enabled else 'disable'} an account "
+            f"whose role is '{target_role}'",
+        )
+    if not enabled and actor_uid is not None and actor_uid == target_id:
+        raise RoleGuardRejected(
+            "self_disable", "an account may not disable itself; another admin must"
+        )
+
     flag = 1 if enabled else 0
-    revoked_at = None if enabled else _stamp()
+    revoked_at = None if enabled else _clock_stamp()
     with _get_manager().engine.begin() as conn:
+        if not enabled and target_role == ROLE_SUPERADMIN and user.get("enabled"):
+            if _enabled_superadmin_count(conn) <= 1:
+                raise RoleGuardRejected(
+                    "last_superadmin",
+                    "this is the only enabled superadmin; promote another before disabling it",
+                )
         conn.execute(
             text("UPDATE users SET enabled = :enabled, updated_at = :stamp WHERE id = :id"),
-            {"enabled": flag, "stamp": _stamp(), "id": int(user["id"])},
+            {"enabled": flag, "stamp": _clock_stamp(), "id": target_id},
         )
         if not enabled:
             conn.execute(
@@ -585,62 +795,122 @@ def set_user_enabled(username: str, *, enabled: bool, actor: str = "cli") -> dic
                     "UPDATE sessions SET revoked_at = :stamp "
                     "WHERE user_id = :id AND revoked_at IS NULL"
                 ),
-                {"stamp": revoked_at, "id": int(user["id"])},
+                {"stamp": revoked_at, "id": target_id},
             )
     invalidate_session_cache()
+    detail = f"user {name} {'enabled' if enabled else 'disabled'} by {actor_name} ({caller})"
+    if not enabled:
+        detail += " (live sessions revoked)"
+    if reason:
+        detail += f" — {reason}"
     record_audit(
         table="users",
-        row_id=int(user["id"]),
+        row_id=target_id,
         field="enabled" if enabled else "disabled",
         old_value="1" if user["enabled"] else "0",
         new_value=str(flag),
-        reason=f"user {name} {'enabled' if enabled else 'disabled'} by {actor}"
-        + ("" if enabled else " (live sessions revoked)"),
+        reason=detail,
     )
     updated = get_user(name)
     return updated or {**user, "enabled": flag}
 
 
-def set_user_role(username: str, *, role: str, actor: str = "cli") -> dict[str, Any]:
-    """Change an account's role (``member`` ↔ ``admin``).
+def set_user_role(
+    username: str,
+    *,
+    role: str,
+    actor: str = "cli",
+    actor_role: str,
+    actor_user_id: int | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Change an account's role — **the only writer of ``users.role``**.
+
+    Three rules, checked before any ``UPDATE``, and each of them a
+    :class:`RoleGuardRejected` rather than a partial write:
+
+    1. **only a superadmin changes a role at all** (``role_change_requires_superadmin``).
+       ``user:manage`` creates accounts, resets passwords and disables
+       members; handing out ``admin`` has to be a higher power than that, or
+       every admin key is a route to ``superadmin``;
+    2. **nobody changes their own role** (``self_role_change``) — the guard
+       that stops a session from promoting itself while it holds it;
+    3. **the last enabled superadmin is not demoted** (``last_superadmin``) —
+       counted on the same connection as the write.
+
+    Rank-over-target (an actor may not touch a peer) is enforced where it can
+    bite: :func:`set_user_enabled`, whose admin callers are below superadmin.
+    Here rule 1 already caps the caller at superadmin, and a superadmin
+    promoting a member *to* superadmin must stay possible.
 
     Role is read back from the ``users`` row on every session resolve, so a
-    fresh :func:`reset_session_cache` is enough — no forced logout, but a demoted
-    admin loses admin routes on their very next request.
+    fresh :func:`reset_session_cache` is enough — no forced logout, but a
+    demoted admin loses admin routes on their very next request.
 
     Raises:
         LookupError: no such user.
-        ValueError: unknown role (nothing is written).
+        ValueError: unknown role, or unknown actor role (nothing is written).
+        RoleGuardRejected: a guard refused; nothing was written.
     """
     name = normalize_username(username)
-    user = get_user(name)
-    if user is None:
-        raise LookupError(f"user '{name}' not found")
+    caller, actor_name, actor_uid = _checked_actor(
+        actor_role, actor=actor, actor_user_id=actor_user_id
+    )
     role_value = str(role or "").strip().lower()
     if role_value not in VALID_ROLES:
         raise ValueError(f"unknown role {role!r}; expected one of {sorted(VALID_ROLES)}")
-    old_role = str(user.get("role") or "member")
+    user = get_user(name)
+    if user is None:
+        raise LookupError(f"user '{name}' not found")
+    old_role = str(user.get("role") or "member").strip().lower()
+    target_id = int(user["id"])
+
+    if caller != ROLE_SUPERADMIN:
+        raise RoleGuardRejected(
+            "role_change_requires_superadmin",
+            f"changing a role needs role:manage (superadmin); the caller is '{caller}'",
+        )
+    if actor_uid is not None and actor_uid == target_id:
+        raise RoleGuardRejected(
+            "self_role_change", "an account may not change its own role; another superadmin must"
+        )
+
     if old_role == role_value:
         return user
-    stamp = _stamp()
+    stamp_str = _clock_stamp()
     with _get_manager().engine.begin() as conn:
+        # Only an *enabled* superadmin is an operator, so the count that matters
+        # is the one that can still grant a role.  Demoting a disabled account
+        # stays possible — the CLI is the recovery path for that state.
+        if (
+            old_role == ROLE_SUPERADMIN
+            and user.get("enabled")
+            and _enabled_superadmin_count(conn) <= 1
+        ):
+            raise RoleGuardRejected(
+                "last_superadmin",
+                "this is the only enabled superadmin; promote another before demoting it",
+            )
         conn.execute(
             text("UPDATE users SET role = :role, updated_at = :stamp WHERE id = :id"),
-            {"role": role_value, "stamp": stamp, "id": int(user["id"])},
+            {"role": role_value, "stamp": stamp_str, "id": target_id},
         )
     # Role is embedded in cached session records — drop the whole cache so a
     # demotion takes effect on the next request instead of at TTL expiry.
     reset_session_cache()
+    detail = f"role of {name} '{old_role}' -> '{role_value}' by {actor_name} ({caller})"
+    if reason:
+        detail += f" — {reason}"
     record_audit(
         table="users",
-        row_id=int(user["id"]),
+        row_id=target_id,
         field="role",
         old_value=old_role,
         new_value=role_value,
-        reason=f"role of {name} changed by {actor}",
+        reason=detail,
     )
     updated = get_user(name)
-    return updated or {**user, "role": role_value, "updated_at": stamp}
+    return updated or {**user, "role": role_value, "updated_at": stamp_str}
 
 
 def change_password(username: str, password: str, *, actor: str = "cli") -> dict[str, Any]:
@@ -657,7 +927,7 @@ def change_password(username: str, password: str, *, actor: str = "cli") -> dict
     if user is None:
         raise LookupError(f"user '{name}' not found")
     digest = hash_password(password)
-    revoked_at = _stamp()
+    revoked_at = _clock_stamp()
     with _get_manager().engine.begin() as conn:
         conn.execute(
             text(
@@ -693,7 +963,7 @@ def revoke_user_sessions(username: str, *, actor: str = "cli") -> dict[str, Any]
     user = get_user(name)
     if user is None:
         raise LookupError(f"user '{name}' not found")
-    revoked_at = _stamp()
+    revoked_at = _clock_stamp()
     with _get_manager().engine.begin() as conn:
         result = conn.execute(
             text(
@@ -730,6 +1000,199 @@ def list_user_sessions(username: str) -> list[dict[str, Any]]:
             {"id": int(user["id"])},
         ).fetchall()
     return [dict(row._mapping) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Role requests — ask now, a superadmin decides later
+# ---------------------------------------------------------------------------
+#
+# The queue exists because promotion is a decision made *about* an account, not
+# a thing an account does to itself: :func:`set_user_role` refuses a
+# self-role-change on purpose.  So the ask is stored, and a superadmin applies
+# it **through that same writer** — this module never writes ``users.role``
+# anywhere else, and the request row is only ever a record of what was asked.
+
+#: Roles an account may ask for.  ``member`` is deliberately absent: every
+#: account is created there, so asking for it is a no-op rather than a request.
+REQUESTABLE_ROLES: tuple[str, ...] = (ROLE_ADMIN, ROLE_SUPERADMIN)
+
+#: The ``role_requests.status`` domain (mirrors the table's CHECK constraint).
+ROLE_REQUEST_STATUSES: frozenset[str] = frozenset({"pending", "approved", "rejected"})
+
+_ROLE_REQUEST_COLUMNS = (
+    "id, user_id, username, requested_role, reason, status, "
+    "created_at, decided_by, decided_at, note"
+)
+
+
+@dataclass(slots=True)
+class DuplicateRoleRequest(Exception):
+    """A pending ask for that role already exists — the partial unique index spoke."""
+
+    username: str = field(default="", repr=False)
+    requested_role: str = ""
+
+    def __str__(self) -> str:
+        return f"duplicate_pending:{self.requested_role}"
+
+
+@dataclass(slots=True)
+class RoleRequestDecided(Exception):
+    """The request was already approved or rejected; nothing changed."""
+
+    request_id: int = 0
+    status: str = ""
+
+    def __str__(self) -> str:
+        return f"already_decided:{self.status}"
+
+
+def create_role_request(
+    *,
+    user_id: int,
+    username: str,
+    requested_role: str,
+    reason: str,
+) -> dict[str, Any]:
+    """Record a pending role ask.  Returns the new row.
+
+    Raises:
+        ValueError: an unknown requested role (never stored — the CHECK would
+            reject it anyway, but the caller deserves the sentence now).
+        DuplicateRoleRequest: this account already has a pending ask for the
+            same role.
+    """
+    role_value = str(requested_role or "").strip().lower()
+    if role_value not in REQUESTABLE_ROLES:
+        raise ValueError(
+            f"role {requested_role!r} cannot be requested; expected one of {list(REQUESTABLE_ROLES)}"
+        )
+    name = normalize_username(username)
+    row = {
+        "user_id": int(user_id),
+        "username": name,
+        "requested_role": role_value,
+        "reason": str(reason or "").strip()[:1000],
+        "created_at": _clock_stamp(),
+    }
+    try:
+        with _get_manager().engine.begin() as conn:
+            result = conn.execute(
+                text(
+                    "INSERT INTO role_requests "
+                    "(user_id, username, requested_role, reason, status, created_at) "
+                    "VALUES (:user_id, :username, :requested_role, :reason, 'pending', :created_at)"
+                ),
+                row,
+            )
+            new_id = int(result.lastrowid or 0)
+    except IntegrityError as exc:
+        # The only constraint this INSERT can trip is ux_role_requests_pending.
+        logger.info("role request refused as duplicate: user=%s role=%s", name, role_value)
+        raise DuplicateRoleRequest(username=name, requested_role=role_value) from exc
+    return {**row, "id": new_id, "status": "pending", "decided_by": None, "decided_at": None, "note": None}
+
+
+def get_role_request(request_id: int) -> dict[str, Any] | None:
+    """One request by id, or ``None``."""
+    with _get_manager().engine.connect() as conn:
+        row = conn.execute(
+            text(f"SELECT {_ROLE_REQUEST_COLUMNS} FROM role_requests WHERE id = :id"),
+            {"id": int(request_id)},
+        ).first()
+    return dict(row._mapping) if row is not None else None
+
+
+def list_role_requests(
+    *,
+    user_id: int | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Newest-first page of requests, optionally one account's own.
+
+    ``user_id`` is the privacy control, not a nicety: passing it means the
+    caller may only ever see its own rows, whichever route calls this.
+    """
+    where: list[str] = []
+    params: dict[str, Any] = {"limit": max(1, int(limit))}
+    if user_id is not None:
+        where.append("user_id = :user_id")
+        params["user_id"] = int(user_id)
+    if status is not None:
+        where.append("status = :status")
+        params["status"] = str(status)
+    sql = f"SELECT {_ROLE_REQUEST_COLUMNS} FROM role_requests"
+    if where:
+        sql += f" WHERE {' AND '.join(where)}"
+    sql += " ORDER BY id DESC LIMIT :limit"
+    with _get_manager().engine.connect() as conn:
+        rows = conn.execute(text(sql), params).fetchall()
+    return [dict(row._mapping) for row in rows]
+
+
+def decide_role_request(
+    request_id: int,
+    *,
+    approve: bool,
+    decided_by: str,
+    note: str | None = None,
+) -> dict[str, Any]:
+    """Move a pending request to ``approved`` / ``rejected`` and audit it.
+
+    **Does not change any role.**  Approval applies the role through
+    :func:`set_user_role` — the only writer — so an approval inherits every
+    guard there (no self-change, no last-superadmin removal) instead of
+    re-implementing them, and a refusal from that writer leaves this row
+    ``pending`` for the operator to read.
+
+    The status flip is conditional on ``status = 'pending'``, so two
+    simultaneous decisions cannot both land: the loser raises
+    :class:`RoleRequestDecided`.
+
+    Raises:
+        LookupError: no such request.
+        RoleRequestDecided: already approved or rejected.
+    """
+    target = get_role_request(request_id)
+    if target is None:
+        raise LookupError(f"role request {request_id} not found")
+    if target.get("status") != "pending":
+        raise RoleRequestDecided(request_id=int(request_id), status=str(target.get("status")))
+
+    new_status = "approved" if approve else "rejected"
+    stamp_str = _clock_stamp()
+    with _get_manager().engine.begin() as conn:
+        result = conn.execute(
+            text(
+                "UPDATE role_requests SET status = :status, decided_by = :decided_by, "
+                "decided_at = :decided_at, note = :note "
+                "WHERE id = :id AND status = 'pending'"
+            ),
+            {
+                "status": new_status,
+                "decided_by": str(decided_by or "")[:120],
+                "decided_at": stamp_str,
+                "note": (str(note).strip()[:1000] if note else None),
+                "id": int(request_id),
+            },
+        )
+        if int(result.rowcount or 0) == 0:
+            raise RoleRequestDecided(request_id=int(request_id), status=new_status)
+    record_audit(
+        table="role_requests",
+        row_id=int(request_id),
+        field="status",
+        old_value="pending",
+        new_value=new_status,
+        reason=(
+            f"role request #{int(request_id)} for {target.get('username')} "
+            f"('{target.get('requested_role')}') {new_status} by {decided_by}"
+            + (f" — {str(note).strip()[:200]}" if note else "")
+        ),
+    )
+    decided = get_role_request(request_id)
+    return decided if decided is not None else {**target, "status": new_status}
 
 
 # ---------------------------------------------------------------------------
@@ -796,7 +1259,7 @@ def login(
     with _get_manager().engine.begin() as conn:
         conn.execute(
             text("UPDATE users SET last_login = :stamp WHERE id = :id"),
-            {"stamp": _stamp(), "id": int(user["id"])},
+            {"stamp": _clock_stamp(), "id": int(user["id"])},
         )
     record_audit(
         table="sessions",
@@ -829,7 +1292,7 @@ def issue_session(user_id: int, *, ip: str | None = None) -> dict[str, Any]:
     token = generate_session_token()
     token_hash = hash_token(token)
     ttl_hours = session_ttl_hours()
-    expires_at = _stamp(datetime.now(timezone.utc) + timedelta(hours=ttl_hours))
+    expires_at = _clock_stamp(_clock_now() + timedelta(hours=ttl_hours))
     with _get_manager().engine.begin() as conn:
         conn.execute(
             text(
@@ -867,7 +1330,7 @@ def revoke_session(token: str | None, *, actor: str = "api") -> bool:
     if not token:
         return False
     token_hash = hash_token(token)
-    revoked_at = _stamp()
+    revoked_at = _clock_stamp()
     with _get_manager().engine.begin() as conn:
         result = conn.execute(
             text("UPDATE sessions SET revoked_at = :stamp WHERE token_hash = :h AND revoked_at IS NULL"),
@@ -915,7 +1378,7 @@ def _lookup_session(token_hash: str) -> dict[str, Any] | None:
     found = dict(row._mapping)
     if found.get("revoked_at"):
         return None
-    if str(found.get("session_expires_at") or "") <= _stamp():
+    if str(found.get("session_expires_at") or "") and _clock_parse(str(found["session_expires_at"])) <= _clock_now():
         return None
     # A disabled account's sessions were revoked at disable time; this covers
     # the case where ``users.enabled`` was flipped by hand afterwards.

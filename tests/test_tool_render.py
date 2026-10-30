@@ -173,12 +173,12 @@ class TestMcpShape:
         }
 
     def test_scope_tool_counts(self) -> None:
-        # anon 8 / member 31 / admin 39 — the counts the MCP surface publishes.
+        # anon 8 / member 31 / admin 42 — the counts the MCP surface publishes.
         # The public tier is unchanged; member carries the B1a language tools and
-        # the learning reads; admin adds the learning write-back channels.
+        # the learning reads; admin adds the learning write-back + ledger reads.
         assert len(mcp_tools(allow_list("public"))) == 8
         assert len(mcp_tools(allow_list("member"))) == 31
-        assert len(mcp_tools(allow_list("admin"))) == 39
+        assert len(mcp_tools(allow_list("admin"))) == 42
 
     def test_rendered_strings_are_plain(self) -> None:
         payload = json.dumps(registry_mod.mcp_tools(names_for("admin")), ensure_ascii=False)

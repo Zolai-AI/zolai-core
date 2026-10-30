@@ -7,18 +7,15 @@ judgment is expressed via ``KnowledgeStatus``.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any, Sequence
 
 from pydantic import Field
 
+from zolai.shared.clock import stamp
+
 from .base import KnowledgeContract, KnowledgeStatus, confidence_from_evidence
 
 __all__ = ["KnowledgeClaim"]
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class KnowledgeClaim(KnowledgeContract):
@@ -39,8 +36,8 @@ class KnowledgeClaim(KnowledgeContract):
     source_ids: list[int] = Field(default_factory=list, description="provenance.id source links")
     notes: str = ""
     version: int = Field(default=1, ge=1)
-    created_at: str = Field(default_factory=_now)
-    updated_at: str = Field(default_factory=_now)
+    created_at: str = Field(default_factory=stamp)
+    updated_at: str = Field(default_factory=stamp)
 
     @classmethod
     def from_evidence(

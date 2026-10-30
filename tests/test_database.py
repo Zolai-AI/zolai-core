@@ -719,3 +719,43 @@ class TestPostgresAutoDetect:
             assert mgr._db_url.startswith("sqlite")
         finally:
             db_mod._manager = None
+
+
+class TestMetadataIsolation:
+    """Reflection into the global ``Base.metadata`` leaked schema into new DBs.
+
+    ``BaseRepository.table`` / ``audit_table_obj`` used to pass ``Base.metadata``
+    to ``Table(..., autoload_with=engine)``. Every reflected table is then
+    registered in the shared global MetaData, so a later ``init_db()`` on an
+    unrelated store created those foreign tables too — failing order-dependent
+    tests and silently widening fresh databases.
+    """
+
+    def test_reflection_does_not_leak_tables_into_init_db(self, tmp_path: Path) -> None:
+        from zolai.data.models import Base
+        from zolai.data.repositories.base import BaseRepository
+
+        src = DatabaseManager(f"sqlite:///{tmp_path / 'source.db'}")
+        with src.engine.begin() as conn:
+            conn.exec_driver_sql("CREATE TABLE foreign_probe (id INTEGER PRIMARY KEY, value TEXT)")
+            conn.exec_driver_sql("CREATE TABLE data_audit_log (id INTEGER PRIMARY KEY)")
+
+        repo = BaseRepository(src.engine, "foreign_probe")
+        assert repo.table is not None
+        assert repo.audit_table_obj is not None
+        src.dispose()
+
+        # ``data_audit_log`` is a real ORM model, so only the foreign table
+        # proves whether reflection leaked into the shared global MetaData.
+        assert "foreign_probe" not in Base.metadata.tables
+
+        fresh = DatabaseManager(f"sqlite:///{tmp_path / 'fresh.db'}")
+        fresh.init_db()
+        with fresh.engine.connect() as conn:
+            names = set(
+                conn.exec_driver_sql("SELECT name FROM sqlite_master WHERE type='table'").scalars()
+            )
+        fresh.dispose()
+
+        assert "foreign_probe" not in names
+        assert "dictionary" in names

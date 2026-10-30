@@ -21,6 +21,8 @@ from typing import Any, Optional
 
 from sqlalchemy.engine import Engine
 
+from zolai.shared.clock import now, stamp
+
 from ...data.repositories import get_engine, get_repositories
 from ...rag.retrieve import UnifiedRetriever
 from ..bible_pattern_learner import get_bible_learner
@@ -84,7 +86,7 @@ class AgentMessage:
     message_type: str = "discussion"  # discussion, task, result, question, consensus
     content: str = ""
     metadata: dict = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=now)
     reply_to: Optional[str] = None
 
 
@@ -96,7 +98,7 @@ class DiscussionContext:
     messages: list[AgentMessage] = field(default_factory=list)
     consensus: Optional[str] = None
     status: str = "active"  # active, concluded, archived
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=now)
 
 
 class BaseAgent(ABC):
@@ -230,7 +232,7 @@ class BaseAgent(ABC):
             "topic": topic,
             "bible_context": bible_context,
             "pattern_context": pattern_context,
-            "learned_at": datetime.utcnow().isoformat(),
+            "learned_at": stamp(),
             "source": "bible",
         }
 
@@ -253,7 +255,7 @@ class BaseAgent(ABC):
         return {
             "source_text": text,
             "bible_contexts": contexts,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": stamp()
         }
 
     async def validate_with_bible(self, translation: str, source_text: str) -> dict[str, Any]:

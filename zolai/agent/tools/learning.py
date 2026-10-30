@@ -239,14 +239,13 @@ def _insert_contribution(
     """One insert into the same ``contributions`` table + caps the REST twin
     uses — mirrors ``contributions_router.submit_contribution`` byte-for-byte
     on column order and the 'pending' status."""
-    from datetime import datetime, timezone
-
     from ...api.contributions_router import ensure_contributions_table
     from ...data.database import get_manager
+    from ...shared.clock import stamp
 
     ensure_contributions_table()
     mgr = get_manager()
-    created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    created_at = stamp()
     with mgr.engine.begin() as conn:
         cursor = conn.exec_driver_sql(
             """

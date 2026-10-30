@@ -4,12 +4,14 @@
 #
 # Requires PANEL_PASSWORD in the environment — the 3x-ui panel password is a
 # credential and must never be committed (this script previously embedded one).
+# PANEL_USER defaults to a generic name; pass your own login in the environment
+# rather than hardcoding it, since the username is half of that credential.
 set -e
 
 VPS_IP="${1:?Usage: $0 <vps-ip> <key.pem> <region>}"
 KEY="${2:?Usage: $0 <vps-ip> <key.pem> <region>}"
 REGION="${3:?Usage: $0 <vps-ip> <key.pem> <region>}"   # e.g. us-1, sgp-1, jp-1
-PANEL_USER="${PANEL_USER:-peterlianpi}"
+PANEL_USER="${PANEL_USER:-admin}"
 PANEL_PASSWORD="${PANEL_PASSWORD:?Set PANEL_PASSWORD (3x-ui panel password)}"
 
 CF_TOKEN="${CLOUDFLARE_API_TOKEN:?Set your Cloudflare API token}"

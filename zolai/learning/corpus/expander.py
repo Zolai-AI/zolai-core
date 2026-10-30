@@ -13,10 +13,11 @@ import logging
 import re
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+
+from zolai.shared.clock import stamp
 
 from ...data.repositories import get_engine
 
@@ -246,7 +247,7 @@ class ParallelCorpusBuilder:
         if not pairs:
             return 0
 
-        now = datetime.utcnow().isoformat()
+        now = stamp()
         rows = []
         for seq, pair in enumerate(pairs):
             ref = pair.get("ref") or ""
@@ -475,7 +476,7 @@ class BibleCorpusExpander:
         if not expansions:
             return 0
 
-        now = datetime.utcnow().isoformat()
+        now = stamp()
         rows = [
             {
                 "ref": e.ref,
@@ -516,7 +517,7 @@ class BibleCorpusExpander:
                 {
                     "run_key": run_key,
                     "stats": json.dumps(stats, ensure_ascii=False, sort_keys=True),
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": stamp(),
                 },
             )
 

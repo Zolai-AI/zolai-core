@@ -17,6 +17,9 @@ class DatasetSpec:
     repo_id: str
     repo_type: str  # "dataset" or "model"
     local_dir: Path
+    #: Branch, tag or commit SHA. Pinned revisions make a pull reproducible;
+    #: "main" means whatever the hub serves today.
+    revision: str = "main"
 
 
 DATASETS: dict[str, DatasetSpec] = {
@@ -78,7 +81,7 @@ def list_datasets() -> int:
     return 0
 
 
-def pull_one(name: str) -> int:
+def pull_one(name: str, revision: str | None = None) -> int:
     if name not in DATASETS:
         print(f"Unknown dataset: {name}", file=sys.stderr)
         print("Use --list to see known datasets.", file=sys.stderr)
@@ -88,22 +91,24 @@ def pull_one(name: str) -> int:
     from huggingface_hub import snapshot_download
 
     spec = DATASETS[name]
+    ref = revision or spec.revision
     spec.local_dir.mkdir(parents=True, exist_ok=True)
 
     # `snapshot_download` will reuse cache when possible.
     snapshot_download(
         repo_id=spec.repo_id,
         repo_type=spec.repo_type,
+        revision=ref,
         local_dir=str(spec.local_dir),
     )
-    print(f"Pulled {spec.repo_id} -> {spec.local_dir}")
+    print(f"Pulled {spec.repo_id}@{ref} -> {spec.local_dir}")
     return 0
 
 
-def pull_all() -> int:
+def pull_all(revision: str | None = None) -> int:
     rc = 0
     for name in sorted(DATASETS.keys()):
-        rc = max(rc, pull_one(name))
+        rc = max(rc, pull_one(name, revision))
     return rc
 
 
@@ -112,14 +117,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("name", nargs="?", help="Dataset name (use --list).")
     p.add_argument("--list", action="store_true", help="List known datasets.")
     p.add_argument("--all", action="store_true", help="Pull all known datasets (large).")
+    p.add_argument(
+        "--revision",
+        default=None,
+        help="Branch, tag or commit SHA to pull (default: each spec's revision, 'main').",
+    )
     args = p.parse_args(argv)
 
     if args.list:
         return list_datasets()
     if args.all:
-        return pull_all()
+        return pull_all(args.revision)
     if args.name:
-        return pull_one(args.name)
+        return pull_one(args.name, args.revision)
 
     p.print_help()
     return 2

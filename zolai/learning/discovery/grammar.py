@@ -90,6 +90,17 @@ PHENOMENA_SPECS: list[dict[str, Any]] = [
 ]
 
 
+def _phenomenon_id(ptype: str, marker: str) -> str:
+    """Stable id per (phenomenon type, marker).
+
+    The id used to end in ``abs(hash(text)) % 100000``; ``hash()`` of a string is
+    salted per process, so a re-run never matched the existence check in
+    ``_write_grammar_phenomenon`` and inserted another copy of the same pattern
+    (and another ``foundation_evidence`` row) — 10 per run on the live DB.
+    """
+    return f"disc_g_{ptype}_{marker.replace(' ', '_')}"
+
+
 def _extract_phenomena_from_text(
     text: str,
     ref: str,
@@ -99,6 +110,9 @@ def _extract_phenomena_from_text(
     """Extract all matching phenomena from a Zolai text."""
     phenomena: list[GrammarPhenomenon] = []
     lower = text.lower()
+    # One extraction per verse, not one per matching marker (a verse can hit
+    # six or more specs and _extract_components tokenizes the whole sentence).
+    base_components = learner._extract_components(text)
 
     for spec in PHENOMENA_SPECS:
         ptype = spec["type"]
@@ -108,11 +122,11 @@ def _extract_phenomena_from_text(
                 pattern_match = re.search(rf".{{0,30}}{re.escape(marker)}.{{0,30}}", text)
                 context = pattern_match.group(0) if pattern_match else text[:100]
 
-                phenomenon_id = f"disc_g_{ptype}_{marker.replace(' ', '_')}_{abs(hash(text)) % 100000}"
+                phenomenon_id = _phenomenon_id(ptype, marker)
                 normalized = f"{ptype}:{marker}"
 
                 # Components: use learner's extraction + marker position
-                components = learner._extract_components(text)
+                components = dict(base_components)
                 components["phenomenon_marker"] = marker
                 components["phenomenon_type"] = ptype
                 components["context"] = context
@@ -192,8 +206,12 @@ def _write_grammar_phenomenon(
     phenomenon: GrammarPhenomenon,
     source_name: str,
     dry_run: bool = False,
-) -> tuple[int, list[int]]:
-    """Write one grammar phenomenon to grammar_patterns."""
+) -> tuple[int, list[int], bool]:
+    """Write one grammar phenomenon to grammar_patterns.
+
+    Returns ``(row_id, evidence_ids, created)``. ``created`` is false when the
+    pattern was already present, so callers can report real writes.
+    """
     from zolai.data.repositories.grammar import GrammarRepository
 
     repo = GrammarRepository(engine)
@@ -203,7 +221,7 @@ def _write_grammar_phenomenon(
     # Check if already exists
     existing = repo.get_by_pattern_id(phenomenon_id)
     if existing:
-        return (existing["id"], [])
+        return (existing["id"], [], False)
 
     # Evidence row
     evidence_rows = [{
@@ -235,16 +253,10 @@ def _write_grammar_phenomenon(
     status = require_discovery_status("OBSERVED").value
 
     if not dry_run:
-        upsert_evidence_bulk(engine, evidence_rows)
-        with engine.connect() as conn:
-            ev_row = conn.execute(
-                text(
-                    "SELECT id FROM foundation_evidence "
-                    "WHERE fact_type = 'grammar' AND fact_key = :fk AND source = :src"
-                ),
-                {"fk": f"pattern:{phenomenon_id}", "src": source_name},
-            ).first()
-        evidence_ids = [ev_row[0]] if ev_row else []
+        # Use the ids the upsert returns: re-querying by fact_key used the
+        # un-normalised "pattern:…" form while the row stores "grammar:pattern:…",
+        # so every discovery pattern was written with evidence_ids = [].
+        evidence_ids = upsert_evidence_bulk(engine, evidence_rows)
 
         with engine.begin() as conn:
             conn.execute(
@@ -272,7 +284,7 @@ def _write_grammar_phenomenon(
     else:
         evidence_ids = []
 
-    return (0, evidence_ids)
+    return (0, evidence_ids, True)
 
 
 def build_grammar_hypotheses(
@@ -289,19 +301,25 @@ def build_grammar_hypotheses(
         all_phenomena = all_phenomena[:limit]
 
     patterns_written = 0
+    already_present = 0
+    processed = 0
     status_counts: dict[str, int] = {"OBSERVED": 0, "CANDIDATE": 0}
     skipped = 0
 
     for phenomenon in all_phenomena:
-        if patterns_written >= GRAMMAR_CAP:
+        if processed >= GRAMMAR_CAP:
             break
+        processed += 1
 
         source_name = "bible_verses" if not phenomenon.ref.startswith("translation") else "translations"
 
         try:
-            _write_grammar_phenomenon(engine, phenomenon, source_name, dry_run)
-            patterns_written += 1
-            status_counts["OBSERVED"] += 1
+            _, _, created = _write_grammar_phenomenon(engine, phenomenon, source_name, dry_run)
+            if created:
+                patterns_written += 1
+                status_counts["OBSERVED"] += 1
+            else:
+                already_present += 1
         except Exception as exc:
             log.warning("Failed to write phenomenon %s: %s", phenomenon.phenomenon_id, exc)
             skipped += 1
@@ -309,10 +327,11 @@ def build_grammar_hypotheses(
     return {
         "capability": "grammar",
         "patterns_written": patterns_written,
+        "already_present": already_present,
         "status_counts": status_counts,
         "skipped": skipped,
         "candidates_considered": len(all_phenomena),
-            "phenomena_found": patterns_written,
+        "phenomena_found": patterns_written,
     }
 class GrammarDiscovery:
     """Wrapper class for grammar discovery matching test expectations."""
@@ -321,7 +340,6 @@ class GrammarDiscovery:
         self.engine = engine
         self.limit = limit
 
-    def run(self, conn=None):
-        from .grammar import build_grammar_hypotheses
+    def run(self):
         return build_grammar_hypotheses(self.engine, limit=self.limit)
 

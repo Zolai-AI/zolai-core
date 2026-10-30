@@ -3,20 +3,45 @@
 Prepare Master Dataset for LLM Training
 Generates training-ready formats and statistics
 Run: python3 prepare_for_training.py
+
+The manifest describes files that actually exist: every declared split is
+counted and hashed, and a missing split fails the run instead of reporting a
+fabricated ``PASSED``.
 """
+import hashlib
 import json
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
-DATA = Path(__file__).parent / "data"
+DATA = Path(__file__).resolve().parents[2] / "data"
 TRAIN_FILE = DATA / "training/master_train_complete.jsonl"
 LOG = DATA / "training/prepare_training.log"
+
+
+def split_facts(path: Path) -> dict:
+    """Row count + sha256 of a split file, or ``exists: False``."""
+    if not path.exists():
+        return {"exists": False}
+    digest = hashlib.sha256()
+    rows = 0
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+            rows += chunk.count(b"\n")
+    return {
+        "exists": True,
+        "records": rows,
+        "bytes": path.stat().st_size,
+        "sha256": digest.hexdigest(),
+    }
 
 def log(msg):
     print(msg, flush=True)
     with open(LOG, "a") as f:
         f.write(msg + "\n")
 
+LOG.parent.mkdir(parents=True, exist_ok=True)
 LOG.write_text("")
 log("\n" + "="*80)
 log("PREPARING DATASET FOR TRAINING")
@@ -82,6 +107,10 @@ except Exception as e:
 
 stats["avg_length"] = stats["total_chars"] / stats["total_records"] if stats["total_records"] > 0 else 0
 
+if stats["total_records"] == 0:
+    log(f"ERROR: {TRAIN_FILE} is missing or empty — refusing to write a manifest")
+    raise SystemExit(1)
+
 log(f"Total records: {stats['total_records']:,}")
 log(f"Total characters: {stats['total_chars']:,}")
 log(f"Estimated tokens: {stats['total_tokens_est']:,}")
@@ -104,7 +133,8 @@ log("\n[2/3] CREATING TRAINING MANIFEST...\n")
 manifest = {
     "dataset_name": "Zolai Master Dataset - Complete",
     "version": "1.0",
-    "generated_at": str(Path(LOG).stat().st_mtime),
+    "generated_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    "input": {"path": TRAIN_FILE.name, **split_facts(TRAIN_FILE)},
     "statistics": {
         "total_records": stats["total_records"],
         "total_characters": stats["total_chars"],
@@ -116,14 +146,9 @@ manifest = {
     "format_distribution": dict(stats["format_types"]),
     "top_sources": dict(stats["sources"].most_common(10)),
     "files": {
-        "train": "master_train_complete.jsonl",
-        "val": "master_val_complete.jsonl",
-        "test": "master_test_complete.jsonl",
-    },
-    "quality": {
-        "validation_status": "PASSED",
-        "valid_records_pct": 100.0,
-        "ready_for_training": True,
+        "train": split_facts(DATA / "training/master_train_complete.jsonl"),
+        "val": split_facts(DATA / "training/master_val_complete.jsonl"),
+        "test": split_facts(DATA / "training/master_test_complete.jsonl"),
     },
     "recommendations": [
         "Use master_train_complete.jsonl for training",
@@ -135,11 +160,23 @@ manifest = {
     ]
 }
 
+# Quality is derived, never asserted: a split that is absent or empty makes the
+# dataset not-ready and fails the run.
+missing = [name for name, facts in manifest["files"].items() if not facts.get("records")]
+manifest["quality"] = {
+    "validation_status": "FAILED" if missing else "PASSED",
+    "missing_splits": missing,
+    "ready_for_training": not missing,
+}
+
 manifest_file = DATA / "training/training_manifest.json"
 with open(manifest_file, "w") as f:
     json.dump(manifest, f, indent=2)
 
 log(f"✓ Created: {manifest_file.name}")
+if missing:
+    log(f"ERROR: missing or empty splits: {', '.join(missing)}")
+    raise SystemExit(1)
 
 # Stage 3: Sample records
 log("\n[3/3] SAMPLE RECORDS...\n")

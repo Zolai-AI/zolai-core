@@ -32,11 +32,14 @@ _ROW = {
 
 
 class _Response:
-    def __init__(self, status: int = 200, payload: dict | None = None) -> None:
+    def __init__(
+        self, status: int = 200, payload: dict | None = None, headers: dict | None = None
+    ) -> None:
         self.status_code = status
         self._payload = payload if payload is not None else {
             "choices": [{"message": {"content": "ok"}}]
         }
+        self.headers = headers or {}
         import json as _json
 
         self.text = _json.dumps(self._payload)
@@ -58,6 +61,16 @@ class _Recorder:
         if self.error is not None:
             raise self.error
         return self.response
+
+
+@pytest.fixture(autouse=True)
+def single_attempt(monkeypatch) -> None:
+    """Pin one attempt so exact ``_post`` call counts stay meaningful.
+
+    The retry loop is exercised by :class:`TestTransientRetry`, which re-enables
+    multiple attempts explicitly.
+    """
+    monkeypatch.setattr(adapter_mod, "LLM_RETRY_ATTEMPTS", 1)
 
 
 @pytest.fixture()
@@ -279,3 +292,86 @@ class TestBreakerSeesProviderHealth:
         stats = breaker.get_stats()
         assert stats["failures"] == 0
         assert stats["state"] == "closed"
+
+
+# ── 5. Transient errors are retried, inside the breaker call ─────────────────
+
+
+class _Sequence:
+    """Stand-in transport answering with a scripted series (then repeating the last)."""
+
+    def __init__(self, outcomes: list) -> None:
+        self.outcomes = outcomes
+        self.calls: list[dict] = []
+
+    def __call__(self, url, *, body, headers, timeout):  # noqa: ANN001
+        self.calls.append({"url": url, "body": body, "headers": headers, "timeout": timeout})
+        outcome = self.outcomes[min(len(self.calls) - 1, len(self.outcomes) - 1)]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+@pytest.fixture()
+def slept(monkeypatch) -> list[float]:
+    delays: list[float] = []
+    monkeypatch.setattr(adapter_mod, "_sleep", delays.append)
+    return delays
+
+
+class TestTransientRetry:
+    """429/5xx and transport errors retry with backoff; the breaker sees one outcome."""
+
+    def test_429_then_success_returns_the_second_answer(
+        self, monkeypatch, slept: list[float]
+    ) -> None:
+        monkeypatch.setattr(adapter_mod, "LLM_RETRY_ATTEMPTS", 3)
+        seq = _Sequence(
+            [
+                _Response(status=429, payload={"error": "slow down"}),
+                _Response(payload={"choices": [{"message": {"content": "second"}}]}),
+            ]
+        )
+        monkeypatch.setattr(adapter_mod, "_post", seq)
+        out = adapter_mod.chat(_ROW, "test-model", [{"role": "user", "content": "hi"}])
+        assert out["status"] == 200
+        assert out["text"] == "second"
+        assert len(seq.calls) == 2
+        assert len(slept) == 1
+
+    def test_transport_error_then_success_returns_the_second_answer(
+        self, monkeypatch, slept: list[float]
+    ) -> None:
+        monkeypatch.setattr(adapter_mod, "LLM_RETRY_ATTEMPTS", 3)
+        seq = _Sequence([httpx.ConnectError("reset"), _Response()])
+        monkeypatch.setattr(adapter_mod, "_post", seq)
+        out = adapter_mod.chat(_ROW, "test-model", [{"role": "user", "content": "hi"}])
+        assert out["status"] == 200
+        assert len(seq.calls) == 2
+        assert len(slept) == 1
+
+    def test_persistent_503_fails_after_the_attempt_budget_and_scores_once(
+        self, breaker, monkeypatch, slept: list[float]
+    ) -> None:
+        monkeypatch.setattr(adapter_mod, "LLM_RETRY_ATTEMPTS", 2)
+        seq = _Sequence([_Response(status=503, payload={"error": "down"})])
+        monkeypatch.setattr(adapter_mod, "_post", seq)
+        with pytest.raises(adapter_mod.ProviderError) as exc:
+            adapter_mod.chat(_ROW, "test-model", [{"role": "user", "content": "hi"}])
+        assert "503" in exc.value.message
+        assert len(seq.calls) == 2
+        assert len(slept) == 1
+        # Retries happen inside the breaker call: one logical failure, not two.
+        assert breaker.get_stats()["failures"] == 1
+
+    def test_retry_after_header_is_honoured_by_the_delay(self) -> None:
+        response = _Response(status=429, headers={"retry-after": "1.5"})
+        assert adapter_mod._retry_delay(response, 0) == 1.5
+
+    def test_delay_is_capped_and_jittered_without_retry_after(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(adapter_mod, "LLM_RETRY_CAP_S", 0.25)
+        monkeypatch.setattr(adapter_mod, "LLM_RETRY_BASE_S", 10.0)
+        delay = adapter_mod._retry_delay(None, 5)
+        assert 0.0 <= delay <= 0.25

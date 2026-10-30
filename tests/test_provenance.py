@@ -98,3 +98,33 @@ def test_verify_passes_on_clean():
         manifest_path.write_text(json.dumps(manifest))
         warnings = provenance_mod.verify_manifest(str(Path(tmpdir)), str(manifest_path))
         assert len(warnings) == 0
+
+
+def test_training_and_master_outputs_are_tracked():
+    """Training files used to be invisible to the manifest entirely."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        for sub, name in [
+            ("master", "master_source_v1.jsonl"),
+            ("training", "llm_train.jsonl"),
+            ("processed", "pairs.csv"),
+        ]:
+            d = Path(tmpdir) / "data" / sub
+            d.mkdir(parents=True)
+            (d / name).write_text('{"id": 1}\n' if name.endswith(".jsonl") else "a,b\n1,2\n")
+        (Path(tmpdir) / "AGENTS.md").touch()
+        manifest = provenance_mod.generate_manifest(str(Path(tmpdir)))
+        files = {f["filename"]: f for f in manifest["files"]}
+        assert "data/master/master_source_v1.jsonl" in files
+        assert files["data/training/llm_train.jsonl"]["source"] == "training_dataset"
+        assert "data/processed/pairs.csv" in files
+        assert files["data/processed/pairs.csv"]["row_count"] is None
+
+
+def test_unrelated_extensions_are_not_scanned():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        d = Path(tmpdir) / "data" / "bible"
+        d.mkdir(parents=True)
+        (d / "notes.md").write_text("# not data\n")
+        (Path(tmpdir) / "AGENTS.md").touch()
+        manifest = provenance_mod.generate_manifest(str(Path(tmpdir)))
+        assert manifest["total_files"] == 0

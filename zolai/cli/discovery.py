@@ -126,8 +126,16 @@ def discovery_build(
         new = cap_summary.get("hypotheses_new") or cap_summary.get(
             "relations_new"
         ) or cap_summary.get("collocations_new") or 0
+        already = cap_summary.get("already_present") or 0
         detail = f"{written} written" + (f" · {new} new" if written and new != written else "")
+        if already:
+            detail += f" · {already} already present"
         rprint(f"  [cyan]{cap_name}:[/cyan] {detail}")
 
     if summary.get("status_counts"):
         rprint(f"  [dim]Status:[/dim] {summary['status_counts']}")
+
+    failed = summary.get("failed_capabilities") or []
+    if failed:
+        rprint(f"  [bold red]failed:[/bold red] {', '.join(failed)}")
+        raise typer.Exit(code=1)

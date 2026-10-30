@@ -79,6 +79,17 @@ def _is_canonical(target: object) -> bool:
 
 
 def _note_write(statement: object) -> None:
+    """Record a corpus write.
+
+    Recording is the only thing a trace callback *can* do: measured 2026-10-28,
+    an exception raised here is swallowed by sqlite3 and the statement completes,
+    so "fail fast" from this hook is a placebo. Genuine prevention would need
+    ``set_authorizer`` (which does deny, and raises ``not authorized``), at the
+    cost of getting every read action right too — SQLITE_READ fires on SELECTs.
+    The teardown report in ``no_canonical_db_writes`` is the current enforcement,
+    and the ``scratch_db`` fixture is what keeps writes out of the corpus in the
+    first place.
+    """
     sql = str(statement)
     if _WRITE_STATEMENT.match(sql):
         stack = "".join(traceback.format_stack(limit=16)[:-4])

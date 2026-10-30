@@ -161,6 +161,10 @@ These scripts handle knowledge graph operations.
 | `predict_test.py` | Prediction tests | `python scripts/kg/predict_test.py` |
 | `smoke_test.py` | Smoke tests | `python scripts/kg/smoke_test.py` |
 
+`extract_zsp.py` and `extract_pipeline.py` persist through `scripts/kg/store.py`,
+which writes the canonical `kg_nodes` / `kg_edges` tables in `config.paths.db`.
+There is no scratch `kg.db` any more.
+
 ### 5. Utility Scripts
 
 | Script | Purpose | Usage |

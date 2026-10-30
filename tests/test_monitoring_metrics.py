@@ -18,6 +18,7 @@ from prometheus_client.parser import Sample, text_string_to_metric_families
 
 from zolai.api import auth as api_auth
 from zolai.api.server import create_app
+from zolai.data import database as database_mod
 from zolai.data.database import DatabaseManager as _AuthDatabaseManager
 from zolai.data.migrations import create_api_keys_table as _create_api_keys_table
 from zolai.monitoring import record_operation, track_operation
@@ -50,6 +51,48 @@ def _ops_admin_key(tmp_path_factory) -> Iterator[str]:
     finally:
         api_auth._get_manager = original
         mgr.dispose()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _metrics_store_on_a_throwaway_db(tmp_path_factory) -> Iterator[None]:
+    """``monitoring.store`` writes through ``get_manager()``, corpus by default.
+
+    :func:`test_route_labels_are_templates_never_raw_paths` PUTs a probe
+    annotation only to read back the *metric label*, and the store resolved the
+    live database — a format test was issuing ``BEGIN IMMEDIATE`` against the
+    2.8 GB corpus.  The store creates its own schema on first use, so a
+    throwaway file is the whole fix; the auth DB was already throwaway
+    (:func:`_ops_admin_key`).
+
+    The store's manager seam is pinned to a dedicated instance as well: the
+    config patch alone depended on fixture ordering and a stale singleton, which
+    let one full-suite run write through to the corpus.
+    """
+    from zolai.config import config
+    from zolai.monitoring import store as store_mod
+    from zolai.monitoring.background import CURATED_TABLES
+
+    db = tmp_path_factory.mktemp("metrics") / "metrics.db"
+    original = config.paths.db
+    config.paths.db = db
+    database_mod.reset_manager()
+
+    patch = pytest.MonkeyPatch()
+    dedicated = database_mod.DatabaseManager(f"sqlite:///{db}")
+    # ``zolai_db_table_rows`` has no sample for a table it cannot count, and the
+    # family-presence test asserts the sample exists — so an empty throwaway
+    # still needs the curated names.  The names come from a module constant.
+    with dedicated.engine.begin() as conn:
+        for table in CURATED_TABLES:
+            conn.exec_driver_sql(f"CREATE TABLE IF NOT EXISTS {table} (id INTEGER PRIMARY KEY)")
+    patch.setattr(store_mod, "get_manager", lambda: dedicated)
+    try:
+        yield
+    finally:
+        patch.undo()
+        dedicated.dispose()
+        config.paths.db = original
+        database_mod.reset_manager()
 
 
 @pytest.fixture(scope="module")

@@ -8,6 +8,7 @@ import sqlite3
 from typing import Any
 
 from ..config import config
+from ..shared.clock import stamp
 
 logger = logging.getLogger(__name__)
 
@@ -60,28 +61,43 @@ class DictionaryManager:
         cur = conn.cursor()
 
         try:
-            # Insert into ZO→EN table
+            # Write both mirrors: `english` is the canonical column other
+            # consumers read, `english_clean` the search copy.
             cur.execute(
                 """INSERT INTO dictionary
-                   (zolai, english_clean, pos, source)
-                   VALUES (?, ?, ?, ?)""",
-                (zolai.lower(), english, pos, source),
+                   (zolai, english, english_clean, myanmar, pos, source)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (zolai.lower(), english, english, myanmar, pos, source),
             )
+            dictionary_id = cur.lastrowid
 
-            # Insert into EN→ZO table
             cur.execute(
                 """INSERT INTO dictionary_en_zo
-                   (headword, translations_clean, pos, source)
-                   VALUES (?, ?, ?, ?)""",
-                (english.lower(), zolai, pos, source),
+                   (headword, translations, translations_clean, pos, source)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    english.lower(),
+                    json.dumps([zolai], ensure_ascii=False),
+                    zolai,
+                    pos,
+                    source,
+                ),
             )
 
-            # Log to audit
+            # Log to audit — row_id is the ZO→EN row, not the reverse mirror.
             cur.execute(
                 """INSERT INTO data_audit_log
                    (table_name, row_id, field, old_value, new_value, changed_at, reason)
-                   VALUES (?, ?, ?, ?, ?, datetime('now'), ?)""",
-                ("dictionary", cur.lastrowid, "entry", "", f"{zolai}: {english}", f"Added by {source}"),
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "dictionary",
+                    dictionary_id,
+                    "entry",
+                    "",
+                    f"{zolai}: {english}",
+                    stamp(),
+                    f"Added by {source}",
+                ),
             )
 
             conn.commit()
@@ -123,34 +139,53 @@ class DictionaryManager:
 
             old_values = dict(old_row)
 
-            # Build update for ZO→EN
+            # Only known columns are writable; the audit loop below logs
+            # exactly the fields that were applied, never the request alone.
+            applied: dict[str, Any] = {}
             if "english" in kwargs:
                 cur.execute(
-                    "UPDATE dictionary SET english_clean = ? WHERE zolai = ?",
-                    (kwargs["english"], zolai.lower()),
+                    "UPDATE dictionary SET english = ?, english_clean = ? WHERE zolai = ?",
+                    (kwargs["english"], kwargs["english"], zolai.lower()),
                 )
+                applied["english"] = kwargs["english"]
+
+            if "myanmar" in kwargs:
+                cur.execute(
+                    "UPDATE dictionary SET myanmar = ? WHERE zolai = ?",
+                    (kwargs["myanmar"], zolai.lower()),
+                )
+                applied["myanmar"] = kwargs["myanmar"]
 
             if "pos" in kwargs:
                 cur.execute(
                     "UPDATE dictionary SET pos = ? WHERE zolai = ?",
                     (kwargs["pos"], zolai.lower()),
                 )
+                applied["pos"] = kwargs["pos"]
 
             # Log to audit
-            for field, new_value in kwargs.items():
+            for field, new_value in applied.items():
                 old_value = old_values.get(field, "")
                 cur.execute(
                     """INSERT INTO data_audit_log
                        (table_name, row_id, field, old_value, new_value, changed_at, reason)
-                       VALUES (?, ?, ?, ?, ?, datetime('now'), ?)""",
-                    ("dictionary", 0, field, str(old_value), str(new_value), "Updated via DictionaryManager"),
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        "dictionary",
+                        0,
+                        field,
+                        str(old_value),
+                        str(new_value),
+                        stamp(),
+                        "Updated via DictionaryManager",
+                    ),
                 )
 
             conn.commit()
             return {
                 "success": True,
                 "zolai": zolai,
-                "updated_fields": list(kwargs.keys()),
+                "updated_fields": list(applied),
             }
 
         except Exception as e:
@@ -178,16 +213,16 @@ class DictionaryManager:
 
             # Soft delete
             cur.execute(
-                "UPDATE dictionary SET is_deleted = 1, deleted_at = datetime('now') WHERE zolai = ?",
-                (zolai.lower(),),
+                "UPDATE dictionary SET is_deleted = 1, deleted_at = ? WHERE zolai = ?",
+                (stamp(), zolai.lower()),
             )
 
             # Log to audit
             cur.execute(
                 """INSERT INTO data_audit_log
                    (table_name, row_id, field, old_value, new_value, changed_at, reason)
-                   VALUES (?, ?, ?, ?, ?, datetime('now'), ?)""",
-                ("dictionary", 0, "is_deleted", "0", "1", f"Deleted by {deleted_by}: {reason}"),
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                ("dictionary", 0, "is_deleted", "0", "1", stamp(), f"Deleted by {deleted_by}: {reason}"),
             )
 
             conn.commit()
@@ -308,7 +343,8 @@ class DictionaryManager:
                 (zolai.lower(), english),
             )
             return cur.fetchone()[0] > 0
-        except Exception:
+        except Exception as exc:  # noqa: BLE001 — duplicate check must not crash the add
+            logger.debug("duplicate check failed: %s", exc)
             return False
         finally:
             conn.close()
@@ -335,49 +371,43 @@ class DictionaryManager:
         """Check if a word is attested in Bible or dictionary.
 
         Returns:
-            Dict with 'attested', 'sources', 'count'.
+            Dict with 'attested', 'sources', 'count' — plus ``errors`` naming
+            any probe that could not run, so a broken probe is never mistaken
+            for evidence of absence.
         """
+        probes = (
+            ("dictionary", "SELECT COUNT(*) FROM dictionary WHERE zolai = ?",
+             (word.lower(),)),
+            # Canonical column is zo_tdb77 (the old zolai_text never existed).
+            ("bible", "SELECT COUNT(*) FROM bible_verses WHERE zo_tdb77 LIKE ?",
+             (f"%{word}%",)),
+            ("vocab", "SELECT COUNT(*) FROM vocabulary WHERE headword = ?",
+             (word.lower(),)),
+        )
+
         conn = self._get_connection()
         cur = conn.cursor()
+        sources: list[str] = []
+        errors: list[str] = []
 
-        sources = []
-
-        # Check dictionary
         try:
-            cur.execute(
-                "SELECT COUNT(*) FROM dictionary WHERE zolai = ?",
-                (word.lower(),),
-            )
-            if cur.fetchone()[0] > 0:
-                sources.append("dictionary")
-        except Exception:
-            pass
+            for name, sql, params in probes:
+                try:
+                    cur.execute(sql, params)
+                    if cur.fetchone()[0] > 0:
+                        sources.append(name)
+                except Exception as exc:  # noqa: BLE001 — one probe must not hide the rest
+                    logger.debug("attestation probe %s failed: %s", name, exc)
+                    errors.append(name)
+        finally:
+            conn.close()
 
-        # Check Bible
-        try:
-            cur.execute(
-                "SELECT COUNT(*) FROM bible_verses WHERE zolai_text LIKE ?",
-                (f"%{word}%",),
-            )
-            if cur.fetchone()[0] > 0:
-                sources.append("bible")
-        except Exception:
-            pass
-
-        # Check vocab
-        try:
-            cur.execute(
-                "SELECT COUNT(*) FROM vocab WHERE word = ?",
-                (word.lower(),),
-            )
-            if cur.fetchone()[0] > 0:
-                sources.append("vocab")
-        except Exception:
-            pass
-
-        return {
+        result: dict[str, Any] = {
             "word": word,
             "attested": len(sources) > 0,
             "sources": sources,
             "count": len(sources),
         }
+        if errors:
+            result["errors"] = errors
+        return result

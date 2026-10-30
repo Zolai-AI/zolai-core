@@ -233,10 +233,15 @@ service. Live at **https://mcp.zolai.space/mcp** and **https://api.zolai.space/m
 (route `/api/v1/mcp`).
 
 - **Clients:** ChatGPT, Claude, Cursor, Gemini, VS Code (any MCP client).
+- **Protocol:** dual-era — modern `2026-07-28` (`server/discover`, per-request
+  `_meta`, `resultType` on every result, `ttlMs`/`cacheScope` on list results)
+  and legacy `initialize` (`2025-11-25` and earlier). An unimplemented version is
+  refused with `-32022`; a header/body disagreement with `-32020`; a browser
+  `Origin` outside the CORS allowlist with HTTP `403`.
 - **OAuth 2.1:** RFC 9728 protected-resource metadata, RFC 8414 authorization-server
   metadata, RFC 7591 dynamic client registration, PKCE (S256) + refresh rotation.
   Optional (`ZOLAI_MCP_OAUTH_REQUIRED`, off by default); API keys still work.
-- **39 tiered tools:** 8 public / 31 member / 39 admin. Public + member tiers are
+- **42 tiered tools:** 8 public / 31 member / 42 admin. Public + member tiers are
   read-only; admin tier adds writes.
 - **Two-way learning family:** members read (`study_quiz_generate`,
   `study_review_schedule`, `study_learner_stats`, ...) and admins contribute back

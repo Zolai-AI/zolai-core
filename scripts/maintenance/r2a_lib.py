@@ -230,7 +230,7 @@ def write_batch(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
 def fuser_pids(path: Path) -> list[int]:
     try:
         proc = subprocess.run(["fuser", str(path)], capture_output=True, text=True, timeout=30)
-    except FileNotFoundError, subprocess.TimeoutExpired:
+    except (FileNotFoundError, subprocess.TimeoutExpired):
         return []  # fuser missing/timed out: cannot assert a holder; caller decides
     return [int(tok) for tok in proc.stdout.split() if tok.isdigit()]
 

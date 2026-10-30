@@ -142,8 +142,12 @@ class TestStreakTracking:
         assert result["longest_streak"] >= 0
         assert isinstance(result["is_active"], bool)
 
-    def test_update_streak_creates_record(self) -> None:
-        """Test that update_streak attempts to create a streak record."""
+    def test_update_streak_creates_record(self, scratch_db) -> None:
+        """Test that update_streak attempts to create a streak record.
+
+        ``update_streak`` is the one streak method that writes, so this test
+        runs against ``scratch_db`` rather than the canonical corpus.
+        """
         tracker = self._get_tracker("test_streak_create")
         result = tracker.update_streak(user_id="test_streak_create")
         # Result should have expected keys regardless of table availability

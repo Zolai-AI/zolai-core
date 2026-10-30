@@ -54,6 +54,25 @@ AGENT_TIMEOUT_S = max(1, int(os.environ.get("AGENT_TIMEOUT_S", "60")))
 
 MAX_TURNS_EXCEEDED = "Max turns reached"
 
+#: Typed terminal state. ``ok``/``error`` stay for existing callers, but the
+#: reason is never inferred from message text: a timeout and an exhausted tool
+#: budget both end with ``ok=False`` and are not the same event.
+STOP_ANSWERED = "answered"
+STOP_SYNTHESIZED = "synthesized"
+STOP_MAX_TURNS = "max_turns_exceeded"
+STOP_TIMEOUT = "timeout"
+STOP_PROVIDER_ERROR = "provider_error"
+
+
+@dataclass(frozen=True)
+class AgentEvent:
+    """One typed step event. ``kind`` is stable; ``data`` is step-specific."""
+
+    kind: str
+    turn: int
+    data: dict[str, Any] = field(default_factory=dict)
+
+
 #: ``chat(messages, tools) -> {"text", "tool_calls", "latency_ms"?}``
 ChatFn = Callable[[list[dict[str, Any]], list[dict[str, Any]] | None], dict[str, Any]]
 
@@ -332,6 +351,7 @@ def run_agent_loop(
     native: bool = False,
     on_token: Callable[[str], None] | None = None,
     on_tool_event: Callable[[dict[str, Any]], None] | None = None,
+    on_event: Callable[[AgentEvent], None] | None = None,
     timeout_s: float | None = None,
 ) -> dict[str, Any]:
     """Run the tool loop: ≤1 tool/turn, at most ``max_turns`` tool calls.
@@ -356,10 +376,12 @@ def run_agent_loop(
             prompt protocol with ``tools=None``.
 
     Returns:
-        ``{reply, tool_calls, turns, ok, error?}`` — always terminates.
+        ``{reply, tool_calls, turns, ok, error?, stop_reason, budget}`` —
+        always terminates.  ``stop_reason`` is one of the ``STOP_*`` constants.
     """
     from .tools.executor import execute_tool
 
+    started = time.monotonic()
     limit = max_turns if max_turns is not None else AGENT_MAX_TURNS
     tools_section = build_tools_section(allow)
     system = f"{system_prompt}\n\n{tools_section}" if tools_section else system_prompt
@@ -384,34 +406,67 @@ def run_agent_loop(
     # previous unbounded behaviour for callers that pass it explicitly.
     deadline = None if timeout_s is None else time.monotonic() + max(0.0, float(timeout_s))
 
+    def emit(kind: str, turn: int, **data: Any) -> None:
+        if on_event is not None:
+            on_event(AgentEvent(kind=kind, turn=turn, data=data))
+
+    def finish(
+        reason: str,
+        *,
+        reply: str,
+        ok: bool,
+        error: str | None = None,
+        **extra: Any,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "reply": reply,
+            "tool_calls": list(trace),
+            "turns": turns_used,
+            "ok": ok,
+            "stop_reason": reason,
+            "budget": {
+                "turns_used": turns_used,
+                "max_turns": limit,
+                "timeout_s": timeout_s,
+                "elapsed_ms": round((time.monotonic() - started) * 1000, 1),
+            },
+            **extra,
+        }
+        if error is not None:
+            payload["error"] = error
+        emit("stopped", turns_used, stop_reason=reason, ok=ok, error=error)
+        return payload
+
     while turns_used < limit:
         if deadline is not None and time.monotonic() >= deadline:
             # Return what was gathered rather than running past the caller's
             # budget, and say so — the run still reports its turns and trace.
-            return {
-                "reply": "",
-                "tool_calls": list(trace),
-                "turns": turns_used,
-                "ok": False,
-                "error": f"timeout: exceeded the {timeout_s:g}s budget after {turns_used} turn(s)",
-                "timed_out": True,
-            }
+            return finish(
+                STOP_TIMEOUT,
+                reply="",
+                ok=False,
+                error=(
+                    f"timeout: exceeded the {timeout_s:g}s budget "
+                    f"after {turns_used} turn(s)"
+                ),
+                timed_out=True,
+            )
         turns_used += 1
         # Native defs go out on turn 1 and stay out while the native track is
         # live; a brain caller (`native=False`) never gets them at all.
         offering_native = bool(native) and (turns_used == 1 or native_track)
         native_defs = native_tool_defs(list(allow)) if offering_native else None
+        emit("turn_started", turns_used, native=offering_native)
         try:
             turn = chat([dict(m) for m in messages], native_defs)
         except Exception as exc:  # provider failure — never a 500, never a hang
             gate.end_turn()
-            return {
-                "reply": "",
-                "tool_calls": list(trace),
-                "turns": turns_used,
-                "ok": False,
-                "error": f"provider_error: {exc}",
-            }
+            return finish(
+                STOP_PROVIDER_ERROR,
+                reply="",
+                ok=False,
+                error=f"provider_error: {exc}",
+            )
         gate.end_turn()
 
         reply = str(turn.get("text") or "")
@@ -444,12 +499,7 @@ def run_agent_loop(
                 native_track = False
 
         if not calls:
-            return {
-                "reply": reply,
-                "tool_calls": list(trace),
-                "turns": turns_used,
-                "ok": True,
-            }
+            return finish(STOP_ANSWERED, reply=reply, ok=True)
 
         # ≤1 tool per turn. The rest of a parallel batch is not dropped: a model
         # that asked for three lookups and got one, with no word about the other
@@ -472,6 +522,7 @@ def run_agent_loop(
         ]
         if on_tool_event:
             on_tool_event({"name": call.name, "status": "started", "latency_ms": 0.0, "turn": turns_used})
+        emit("tool_started", turns_used, name=call.name, source=call.source)
         result = execute_tool(call, allow, turn=turns_used)
         results.append(result)
         entry = result.to_dict()
@@ -483,6 +534,7 @@ def run_agent_loop(
             skipped["input"] = extra.input or {}
             skipped["status"] = "declined"
             trace.append(skipped)
+            emit("tool_declined", turns_used, name=extra.name)
         if on_tool_event:
             on_tool_event(
                 {
@@ -492,6 +544,14 @@ def run_agent_loop(
                     "turn": turns_used,
                 }
             )
+        emit(
+            "tool_completed",
+            turns_used,
+            name=call.name,
+            ok=result.ok,
+            latency_ms=result.latency_ms,
+            error_code=getattr(result.error_code, "value", result.error_code),
+        )
         if native_track:
             # Native replay: the model needs the turn it asked in and the turn
             # that answers it, in the OpenAI wire shape — including an answer for
@@ -533,20 +593,14 @@ def run_agent_loop(
         # the UI, and prose that is really a tool call is not an answer.
         reply = parse_tool_calls(raw).text.strip()
         if reply:
-            return {
-                "reply": reply,
-                "tool_calls": list(trace),
-                "turns": turns_used,
-                "ok": True,
-            }
+            return finish(STOP_SYNTHESIZED, reply=reply, ok=True)
 
-    return {
-        "reply": (
+    return finish(
+        STOP_MAX_TURNS,
+        reply=(
             "I hit my per-message tool limit before finishing. "
             "Please ask again in a slightly simpler way."
         ),
-        "tool_calls": list(trace),
-        "turns": turns_used,
-        "ok": False,
-        "error": MAX_TURNS_EXCEEDED,
-    }
+        ok=False,
+        error=MAX_TURNS_EXCEEDED,
+    )

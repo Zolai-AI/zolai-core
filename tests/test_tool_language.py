@@ -35,6 +35,8 @@ import pytest
 
 from zolai.agent.tools import language as lang
 from zolai.agent.tools.executor import HANDLERS, execute_tool
+from zolai.agent.tools.learning import LEARNING_READ_TOOLS, LEARNING_WRITE_TOOLS
+from zolai.agent.tools.learning_runs import LEARNING_RUN_TOOL_NAMES
 from zolai.agent.tools.registry import (
     ANONYMOUS_TOOLS,
     LANGUAGE_SPECS,
@@ -147,11 +149,19 @@ class TestSurfaceOnlyGrew:
             )
 
     def test_member_and_admin_are_a_strict_superset_and_the_public_tier_is_untouched(self) -> None:
+        # B1a added the language family; later batches added the learning reads to
+        # member and (admin only) the learning write-back + ledger reads — so the
+        # expected delta is the batch plus everything layered on top of it.
+        added = {
+            "member": set(LANGUAGE_TOOL_NAMES) | set(LEARNING_READ_TOOLS),
+            "admin": set(LANGUAGE_TOOL_NAMES) | set(LEARNING_READ_TOOLS)
+            | set(LEARNING_WRITE_TOOLS) | set(LEARNING_RUN_TOOL_NAMES),
+        }
         for tier, before_names in _PRE_B1A_NAMES.items():
             before, after = set(before_names), set(names_for(tier))
             if tier in _GROWN:
                 assert before < after, f"{tier} must strictly grow"
-                assert after - before == set(LANGUAGE_TOOL_NAMES), tier
+                assert after - before == added[tier], tier
             else:
                 assert before == after, "the anonymous set is a founder decision — unchanged"
                 assert after == set(ANONYMOUS_TOOLS)
@@ -170,7 +180,7 @@ class TestSurfaceOnlyGrew:
         assert member - public == set(LANGUAGE_TOOL_NAMES) | {
             "word_related",
             "analyze_text",
-        } | set(foundation_names())
+        } | set(foundation_names()) | set(LEARNING_READ_TOOLS)
 
 
 def render_mcp_for(names: list[str]) -> list[dict[str, Any]]:

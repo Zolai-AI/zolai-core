@@ -61,11 +61,23 @@ MAX_PARAGRAPH_LINES = 12
 #: lesson stories are single sentences (~12 tokens), so this only drops
 #: navigation crumbs, not real Zolai text.
 MIN_DOCUMENT_TOKENS = 10
+#: Openers only listen to Zolai prose: a paragraph needs at least this many
+#: hits from :data:`_ZOLAI_MARKERS` and at least this share of its tokens.
+#: English analysis prose in the wiki and the English-tagged news rows score
+#: 0–1, so template openers ("new vocabulary", "chorus", "related") never
+#: enter the tables while Zolai paragraphs quoting an English gloss still do.
+ZOLAI_MIN_HITS = 2
+ZOLAI_MIN_SHARE = 0.05
 #: Openers: minimum paragraph-initial count, minimum share of all paragraphs,
-#: and lift over the corpus rate.  The share floor keeps a large corpus from
-#: admitting thousands of Zipf-tail bigrams that clear a bare count gate.
+#: minimum number of distinct documents, and lift over the corpus rate.  The
+#: share floor keeps a large corpus from admitting thousands of Zipf-tail
+#: bigrams that clear a bare count gate; the document floor keeps page
+#: templates ("article no", "october", a quiz's "a correct") from qualifying,
+#: because a phrase that only ever opens paragraphs inside one page is not a
+#: corpus-level discourse pattern.
 OPENER_MIN_COUNT = 5
 OPENER_MIN_SHARE = 0.001
+OPENER_MIN_DOCS = 3
 OPENER_MIN_LIFT = 2.0
 #: Lift is mapped to (0, 1] confidence by dividing by this value.
 OPENER_LIFT_FULL = 10.0
@@ -83,6 +95,69 @@ _MARKDOWN_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _SPACE_RE = re.compile(r"\s+")
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+#: Function and grammar words that run through Zolai prose and (almost) never
+#: through English.  Words English also uses are deliberately absent — ``a``,
+#: ``i``, ``in``, ``na``, ``ka``, ``te``, ``lo``, ``pan``, ``pen``, ``note`` —
+#: because "a grammar guide in Zolai" would otherwise clear the gate.
+_ZOLAI_MARKERS = frozenset(
+    """
+    tua ciangin leh hiam diam ding kei tawh sung nung zong khat hih teng om nei
+    pai pia gen thei bang bangin kua sak khit mun kum tui khua gam pasian topa
+    tapa kumpipa ngei hong kik cih ahi uhhi ciang nading amah amaute keimah
+    nangmah eite zolai uh hi aw
+    """.split()
+)
+_ENGLISH_MARKERS = frozenset(
+    """
+    the and of to is are was were be been on at for with from by as that this
+    these those there here it its we you they he she his her their our not but
+    if when where which what who how can could would should will may might must
+    have has had do does did one two also than then them us your my me page
+    guide note example examples section source
+    """.split()
+)
+
+#: Markdown lines that are structure, never prose: headings, blockquote
+#: metadata ("Last updated: …"), table rows, rules, "**Source:** …" metadata
+#: lines and "**Verse 1**" / "_Note:_" labels.
+_MD_STRUCTURE_RE = re.compile(
+    r"^\s{0,3}(?:"
+    r"#{1,6}\s"
+    r"|>"
+    r"|\|"
+    r"|(?:[-*_]\s*){3,}$"
+    r"|\*\*[^*\n]{1,64}:\*\*"
+    r"|\*\*[^*\n]{1,48}\*\*\s*$"
+    r"|_[A-Z][^_\n]{0,48}:_\s*$"
+    r")"
+)
+_MD_LIST_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+#: Page-furniture labels with an inline value: bibliographic citations
+#: ("*Reference: ZVS 2018, …*"), grammar templates ("Pattern: `[verb] ding hi`
+#: = will [verb]") and news cross-links ("Related: Nungak kum 106 …").  Their
+#: values are citation lists, placeholders, or another article's headline, so
+#: reading them as prose taught "reference", "pattern" and "related" as
+#: paragraph openers.  The value is dropped with the label: a headline about a
+#: paragraph is not the paragraph.
+_FURNITURE_RE = re.compile(
+    r"^\s{0,3}(?:\*{1,2}|_{1,2})?\s*(?:reference|pattern|related)\s*:",
+    re.IGNORECASE,
+)
+#: A bold label that prefixes real prose ("**Verse 2** Tu in Topa …") — the
+#: label is structure, the rest of the line is not.
+#: Strips a bold label from the front of a lyric line.  The trailing separator
+#: is required: without it "**Pasian in a it hi.**" (a whole bold sentence)
+#: would be swallowed as if it were a label.
+_MD_LABEL_RE = re.compile(r"^\*\*[^*\n]{1,64}\*\*[:\s]+")
+#: Song-structure labels written inline in lyrics pages ("Verse 1: Inn hong
+#: zuan in, …", "Verse 1 Jesuh singlamteh nuai ah, …", "Chorus: …").
+#: Structural, so stripped before the line is read as prose.
+_MD_LYRICS_LABEL_RE = re.compile(
+    r"^(?:verse|chorus|bridge|intro|outro|hook|refrain|pre-chorus)"
+    r"(?:\s*\d{1,2})?(?:\s*[:.\-–—]\s*|\s+|$)",
+    re.IGNORECASE,
+)
 
 
 # ── source specifications ──────────────────────────────────────────────────
@@ -253,6 +328,7 @@ class SourceResult:
     paragraphs: int = 0
     tokens: int = 0
     skipped_documents: int = 0
+    non_zolai_paragraphs: int = 0
     openers: list[dict[str, Any]] = field(default_factory=list)
     marker_examples: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     layers: Counter = field(default_factory=Counter)
@@ -298,7 +374,9 @@ def _html_paragraphs(html: str) -> list[str]:
         blocks = [
             block
             for block in blocks
-            if len(_tokens(block)) >= 3 and not _is_site_chrome(block)
+            if len(_tokens(block)) >= 3
+            and not _is_site_chrome(block)
+            and not _FURNITURE_RE.match(block)
         ]
         if blocks:
             return blocks
@@ -309,28 +387,93 @@ def _html_paragraphs(html: str) -> list[str]:
     return [
         block.strip()
         for block in re.split(r"\n\s*\n", fallback)
-        if block.strip() and not _is_site_chrome(block)
+        if block.strip()
+        and not _is_site_chrome(block)
+        and not _FURNITURE_RE.match(block.strip())
     ]
 
 
 def _markdown_paragraphs(markdown: str) -> list[str]:
-    """Prose blocks from markdown; fenced code is dropped, link syntax unwrapped."""
-    kept: list[str] = []
+    """Prose blocks from markdown; structure is dropped, links are unwrapped.
+
+    Song pages and reference guides are half headings, tables and labels —
+    "## Verse 1", "**Source:** …", "| Zolai | English |", "**Verse 2**" — and
+    those blocks used to be learned as paragraph openers ("verse", "source",
+    "zolai english").  They are structure, not prose, so only real prose
+    survives; fenced code is skipped and list items keep their text.
+    """
+    blocks: list[str] = []
+    current: list[str] = []
+
+    def flush() -> None:
+        text_value = _SPACE_RE.sub(" ", " ".join(current)).strip()
+        current.clear()
+        if len(_tokens(text_value)) >= 3:
+            blocks.append(text_value)
+
+    def take_prose(segment: str) -> None:
+        line = segment.strip()
+        if not line:
+            return
+        # Strip the list marker first: "- **Verse 1:** …" is a label line, and
+        # checking the "*" at the front misses it because the line starts "- ".
+        line = _MD_LIST_RE.sub("", line).strip()
+        if not line:
+            return
+        if _MD_STRUCTURE_RE.match(line) or _FURNITURE_RE.match(line):
+            # A heading ends the prose above it; metadata lines (blockquotes,
+            # "**Source:** …", rules, tables, citations) are skipped without
+            # breaking the block.
+            if line.startswith("#"):
+                flush()
+            return
+        line = _MD_LABEL_RE.sub("", line)
+        line = _MD_LYRICS_LABEL_RE.sub("", line)
+        line = _MARKDOWN_LINK_RE.sub(r"\1", line).strip()
+        if line:
+            current.append(line)
+
     in_fence = False
-    for block in re.split(r"\n\s*\n", markdown or ""):
-        stripped = block.strip()
-        if stripped.startswith("```"):
-            in_fence = not in_fence
+    for raw in (markdown or "").splitlines():
+        line = raw.strip()
+        if not line:
+            flush()
             continue
-        if in_fence or not stripped:
+        if "```" in line:
+            # Fences may share a line with prose ("Lyrics ```").
+            parts = line.split("```")
+            if not in_fence and parts[0].strip():
+                take_prose(parts[0])
+            if len(parts) % 2 == 0:
+                in_fence = not in_fence
+            if not in_fence and len(parts) % 2 == 1 and parts[-1].strip():
+                take_prose(parts[-1])
             continue
-        if stripped.startswith("#") or stripped.startswith("|"):
-            # Headings and tables are structure, not prose.
-            stripped = _MARKDOWN_LINK_RE.sub(r"\1", stripped.lstrip("# ").strip())
-        stripped = _MARKDOWN_LINK_RE.sub(r"\1", stripped)
-        if len(_tokens(stripped)) >= 3:
-            kept.append(_SPACE_RE.sub(" ", stripped).strip())
-    return kept
+        if in_fence:
+            continue
+        take_prose(line)
+    flush()
+    return blocks
+
+
+def _looks_zolai(text_value: str, min_hits: int = ZOLAI_MIN_HITS) -> bool:
+    """True when a paragraph reads as Zolai prose rather than English text.
+
+    Density-based, not a language model: Zolai marks every clause with
+    function words that English prose does not use, so a paragraph carrying
+    none of them is not Zolai no matter how it is tagged.  ``min_hits`` is
+    relaxed to 1 for a single opening line, where one marker and no English
+    is enough evidence and two would reject a real sentence that is mostly
+    proper nouns.
+    """
+    tokens = _tokens(text_value)
+    if not tokens:
+        return False
+    zolai = sum(1 for tok in tokens if tok in _ZOLAI_MARKERS)
+    if zolai < min_hits or zolai / len(tokens) < ZOLAI_MIN_SHARE:
+        return False
+    english = sum(1 for tok in tokens if tok in _ENGLISH_MARKERS)
+    return zolai > english
 
 
 def _slug(marker: str) -> str:
@@ -625,24 +768,52 @@ def learn_openers(
 ) -> list[dict[str, Any]]:
     """Learn paragraph openers over-represented at paragraph starts.
 
-    ``paragraph_starts`` is ``(unigram, bigram)`` per paragraph.  A marker's
-    paragraph-start rate is compared with its rate across the whole corpus, so
-    a discourse phrase used at boundaries lifts while a phrase that is simply
-    frequent everywhere does not.  Requiring ``OPENER_MIN_LIFT`` rules out
-    markers that are only as common at starts as anywhere else.
+    ``paragraph_starts`` is ``(unigram, bigram, doc_id)`` per paragraph.  A
+    marker's paragraph-start rate is compared with its rate across the whole
+    corpus, so a discourse phrase used at boundaries lifts while a phrase that
+    is simply frequent everywhere does not.  Requiring ``OPENER_MIN_LIFT``
+    rules out markers that are only as common at starts as anywhere else, and
+    ``OPENER_MIN_DOCS`` rules out a page that repeats its own template.
     """
     n_paragraphs = max(1, len(paragraph_starts))
     required = max(OPENER_MIN_COUNT, math.ceil(OPENER_MIN_SHARE * n_paragraphs))
-    para_uni: Counter = Counter(uni for uni, _ in paragraph_starts if uni)
-    para_bi: Counter = Counter(bi for _, bi in paragraph_starts if bi)
+    para_uni: Counter = Counter()
+    para_bi: Counter = Counter()
+    docs_uni: dict[str, set[str]] = defaultdict(set)
+    docs_bi: dict[str, set[str]] = defaultdict(set)
+    for uni, bi, doc_id in paragraph_starts:
+        if uni:
+            para_uni[uni] += 1
+            docs_uni[uni].add(doc_id)
+        if bi:
+            para_bi[bi] += 1
+            docs_bi[bi].add(doc_id)
 
     found: list[dict[str, Any]] = []
-    for kind, counts, base_counts, slots in (
-        ("unigram", para_uni, corpus.unigrams, max(1, corpus.unigram_slots)),
-        ("bigram", para_bi, corpus.bigrams, max(1, corpus.bigram_slots)),
+    for kind, counts, docs, base_counts, slots in (
+        (
+            "unigram",
+            para_uni,
+            docs_uni,
+            corpus.unigrams,
+            max(1, corpus.unigram_slots),
+        ),
+        ("bigram", para_bi, docs_bi, corpus.bigrams, max(1, corpus.bigram_slots)),
     ):
         for marker, count in counts.items():
             if count < required:
+                continue
+            if len(docs[marker]) < OPENER_MIN_DOCS:
+                continue
+            if kind == "unigram" and len(marker) < 2:
+                # A bare letter is an enumerated label ("b)") or a leftover
+                # list marker, never a Zolai discourse opener.
+                continue
+            if any(tok in _ENGLISH_MARKERS for tok in marker.split()):
+                # Bilingual articles glue an English title to the first Zolai
+                # paragraph ("The remnant: Isaiah laibu sungah …"), so an
+                # English stopword can lead a real paragraph.  It is not a
+                # Zolai discourse marker.
                 continue
             p_para = count / n_paragraphs
             p_corpus = base_counts.get(marker, 0) / slots
@@ -676,7 +847,7 @@ def _build_source_layers(
     rows: list[LayerRow] = []
     result = SourceResult()
     opener_input: list[dict[str, Any]] = []
-    paragraph_starts: list[tuple[str, str]] = []
+    paragraph_starts: list[tuple[str, str, str]] = []
     corpus = OpenerCorpus()
     corpus_tokens: Counter = Counter()
     corpus_clauses: Counter = Counter()
@@ -722,8 +893,6 @@ def _build_source_layers(
         doc_titles[document.doc_id] = document.title
         doc_groups[document.doc_id] += 1
 
-        corpus.add_tokens(doc_tokens)
-
         for p_no, paragraph in enumerate(paragraphs, start=1):
             p_tokens = [tok for line in paragraph for tok in _tokens(line.text)]
             p_id = f"{document.doc_id}|{document.group_id or 'doc'}p{p_no}"
@@ -745,10 +914,24 @@ def _build_source_layers(
                 # A one-paragraph document cannot show that a phrase opens
                 # paragraphs rather than just sentences.
                 continue
+            paragraph_text = _SPACE_RE.sub(" ", " ".join(line.text for line in paragraph))
+            if not _looks_zolai(paragraph_text) or not _looks_zolai(
+                paragraph[0].text, min_hits=1
+            ):
+                # English prose (wiki guides, English-tagged news) does not
+                # teach Zolai discourse openers — and must not pad the
+                # baseline either, or a Zolai marker's lift is diluted by
+                # tokens it never competes with.  The opening line is checked
+                # on its own because an English sentence that quotes Zolai
+                # words ("Use pasian/gam/tapa …") is dense in markers yet
+                # still not a Zolai opener.
+                result.non_zolai_paragraphs += 1
+                continue
+            corpus.add_tokens(p_tokens)
             uni = p_tokens[0] if p_tokens else ""
             bi = " ".join(p_tokens[:2]) if len(p_tokens) >= 2 else ""
-            paragraph_starts.append((uni, bi))
-            paragraph_text = _SPACE_RE.sub(" ", " ".join(line.text for line in paragraph))[:240]
+            paragraph_starts.append((uni, bi, document.doc_id))
+            paragraph_text = paragraph_text[:240]
             for marker in (uni, bi):
                 if marker and len(result.marker_examples.setdefault(marker, [])) < 3:
                     result.marker_examples[marker].append(
@@ -836,6 +1019,7 @@ def _build_source_layers(
         "lines": result.lines,
         "paragraphs": result.paragraphs,
         "skipped": result.skipped_documents,
+        "non_zolai_paragraphs": result.non_zolai_paragraphs,
         "openers": openers[:5],
         "paragraph_samples": opener_input[:3],
     }
@@ -1184,6 +1368,7 @@ def learn_layers(
             "paragraphs": result.paragraphs,
             "tokens": result.tokens,
             "skipped_documents": result.skipped_documents,
+            "non_zolai_paragraphs": result.non_zolai_paragraphs,
             "layers": len(rows),
             "layers_written": layer_stats.get("written", 0),
             "layers_removed": layer_stats.get("removed", 0),

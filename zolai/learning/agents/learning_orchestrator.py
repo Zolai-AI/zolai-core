@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
+from zolai.shared.clock import now
+
 from ...data.repositories import get_engine as get_data_engine
 from ..feedback_store import get_feedback_store
 from .agent_team import AgentTeamManager, DiscussionFacilitator, create_standard_learning_team
@@ -31,7 +33,7 @@ class LearningTask:
     team_id: Optional[str] = None
     payload: dict = field(default_factory=dict)
     status: str = "pending"  # pending, assigned, in_progress, completed, failed
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=now)
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     result: Optional[dict] = None
@@ -113,7 +115,7 @@ class LearningOrchestrator:
     async def _execute_task(self, task: LearningTask):
         """Execute a single task."""
         task.status = "in_progress"
-        task.started_at = datetime.utcnow()
+        task.started_at = now()
         self.active_tasks[task.task_id] = task
 
         try:
@@ -130,7 +132,7 @@ class LearningOrchestrator:
             result = await agent.process_task(task.payload)
             task.result = result
             task.status = "completed"
-            task.completed_at = datetime.utcnow()
+            task.completed_at = now()
 
         except Exception as e:
             task.status = "failed"

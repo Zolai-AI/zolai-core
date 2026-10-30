@@ -1,53 +1,35 @@
 """Prototype API app — NOT mounted by ``zolai.api.server.create_app``.
 
 Kept because ``prediction_router`` is exercised through it
-(``tests/test_prediction_api.py``). Its ``/verify-grammar`` rule list and its
-``entries``/``translations`` schema are pre-canonical: the served grammar
-routes live in ``server.py`` and the lexicon lives in ``dictionary`` /
-``dictionary_en_zo``, read through ``DatabaseManager``. Nothing here is a
-source of truth.
+(``tests/test_prediction_api.py``). Its ``/verify-grammar`` rule list is
+pre-canonical: the served grammar routes live in ``server.py`` and the lexicon
+lives in ``dictionary`` / ``dictionary_en_zo``, read through ``DatabaseManager``.
+
+``/search-dict`` was removed: it queried ``entries`` / ``translations`` in
+``data/master_unified_dictionary.db``, a retired store that does not exist at
+that path, so the endpoint answered 500 to every request. Nothing is left here
+that opens a second database.
 """
 
-import json
-import os
-import sqlite3
-from typing import List, Optional
+from typing import List
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel
 
-from zolai.api.prediction_api import router as prediction_router  # noqa: E402
-from zolai.config import config
+from zolai.api.prediction_api import router as prediction_router
 
 app = FastAPI(title="Zolai Tool API")
 
-#: Legacy scratch store, anchored to the data root instead of the cwd — a
-#: relative path here used to silently create an empty second database in
-#: whichever directory the process happened to start in.
-DB_PATH = str(config.paths.data / "master_unified_dictionary.db")
-
-class SearchResult(BaseModel):
-    headword: str
-    pos: List[str]
-    sources: List[str]
-    translations: List[str]
-    explanations: List[Optional[str]]
-
-class SearchQuery(BaseModel):
-    query: str
 
 class GrammarQuery(BaseModel):
     sentence: str
+
 
 class GrammarResponse(BaseModel):
     is_valid: bool
     feedback: str
     suggestions: List[str]
 
-def get_db_connection():
-    if not os.path.exists(DB_PATH):
-        raise HTTPException(status_code=500, detail="Database file not found.")
-    return sqlite3.connect(DB_PATH)
 
 @app.post("/verify-grammar", response_model=GrammarResponse)
 def verify_grammar(payload: GrammarQuery):
@@ -76,44 +58,5 @@ def verify_grammar(payload: GrammarQuery):
     else:
         return GrammarResponse(is_valid=False, feedback="; ".join(feedback), suggestions=suggestions)
 
-@app.post("/search-dict", response_model=List[SearchResult])
-def search_dictionary(payload: SearchQuery):
-    conn = get_db_connection()
-    c = conn.cursor()
-    query = payload.query.lower().strip()
-
-    results = []
-
-    # 1. Exact Match
-    c.execute('SELECT raw_json FROM entries WHERE headword = ?', (query,))
-    for row in c.fetchall():
-        results.append(json.loads(row[0]))
-
-    # 2. Translation Match
-    if not results:
-        c.execute('''
-            SELECT entries.raw_json FROM translations
-            JOIN entries ON translations.entry_id = entries.id
-            WHERE translations.translation = ?
-        ''', (query,))
-        for row in c.fetchall():
-            res = json.loads(row[0])
-            if res not in results:
-                results.append(res)
-
-    conn.close()
-
-    # Map raw_json to Pydantic model
-    formatted_results = [
-        SearchResult(
-            headword=r.get("headword", ""),
-            pos=r.get("pos", []),
-            sources=r.get("sources", []),
-            translations=r.get("translations", []),
-            explanations=r.get("explanations", [])
-        ) for r in results
-    ]
-
-    return formatted_results
 
 app.include_router(prediction_router)

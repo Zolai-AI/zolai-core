@@ -19,18 +19,19 @@ def convert_to_text_format(obj):
     return None
 
 def consolidate_all():
-    base = Path(str(Path(__file__).resolve().parents[2]) + "/data/training')
-    
-    # All potential sources
+    base = Path(__file__).resolve().parents[2] / "data" / "training"
+
+    # Split outputs are never inputs: re-reading llm_{train,val,test} copies
+    # the previous test rows into the new corpus and defeats every later gate.
     sources = [
-        'llm_train.jsonl',
-        'llm_val.jsonl', 
-        'llm_test.jsonl',
         'master.jsonl',
         'snapshots/training_v11_base.jsonl',
         'snapshots/training_v11_cefr.jsonl',
         'snapshots/training_v11_tagged.jsonl',
     ]
+    split_outputs = {'llm_train.jsonl', 'llm_val.jsonl', 'llm_test.jsonl'}
+    if split_outputs & {Path(s).name for s in sources}:
+        raise SystemExit("split outputs must not be consolidation sources")
     
     seen_texts = set()
     all_records = []
@@ -77,7 +78,7 @@ def consolidate_all():
                     all_records.append(record)
                     count += 1
                     
-                except Exception as e:
+                except Exception:
                     stats['errors'] += 1
         
         print(f"    Added {count:,} unique records")
@@ -101,7 +102,7 @@ def consolidate_all():
     val = all_records[train_size:train_size + val_size]
     test = all_records[train_size + val_size:]
     
-    print(f"\nSplitting:")
+    print("\nSplitting:")
     print(f"  Train: {len(train):,}")
     print(f"  Val: {len(val):,}")
     print(f"  Test: {len(test):,}")

@@ -19,6 +19,8 @@ from typing import Callable
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from zolai.shared.clock import now, stamp
+
 from ...data.repositories import get_engine
 
 logger = logging.getLogger(__name__)
@@ -73,7 +75,7 @@ class MetricCollector:
         timestamp: datetime = None,
     ):
         """Record a metric value."""
-        ts = timestamp or datetime.utcnow()
+        ts = timestamp or now()
 
         with self.engine.begin() as conn:
             conn.execute(
@@ -92,10 +94,10 @@ class MetricCollector:
 
     def record_batch(self, metrics: list[dict]):
         """Record multiple metrics at once."""
-        now = datetime.utcnow().isoformat()
+        stamped = stamp()
         rows = [
             {
-                "timestamp": m.get("timestamp") or now,
+                "timestamp": m.get("timestamp") or stamped,
                 "name": m["name"],
                 "value": float(m["value"]),
                 "labels": json.dumps(m.get("labels", {})),
@@ -172,7 +174,7 @@ class MetricCollector:
 
     def get_metric_stats(self, name: str, since: datetime = None) -> dict:
         """Get statistics for a metric."""
-        since = since or datetime.utcnow() - timedelta(days=7)
+        since = since or now() - timedelta(days=7)
 
         with self.engine.connect() as conn:
             rows = conn.execute(
@@ -383,10 +385,10 @@ class MetricsDashboard:
 
     def get_dashboard_data(self, hours: int = 24) -> dict:
         """Get all dashboard data for the last N hours."""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = now() - timedelta(hours=hours)
 
         data = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": stamp(),
             "window_hours": hours,
             "metrics": {},
         }
@@ -401,7 +403,7 @@ class MetricsDashboard:
     def export_prometheus(self) -> str:
         """Export metrics in Prometheus format."""
         lines = []
-        since = datetime.utcnow() - timedelta(hours=24)
+        since = now() - timedelta(hours=24)
 
         for name in self.collector.get_all_metric_names():
             stats = self.collector.get_metric_stats(name, since)

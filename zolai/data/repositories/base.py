@@ -7,11 +7,25 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Callable, TypeVar
 
-from sqlalchemy import Table, func, text
+from sqlalchemy import MetaData, Table, func, text
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.engine import Engine
 
 T = TypeVar("T")
+
+
+def _configured_table(name: str) -> Table | None:
+    """Return the ORM-declared table, if the models define one.
+
+    A reflected ``Table`` carries only server-side defaults. Several models use
+    Python-side ``default=`` callables (e.g. ``created_at``), so a repo that
+    reflected instead of using the declaration rejected inserts that omit those
+    columns with ``NOT NULL constraint failed``. The lookup is lazy to keep the
+    models -> database import order untouched.
+    """
+    from ..models import Base
+
+    return Base.metadata.tables.get(name)
 
 
 class OptimisticLockError(Exception):
@@ -52,21 +66,22 @@ class BaseRepository:
     def table(self) -> Table:
         """Get the SQLAlchemy Table object (lazy-loaded)."""
         if self._table is None:
-            from ..models import Base
-
-            Base.metadata.reflect(bind=self._engine)
-            self._table = Table(self._table_name, Base.metadata, autoload_with=self._engine)
+            self._table = _configured_table(self._table_name)
+            if self._table is None:
+                # Reflect into a private MetaData: reflecting into Base.metadata
+                # permanently adds tables it saw in whatever DB was reflected, so
+                # a later init_db() on a fresh store created unrelated tables.
+                self._table = Table(
+                    self._table_name, MetaData(), autoload_with=self._engine
+                )
         return self._table
 
     @property
     def audit_table_obj(self) -> Table:
         """Get the audit log table."""
         if self._audit_table_obj is None:
-            from ..models import Base
-
-            Base.metadata.reflect(bind=self._engine)
             self._audit_table_obj = Table(
-                self._audit_table, Base.metadata, autoload_with=self._engine
+                self._audit_table, MetaData(), autoload_with=self._engine
             )
         return self._audit_table_obj
 

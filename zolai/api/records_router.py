@@ -4,9 +4,12 @@ Mounted under ``/api/v1`` (registered **before** the ``server.py`` catch-all):
 
 - ``GET /api/v1/records?table=&q=&limit=&cursor=`` — read-only rows over a
   **fixed whitelist** (:data:`RECORDS_WHITELIST`): ``dictionary``,
-  ``bible_verses``, ``grammar_patterns``, ``phrases``, ``vocabulary``.
-  Anything else (``*_import`` staging, ``api_keys``, ``data_audit_log``, …)
-  is **400** before a single row is touched.  Scope: ``dataset:read``.
+  ``bible_verses``, ``grammar_patterns``, ``phrases``, ``vocabulary``,
+  ``contributions``.  Anything else (``*_import`` staging, ``api_keys``,
+  ``data_audit_log``, …) is **400** before a single row is touched.  Scope:
+  ``dataset:read``, except where :data:`RECORDS_READ_SCOPE` raises it —
+  ``contributions`` needs ``dataset:edit`` and answers without its ``email``
+  column, because a contributor list is not a directory.
 - ``GET /api/v1/audit?table=&row_id=&limit=&cursor=`` — read-only tail of
   ``data_audit_log`` (newest first, cursor walks downwards).  Scope:
   ``audit:read``.  There is **no** audit write endpoint here — writes are a
@@ -22,7 +25,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ..config import config
 from . import auth
@@ -39,8 +42,33 @@ RECORDS_WHITELIST: dict[str, tuple[str, ...]] = {
     "grammar_patterns": ("pattern_id", "pattern", "description", "function", "examples"),
     "phrases": ("zolai", "english", "examples"),
     "vocabulary": ("headword", "english", "examples"),
-    "contributions": ("word", "type", "suggested_value", "status", "email"),
+    # ``email`` left this tuple when contribution attribution landed: it is a
+    # contributor's address, not a lexical field, and searching by it is a way to
+    # confirm whether an address is in the store.
+    "contributions": ("word", "type", "suggested_value", "status"),
 }
+
+#: Table → the scope needed to **list** it, when ``dataset:read`` is not enough.
+#:
+#: ``contributions`` carries an ``email`` column, so a row list readable by every
+#: member credential (or, in ``warn`` mode, by nobody at all) is an address
+#: directory.  It now needs ``dataset:edit`` — the same frozen action the Review
+#: queue's PATCH already uses, and a scope an **admin session** holds (since the
+#: 4-role model split it out of ``ADMIN_EXTRA_SCOPES``' absence).
+#:
+#: Enforced per-request in :func:`list_records`, not by a router dependency,
+#: because the answer depends on the ``table`` **query parameter** — a
+#: dependency that runs before the handler cannot see which table was asked for.
+RECORDS_READ_SCOPE: dict[str, str] = {"contributions": "dataset:edit"}
+
+#: Table → columns stripped from every row before it is returned.
+#:
+#: The email is gone from the **payload** as well as the search, so even an
+#: authorised list cannot exfiltrate the addresses in one page. Consequence,
+#: stated plainly: contacting a contributor is not a ``/records`` capability.
+#: It is a ``/contributions/mine`` capability for the person themselves, and
+#: otherwise an editorial act outside this API.
+RECORDS_REDACTED_COLUMNS: dict[str, tuple[str, ...]] = {"contributions": ("email",)}
 
 
 def connect_db() -> sqlite3.Connection:
@@ -75,17 +103,38 @@ def _require_whitelisted(table: str) -> tuple[str, ...]:
     return fields
 
 
+def _require_read_scope(request: Request, table: str) -> None:
+    """The scope that governs *this* table, applied where the table is known.
+
+    Called from the handler instead of declared as a route dependency for one
+    structural reason: the action depends on the ``table`` **query parameter**,
+    and no dependency runs after the handler has read it — and a second, for the
+    raised tables: ``warn`` mode's dual-accept of an absent credential exists to
+    avoid regressing ordinary reads, but a PII read protected by it is not
+    protected at all.  So ``contributions`` is checked **strict**, and every
+    other whitelisted table keeps exactly the ``dataset:read`` non-strict posture
+    it has always had.
+
+    One lookup, one enforcement point: a table either names its own action in
+    :data:`RECORDS_READ_SCOPE` or falls back to ``dataset:read``.  Note the
+    fallback is *not* "edit implies read" — the frozen vocabulary has no such
+    sugar (:func:`zolai.api.auth.scope_allows` matches the exact action, plus
+    ``resource:*`` / ``*:action``), so a key holding only ``dataset:edit`` must
+    be measured against ``dataset:edit`` here rather than bounced by a second,
+    unrelated ``dataset:read`` gate.
+    """
+    action = RECORDS_READ_SCOPE.get(table, "dataset:read")
+    auth.require_scope(action, strict=table in RECORDS_READ_SCOPE)(request)
+
+
 # ---------------------------------------------------------------------------
 # GET /api/v1/records — whitelisted, read-only, cursor paginated
 # ---------------------------------------------------------------------------
 
 
-@router.get(
-    "/records",
-    dependencies=[Depends(auth.require_scope("dataset:read"))],
-    summary="Read rows from a whitelisted table",
-)
+@router.get("/records", summary="Read rows from a whitelisted table")
 def list_records(
+    request: Request,
     table: str = Query(..., description="Whitelisted table name (400 for anything else)"),
     q: str | None = Query(None, min_length=1, description="Free-text filter over the table's search fields"),
     limit: int = Query(50, ge=1, le=500, description="Page size (api-design §4: default 50, cap 500)"),
@@ -93,6 +142,8 @@ def list_records(
 ) -> dict[str, Any]:
     """List rows of one whitelisted table, ascending id, cursor paginated."""
     search_fields = _require_whitelisted(table)
+    _require_read_scope(request, table)
+    redacted = RECORDS_REDACTED_COLUMNS.get(table, ())
 
     conn = connect_db()
     try:
@@ -120,7 +171,12 @@ def list_records(
             where.append(f"({' OR '.join(clauses)})")
             params.extend([pattern] * len(fields))
 
-        sql = f'SELECT * FROM "{table}"'
+        # Projected, not ``SELECT *``: a redacted column never leaves the store,
+        # so no page of this table can carry it — and a column added tomorrow
+        # cannot join the payload by accident.  Both names come from this
+        # table's own ``PRAGMA table_info``, never from the caller.
+        projected = [column for column in available if column not in redacted]
+        sql = f"SELECT {', '.join(projected)} FROM \"{table}\""
         if where:
             sql += f" WHERE {' AND '.join(where)}"
         sql += " ORDER BY id ASC LIMIT ?"

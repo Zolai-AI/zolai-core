@@ -45,8 +45,10 @@ ALLOWLIST: dict[str, set[str]] = {
         "well_known_openid_configuration",
         "well_known_oauth_protected_resource",
         "well_known_oauth_protected_resource_mcp",
+        "well_known_oauth_protected_resource_api_mcp",
         "mcp_relative_oauth_authorization_server",
         "mcp_relative_oauth_protected_resource",
+        "api_mcp_relative_oauth_protected_resource",
         "oauth_authorize_css",
     },
 }

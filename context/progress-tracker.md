@@ -1225,3 +1225,105 @@ in the audit trail. Writes now fill both mirrors, `update_entry` applies and
 audits only the fields it actually updates (`myanmar` was previously logged
 but never written), and the missing connection close in the attestation path
 is gone.
+
+## 2026-10-30 (Session — CI: eval-smoke job green, eval typing cleared)
+
+**ZolaiBench Smoke Tests is green for the first time** (`b94f9de`, run
+41076005867: smoke gate + Ruff Lint + Type Check all pass). Four separate
+defects were stacked behind each other in that file:
+
+1. **The workflow never parsed.** `Check for failures` opened a `python -c "`
+   program whose body sat at column 0, which closes the `run: |` block scalar —
+   GitHub rejected the whole file ("This run likely failed because of a workflow
+   file issue", 0s) on every push since it was added. Now a quoted heredoc,
+   indented inside the block. `yaml.safe_load` clean.
+2. **The smoke command did not exist.** `zolai eval run --task all --smoke
+   --json` — TASK is positional on that CLI and it has no `--json`; the flag
+   belongs to the *offline* evaluator. Switched to `python -m zolai.eval.cli
+   --set smoke --json --baseline report/eval-baseline.json --gate`, which is the
+   invocation that works without the gitignored corpus. The old gate then read a
+   `{"<task>": {"error": …}}` shape the CLI never emits; it now reads
+   `metrics` / `floors` / `below_floor`.
+3. **No writable data root.** The evaluator persists its run row through the
+   default config path (`repo.parent/data`), so a runner died with
+   `sqlite3.OperationalError: unable to open database file`. `ZOLAI_DATA_ROOT`
+   is now pinned into the workspace, as `ci.yml` already does.
+4. **Typecheck checked the wrong thing.** `mypy zolai/eval` follows imports, so
+   the job reported every pre-existing error in `zolai/qa`, `zolai/ner`,
+   `zolai/mt`, `zolai/classifier`, `zolai/data/database.py` instead of the
+   package it exists to guard. Added `--follow-imports=silent` (locally:
+   `Success: no issues found in 7 source files`).
+
+The eval-package errors it *was* supposed to report are fixed (11 → 0): the
+`dict` union in `evaluate()` is narrowed with `isinstance` instead of four
+`# type: ignore` lines, the POS confusion matrix is annotated, the JSON payload
+is declared heterogeneous, `compute_morphology_metrics` is typed as returning
+the `TokenizationMetrics` it actually builds — feature-annotated gold does not
+exist, so `MorphologyMetrics.feature_accuracy` has no number to report — and
+`add_eval_item` casts `cur.lastrowid` (captured per cursor at execute() time;
+only the stub calls it `int | None`). That last line landed on `store.py`, which
+the eval-store lane has dirty: it was committed from a throwaway worktree and
+then applied to the working file too, so their next commit carries it rather
+than reverting it. `tests/test_eval_{runner,metrics,gold_metrics}.py`: 45 passed.
+
+Also verified, unchanged: `ruff check zolai/` (the `cb1d547` E501 fix held —
+Lint is green on every push since), and `zolai eval run all --smoke` still
+reports "No gold data" for the four gold-backed tasks on a clean checkout; that
+is why the job name and header no longer claim POS/morphology/grammar coverage
+in CI. The gold sets are 3.5 MB in `data/eval/` and stay out of git.
+
+**Still red, and why** (`CI` job, `Test` step — every run on main since
+2026-10-27): 68 failures + 52 errors, all pre-existing, none from this session.
+The 52 errors are 100% fence teardowns — `no_canonical_db_writes` reports
+"test issued N write(s) against the canonical corpus" *after* the test body
+passed, because `ZOLAI_DATA_ROOT` points CI at a fresh `data/zolai.db` that the
+app's own migrations create mid-session, so the fixture's `not
+CANONICAL_DB.exists()` exemption stops applying partway through. Freezing that
+check at session start (or `ZOLAI_ALLOW_CANONICAL_WRITES=1` for CI, which is
+what the escape hatch documents — there is no corpus on a runner to protect)
+clears all 52. The 68 are mostly corpus-dependent assertions (`assert 0 >= 5000`
+in discovery, `no such table: kg_nodes` in the engine contract) plus real drift
+(`test_ai_providers_api::test_activate_sets_exactly_one` 409 vs 200 with no
+API key in CI, `test_agent_runs` turn-count assertions). Not touched here:
+`tests/conftest.py` and `.github/workflows/ci.yml` — where the quarantine list
+and the fence live — are both dirty in the in-progress learning/eval-store
+lanes, so a triage pass belongs after those land.
+
+## 2026-10-31 (Session — openers learn only from Zolai prose; page structure is not prose)
+
+The 2026-10-30 hierarchy pass stored what it studied, but its opener lane still
+listened to page furniture and to English. The `reference` guides were
+templated, so `verse` (1,011), `new` (958), `new vocabulary` (708) and `themes`
+(692) led wiki paragraphs; mis-tagged bilingual articles contributed `us` (636),
+`the` (101) and `b` (35). Filtering those words by name would have been a
+hardcode, so the learner now reads structure and language.
+
+- `_markdown_paragraphs` parses `wiki_content` instead of splitting on blank
+  lines: headings, `>` metadata, tables, rules, `**Label:**` rows and
+  `_Note:_` lines are dropped, a heading closes the block, a bold label is
+  stripped from the front of a lyric line, and links become their text. Wiki
+  layers fell 74,864 → 56,149 because those lines are only studyable to a page
+  renderer.
+- `_MD_LYRICS_LABEL_RE` strips `Verse 1: …` / `Verse 1 …` / a standalone
+  `Chorus` whether the label is followed by `:`, `.`, `-`, whitespace or
+  end-of-line. 0 blocks now start `verse`/`chorus`.
+- `_looks_zolai` gates **opener learning only**: ≥2 Zolai function-word hits,
+  ≥5 % density, and more Zolai than English stopwords. Layers stay a full
+  census; skipped paragraphs are reported as `non_zolai_paragraphs`, and an
+  opener marker containing an English stopword is skipped (bilingual titles
+  glued to a Zolai paragraph). Unigram markers shorter than two characters are
+  skipped (a bare `b` was an enumerated label).
+- Applied to `data/zolai.db`: **599,963 layers** (zomidaily 496,965 · wiki
+  56,149 · bible 39,044 · lessons 7,805; line 401,549 · paragraph 186,285 ·
+  document 12,125 · corpus 4) and **390 openers** (bible 143 · wiki 119 ·
+  zomidaily 128), each with exactly one `foundation_evidence` row. 0 English
+  markers, 0 template words, 0 orphan evidence links.
+
+Tests: `tests/test_bible_hierarchy.py` grew to 22 — `test_markdown_structure_is_not_prose`,
+`test_looks_zolai_rejects_english_that_mentions_zolai`, and
+`test_english_paragraphs_teach_no_openers_but_keep_their_layers` (72 paragraph
+rows kept, zero English openers). Docs updated: `docs/database/tables.md`
+§ 2.16 + the grammar/evidence rows, `docs/database/README.md`,
+`docs/reports/SOURCE_OF_TRUTH_MATRIX.md`, `docs/OPEN-ISSUES.md` (the template
+opener item is closed; the English-tagged-row item is now a measured 24, not
+~34, and remains an owner decision).

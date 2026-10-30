@@ -76,6 +76,7 @@ from pathlib import Path
 from typing import Any, Literal, Sequence
 
 from ..config import config
+from ..shared.clock import stamp
 from .verse_counts import (
     BOOK_ORDER,
     TOTAL_VERSES,
@@ -276,10 +277,6 @@ def _connect(path: Path) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=30000")
     return conn
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> list[str]:
@@ -633,7 +630,7 @@ def run_audit(
         scan = _scan(conn, kjv)
         return {
             "db": str(db),
-            "generated_at": _utc_now(),
+            "generated_at": stamp(),
             "kjv_path": str(Path(kjv_path) if kjv_path else default_kjv_path()),
             "target_row_count": TOTAL_VERSES,
             **_public(scan),
@@ -694,16 +691,18 @@ def run_fix(
 
         if apply:
             created_archive = _ensure_archive_table(conn)
-            stamp = _utc_now()
+            # Never rebind ``stamp``: that makes it function-local and breaks
+            # every other ``stamp()`` call in this function.
+            batch_stamp = stamp()
             for action in actions:
                 row = action["row"]
                 restore = action["en_restore"]
                 try:
-                    _archive_row(conn, row, stamp)
+                    _archive_row(conn, row, batch_stamp)
                     _audit(
                         conn, table=TABLE, row_id=row["id"], field="ref",
                         old=row["ref"], new=f"ARCHIVED:{row['ref']}",
-                        stamp=stamp, reason=REASON,
+                        stamp=batch_stamp, reason=REASON,
                     )
                     conn.execute(f"DELETE FROM {TABLE} WHERE id = ?", (row["id"],))
                     if restore is not None:
@@ -711,7 +710,7 @@ def run_fix(
                         _update_en(conn, target_id, new_en)
                         _audit(
                             conn, table=TABLE, row_id=target_id, field="en_kJV",
-                            old=old_en, new=new_en, stamp=stamp,
+                            old=old_en, new=new_en, stamp=batch_stamp,
                             reason=EN_RESTORE_REASON,
                         )
                     conn.commit()
@@ -736,7 +735,7 @@ def run_fix(
                 _update_en(conn, live["id"], text)
                 _audit(
                     conn, table=TABLE, row_id=live["id"], field="en_kJV",
-                    old=None, new=text, stamp=_utc_now(), reason=FILL_NULL_REASON,
+                    old=None, new=text, stamp=stamp(), reason=FILL_NULL_REASON,
                 )
                 fill_null += 1
                 audit_rows += 1
@@ -827,7 +826,7 @@ def run_revert(
         restored = refused = reversed_ = conflict = audit_rows = 0
 
         if apply:
-            stamp = _utc_now()
+            batch_stamp = stamp()
             for a in archived:
                 source_id = a["source_row_id"]
                 ref = a["ref"]
@@ -845,7 +844,7 @@ def run_revert(
                 )
                 _audit(
                     conn, table=TABLE, row_id=source_id, field="ref",
-                    old=f"ARCHIVED:{ref}", new=ref, stamp=stamp, reason=REVERT_REASON,
+                    old=f"ARCHIVED:{ref}", new=ref, stamp=batch_stamp, reason=REVERT_REASON,
                 )
                 conn.execute(
                     f"DELETE FROM {ARCHIVE_TABLE} WHERE source_row_id = ?",
@@ -867,7 +866,7 @@ def run_revert(
                 _audit(
                     conn, table=TABLE, row_id=log["row_id"], field="en_kJV",
                     old=log["new_value"], new=log["old_value"],
-                    stamp=stamp, reason=REVERT_REASON,
+                    stamp=batch_stamp, reason=REVERT_REASON,
                 )
                 reversed_ += 1
                 audit_rows += 1
@@ -930,7 +929,7 @@ def run_remap(
 
         results: dict[str, dict[str, int]] = {}
         audit_rows = 0
-        stamp = _utc_now()
+        batch_stamp = stamp()
         for table, column in DOWNSTREAM:
             if table not in tables:
                 results[table] = {"present": 0, "scanned": 0, "remapped": 0, "unmapped": 0}
@@ -953,7 +952,7 @@ def run_remap(
                     )
                     _audit(
                         conn, table=table, row_id=row["id"], field=column,
-                        old=row["ref"], new=new_ref, stamp=stamp, reason=REMAP_REASON,
+                        old=row["ref"], new=new_ref, stamp=batch_stamp, reason=REMAP_REASON,
                     )
                     audit_rows += 1
                 remapped += 1

@@ -41,7 +41,7 @@ from starlette.concurrency import run_in_threadpool
 from . import auth
 from .auth_middleware import extract_key
 from .errors import internal_http_error
-from .rbac import ROLE_ADMIN, require_role, role_for
+from .rbac import ROLE_ADMIN, has_role, require_role
 
 logger = logging.getLogger(__name__)
 
@@ -772,7 +772,7 @@ async def _ws_authorize(websocket: WebSocket) -> dict[str, Any] | None:
 
             record = await run_in_threadpool(session_auth.resolve_session, token)
 
-    if role_for(record) != ROLE_ADMIN:
+    if not has_role(record, ROLE_ADMIN):
         logger.info("rejected learning websocket handshake: %s", token or "anonymous")
         await websocket.close(code=WS_FORBIDDEN, reason="admin role required")
         return None

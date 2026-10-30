@@ -622,6 +622,11 @@ app.add_typer(eval_app, name="eval")
 def eval_run(
     task: str = typer.Argument(..., help="Task: tokenization, pos, morph, grammar, all"),
     smoke: bool = typer.Option(False, help="Run smoke test (50 items per task)"),
+    system: str = typer.Option(
+        "placeholder",
+        "--system",
+        help="POS system to score: 'placeholder' (floor) or 'crf' (trained model, in-sample)",
+    ),
 ):
     """Run evaluation for specified task(s) — reads from evaluation database."""
 
@@ -629,6 +634,8 @@ def eval_run(
     argv = ["run", task]
     if smoke:
         argv.append("--smoke")
+    if system != "placeholder":
+        argv += ["--system", system]
     # Use the runner app directly
     raise typer.Exit(runner_app(argv, standalone_mode=False))
 
@@ -1205,6 +1212,11 @@ def _apikey_bootstrap():
     from ..api import auth
 
     auth.ensure_api_keys_table()
+    # create/rotate/revoke each append an api_keys row to data_audit_log —
+    # same reason as `_user_bootstrap`, and the same silent loss without it.
+    # Created through the auth service so it lands on the same manager as
+    # those audit writes.
+    auth.ensure_audit_log_table()
     return auth
 
 
@@ -1369,7 +1381,22 @@ def _user_bootstrap():
     from ..api import session_auth
 
     session_auth.ensure_user_session_tables()
+    # Every guarded writer below appends a data_audit_log row, and the startup
+    # migrations that create that table only run inside the API server. On a
+    # fresh store driven from the CLI the first role change would otherwise be
+    # the one audit row this deployment can never reconstruct.
+    session_auth.ensure_audit_log_table()
     return session_auth
+
+
+#: The rank a **local operator on this machine** asserts when calling a guarded
+#: writer (`session_auth.set_user_role` / `set_user_enabled`).  The CLI is not a
+#: network surface — it holds the database file — so it is the one caller allowed
+#: to state its own role, and stating it is what makes
+#: `zolai user set-role … superadmin` the bootstrap path for role #1.  No HTTP
+#: handler may use this: they pass the caller's own resolved role.
+def _cli_actor_role(session_auth) -> str:
+    return session_auth.ROLE_SUPERADMIN
 
 
 def _read_password(from_stdin: bool) -> str:
@@ -1418,7 +1445,7 @@ def _user_table(users: list[dict], title: str) -> Table:
 def user_create(
     username: str = typer.Option(..., "--username", "-u", help="1-64 chars of a-z 0-9 . _ -"),
     display_name: str = typer.Option("", "--display-name", help="Optional display name"),
-    role: str = typer.Option("member", "--role", help="member | admin"),
+    role: str = typer.Option("member", "--role", help="member | admin | superadmin"),
     password_stdin: bool = typer.Option(
         False, "--password-stdin", help="Read the password from stdin (one line)"
     ),
@@ -1466,6 +1493,72 @@ def user_list(
             rprint('[yellow]No users yet — run `zolai user create --username <name>`[/yellow]')
 
 
+@user_app.command("set-role")
+def user_set_role(
+    username: str = typer.Argument(..., help="Username"),
+    role: str = typer.Argument(..., help="member | admin | superadmin"),
+    json_out: bool = typer.Option(False, "--json", help="Print the record as JSON"),
+):
+    """🛡️ Change an account's role — the only writer, and the bootstrap path.
+
+    Every HTTP route that could change a role goes through the same guarded
+    :func:`zolai.api.session_auth.set_user_role`, and that guard refuses a role
+    change by anyone who is not already a superadmin.  So the **first**
+    superadmin cannot be made over the API by construction: it is made here,
+    by whoever holds the database file.
+
+        zolai user set-role <you> superadmin
+
+    The same guard then refuses to demote or disable the last one, so this
+    command cannot strand the deployment either.
+    """
+    _setup_logging(False)
+    session_auth = _user_bootstrap()
+    try:
+        user = session_auth.set_user_role(
+            username,
+            role=role,
+            actor="cli",
+            actor_role=_cli_actor_role(session_auth),
+        )
+    except LookupError as exc:
+        rprint(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+    except ValueError as exc:
+        rprint(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+    except session_auth.RoleGuardRejected as exc:
+        rprint(f"[red]🚫 Refused ({exc.reason}): {exc}[/red]")
+        raise typer.Exit(code=1)
+
+    safe = session_auth.sanitize_user(user)
+    if json_out:
+        _user_print(safe)
+    else:
+        rprint(f"[green]✓ {safe['username']} is now {safe['role']}.[/green] "
+               "Live sessions pick the change up on their next request.")
+
+
+@user_app.command("promote")
+def user_promote(
+    username: str = typer.Argument(..., help="Username"),
+    role: str = typer.Option("admin", "--to", help="admin | superadmin"),
+    json_out: bool = typer.Option(False, "--json", help="Print the record as JSON"),
+):
+    """⬆️ `set-role` with the direction spelled out (`--to superadmin` too)."""
+    user_set_role(username, role, json_out)
+
+
+@user_app.command("demote")
+def user_demote(
+    username: str = typer.Argument(..., help="Username"),
+    role: str = typer.Option("member", "--to", help="member | admin"),
+    json_out: bool = typer.Option(False, "--json", help="Print the record as JSON"),
+):
+    """⬇️ `set-role` downward — refuses the last superadmin, same guard."""
+    user_set_role(username, role, json_out)
+
+
 @user_app.command("disable")
 def user_disable(
     username: str = typer.Argument(..., help="Username"),
@@ -1475,9 +1568,17 @@ def user_disable(
     _setup_logging(False)
     session_auth = _user_bootstrap()
     try:
-        user = session_auth.set_user_enabled(username, enabled=False, actor="cli")
+        user = session_auth.set_user_enabled(
+            username,
+            enabled=False,
+            actor="cli",
+            actor_role=_cli_actor_role(session_auth),
+        )
     except LookupError as exc:
         rprint(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+    except session_auth.RoleGuardRejected as exc:
+        rprint(f"[red]🚫 Refused ({exc.reason}): {exc}[/red]")
         raise typer.Exit(code=1)
 
     safe = session_auth.sanitize_user(user)
@@ -1496,9 +1597,17 @@ def user_enable(
     _setup_logging(False)
     session_auth = _user_bootstrap()
     try:
-        user = session_auth.set_user_enabled(username, enabled=True, actor="cli")
+        user = session_auth.set_user_enabled(
+            username,
+            enabled=True,
+            actor="cli",
+            actor_role=_cli_actor_role(session_auth),
+        )
     except LookupError as exc:
         rprint(f"[red]✗ {exc}[/red]")
+        raise typer.Exit(code=1)
+    except session_auth.RoleGuardRejected as exc:
+        rprint(f"[red]🚫 Refused ({exc.reason}): {exc}[/red]")
         raise typer.Exit(code=1)
 
     safe = session_auth.sanitize_user(user)
@@ -1556,6 +1665,183 @@ def user_revoke_sessions(
         _user_print(result)
     else:
         rprint(f"[green]✓ Revoked {result['revoked']} session(s)[/green] for {result['username']}.")
+
+
+# ============================================================
+# RBAC AUDIT (read-only privilege report)
+# ============================================================
+
+#: The scopes that make their holder **superadmin** — see
+#: :data:`zolai.api.rbac.SUPERADMIN_SCOPES`.  Named here rather than imported so
+#: the report reads as a question ("who can hand out roles?"), not as a dump.
+_ELEVATED_SCOPES = ("*", "role:manage")
+
+
+def _mask_display(value: object) -> str:
+    """First 6 + last 4 of an identifier that is already non-secret.
+
+    ``key_prefix`` is what the API itself publishes to let you point at a key,
+    but an audit report is pasted into issues, tickets and terminal scrollback.
+    The 6+4 form still identifies the row closely enough to act on with
+    ``zolai apikey revoke``.
+    """
+    text = str(value or "")
+    if len(text) <= 10:
+        return text
+    return f"{text[:6]}…{text[-4:]}"
+
+
+@app.command("rbac-audit")
+def rbac_audit(
+    json_out: bool = typer.Option(False, "--json", help="Print the report as JSON"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """🔍 Read-only privilege report: who can grant roles, and how they got it.
+
+    Three answers, all from the database as it stands:
+
+    1. **accounts by role**, with the enabled-superadmin count — the writer
+       refuses to demote or disable the last one, so this is the number to keep
+       above 1;
+    2. **non-revoked API keys holding ``*`` or ``role:manage``** — the scopes
+       that make a key superadmin, i.e. every credential that can mint roles and
+       widen other keys;
+    3. **pending role requests**, so a queue nobody reads is visible.
+
+    Read-only **by design**: it never downgrades, revokes or rewrites a scope,
+    because silently editing somebody else's credential is worse than reporting
+    it — the person who minted that key may have a reason you cannot see.  Act
+    on the rows yourself with ``zolai apikey revoke`` / ``zolai user set-role``.
+    """
+    _setup_logging(verbose)
+    session_auth = _user_bootstrap()
+    auth = _apikey_bootstrap()
+    users = session_auth.sanitize_users(session_auth.list_users())
+    keys = auth.list_api_keys()
+    role_counts: dict[str, int] = {}
+    for user in users:
+        role_counts[str(user.get("role") or "member")] = role_counts.get(
+            str(user.get("role") or "member"), 0
+        ) + 1
+    superadmins = [u for u in users if str(u.get("role") or "") == session_auth.ROLE_SUPERADMIN]
+    enabled_superadmins = [u for u in superadmins if u.get("enabled")]
+
+    elevated_keys = [
+        k
+        for k in keys
+        if not k.get("revoked_at") and set(k.get("scopes") or []) & set(_ELEVATED_SCOPES)
+    ]
+
+    pending_requests = []
+    try:
+        # Through the service, so the DDL keeps its one home in migrations.
+        session_auth.ensure_role_request_tables()
+        pending_requests = session_auth.list_role_requests(status="pending", limit=200)
+    except Exception as exc:  # noqa: BLE001 - a report must not crash on a missing table
+        rprint(f"[yellow]role_requests unread:[/yellow] {type(exc).__name__}")
+
+    report = {
+        "accounts": {
+            "total": len(users),
+            "by_role": dict(sorted(role_counts.items())),
+            "superadmins": [
+                {
+                    "id": u.get("id"),
+                    "username": u.get("username"),
+                    "enabled": bool(u.get("enabled")),
+                }
+                for u in superadmins
+            ],
+            "enabled_superadmin_count": len(enabled_superadmins),
+        },
+        "elevated_keys": [
+            {
+                "id": k.get("id"),
+                "name": k.get("name"),
+                "key_prefix": _mask_display(k.get("key_prefix")),
+                "elevated_scopes": sorted(
+                    set(k.get("scopes") or []) & set(_ELEVATED_SCOPES)
+                ),
+                "created_by": k.get("created_by"),
+                "created_at": k.get("created_at"),
+                "last_used_at": k.get("last_used_at"),
+                "expires_at": k.get("expires_at"),
+            }
+            for k in elevated_keys
+        ],
+        "pending_role_requests": [
+            {
+                "id": r.get("id"),
+                "username": r.get("username"),
+                "requested_role": r.get("requested_role"),
+                "created_at": r.get("created_at"),
+            }
+            for r in pending_requests
+        ],
+        "actions_taken": 0,
+    }
+
+    if json_out:
+        _user_print(report)
+        return
+
+    accounts = Table(title="Accounts by role", border_style="blue")
+    for column in ("Role", "Accounts"):
+        accounts.add_column(column, justify="right")
+    for role, count in report["accounts"]["by_role"].items():
+        accounts.add_row(role, str(count))
+    console.print(accounts)
+    rprint(
+        f"[bold]{len(enabled_superadmins)}[/bold] enabled superadmin(s): "
+        + (", ".join(str(u.get("username")) for u in enabled_superadmins) or "none")
+    )
+    if len(enabled_superadmins) == 0:
+        rprint(
+            "[red]✗ No account can grant a role.[/red] Bootstrap one: "
+            "[dim]zolai user set-role <you> superadmin[/dim]"
+        )
+    elif len(enabled_superadmins) == 1:
+        rprint(
+            "[yellow]! One enabled superadmin.[/yellow] The writer refuses to demote or "
+            "disable it, so promote a second before anyone goes on leave."
+        )
+
+    key_rows = Table(title="Non-revoked keys that can grant roles", border_style="yellow")
+    for column in ("ID", "Name", "Prefix", "Scope", "Created by", "Created", "Last used"):
+        key_rows.add_column(column)
+    for row in report["elevated_keys"]:
+        for scope in row["elevated_scopes"]:
+            key_rows.add_row(
+                str(row["id"]),
+                str(row["name"]),
+                row["key_prefix"],
+                scope,
+                str(row["created_by"] or ""),
+                str(row["created_at"] or ""),
+                str(row["last_used_at"] or "never"),
+            )
+    console.print(key_rows)
+    if not report["elevated_keys"]:
+        rprint("[green]✓[/green] No live key holds `*` or `role:manage`.")
+
+    if report["pending_role_requests"]:
+        queue = Table(title="Pending role requests", border_style="cyan")
+        for column in ("ID", "Username", "Requests", "Asked"):
+            queue.add_column(column)
+        for row in report["pending_role_requests"]:
+            queue.add_row(
+                str(row["id"]),
+                str(row["username"]),
+                str(row["requested_role"]),
+                str(row["created_at"] or ""),
+            )
+        console.print(queue)
+
+    rprint(
+        "[dim]actions_taken: 0 — this command changes nothing. "
+        "Revoke with [bold]zolai apikey revoke <id>[/bold], demote with "
+        "[bold]zolai user set-role <name> member[/bold].[/dim]"
+    )
 
 
 # ============================================================

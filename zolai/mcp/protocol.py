@@ -31,21 +31,28 @@ Design constraints (all enforced here):
   exists.
 
 Transports return :func:`handle_payload`'s ``(http_status, body)``:
-``(200, response)`` for a request, ``(202, None)`` for a notification, and
-``(400, response)`` for a lone unsupported-version error (the streamable-HTTP
-*binding*'s server-validation status, so a modern client's era probe recognises
-it — see :data:`UNSUPPORTED_VERSION_HTTP_STATUS`).
+``(200, response)`` for a request, ``(202, None)`` for a notification,
+``(400, response)`` for a lone unsupported-version error or a header/body
+disagreement (the streamable-HTTP *binding*'s server-validation statuses, so a
+modern client's era probe recognises this server — see
+:data:`UNSUPPORTED_VERSION_HTTP_STATUS` and :data:`HEADER_MISMATCH`), and
+``(404, response)`` for an unknown method **when the request declared**
+``2026-07-28`` (the modern binding's status; a legacy client reads a 404 as
+"fall back to HTTP+SSE", so era-ambiguous requests keep the 200).  Origin
+validation is the transport's job (HTTP 403) — see
+:mod:`zolai.api.mcp_router`.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import Callable, Iterable
 from typing import Any
 
 from .. import __version__
 from ..agent.tools.errors import safe_message
-from ..agent.tools.registry import get_tool, mcp_tools, ordered_names
+from ..agent.tools.registry import allow_list, get_tool, mcp_tools, ordered_names
 from ..agent.tools.types import ToolErrorCode, ToolResult
 
 # ── Version + identity ───────────────────────────────────────────────────────
@@ -78,6 +85,10 @@ SUPPORTED_PROTOCOL_VERSIONS: tuple[str, ...] = (
     "2025-11-25",
     "2025-06-18",
     "2025-03-26",
+    # The first published legacy revision. Older Claude Desktop / Cursor /
+    # VS Code builds still send it in ``initialize``; the tool surface here is
+    # version-agnostic, so echoing it is honest rather than a downgrade.
+    "2024-11-05",
 )
 
 SERVER_NAME = "zolai-core"
@@ -110,11 +121,20 @@ INTERNAL_ERROR = -32603
 #: ``UnsupportedProtocolVersionError`` — the version a request declared is not
 #: one this server implements (spec: versioning page, ``-32022``).
 UNSUPPORTED_PROTOCOL_VERSION = -32022
+#: ``HeaderMismatchError`` — an HTTP header disagrees with the request body
+#: (spec: streamable HTTP, *Server Validation*).  Rejected with HTTP 400 so a
+#: client sees the same status whether an intermediary or this server caught it.
+HEADER_MISMATCH = -32020
 
 #: HTTP status the *binding* uses for a lone unsupported-version error, so the
 #: modern-era probe ("attempt a modern request and inspect the body of a
 #: ``400 Bad Request``") recognises this server as modern rather than legacy.
 UNSUPPORTED_VERSION_HTTP_STATUS = 400
+#: HTTP status the modern binding uses for an unrecognised method.  Applying it
+#: unconditionally would break legacy clients — a 404 is exactly what makes a
+#: handshake-era client fall back to the deprecated HTTP+SSE transport — so it
+#: is only used when the request *declared* ``2026-07-28``.
+METHOD_NOT_FOUND_HTTP_STATUS = 404
 
 # ── ``_meta`` keys + the HTTP version header ─────────────────────────────────
 
@@ -125,10 +145,38 @@ META_SERVER_INFO = "io.modelcontextprotocol/serverInfo"
 #: Header the same version also travels in on HTTP (SEP-2243 / streamable HTTP).
 #: Starlette lower-cases header names, hence the lower-case literal.
 PROTOCOL_VERSION_HEADER = "mcp-protocol-version"
-#: ``server/discover`` caching hints — the registry is static, so a client may
-#: cache the result (spec: discover supports caching).
-DISCOVER_TTL_MS = 3_600_000
-DISCOVER_CACHE_SCOPE = "public"
+#: Request-metadata headers that mirror body fields (spec: streamable HTTP,
+#: *Standard Request Headers*).  Starlette lower-cases header names.
+METHOD_HEADER = "mcp-method"
+NAME_HEADER = "mcp-name"
+#: Sentinel wrapper for a header value that is not plain ASCII (spec: *Value
+#: Encoding*): ``=?base64?<base64-of-utf8>?=``.
+HEADER_BASE64_PREFIX = "=?base64?"
+HEADER_BASE64_SUFFIX = "?="
+
+#: Caching hints (spec: caching + the ``tools/list`` response example).  The
+#: registry is static for the lifetime of a process, so one hour is the
+#: discovery/list TTL; ``cacheScope`` is ``public`` only when the payload is
+#: identical for every caller.
+TTL_MS = 3_600_000
+CACHE_SCOPE_PUBLIC = "public"
+CACHE_SCOPE_PRIVATE = "private"
+#: ``server/discover`` shares the discovery TTL — kept as the older names so
+#: existing imports (and tests) keep working.
+DISCOVER_TTL_MS = TTL_MS
+DISCOVER_CACHE_SCOPE = CACHE_SCOPE_PUBLIC
+
+#: The ``resultType`` discriminator every result carries (SEP-2322).  This
+#: server never asks the client for input, so every result is ``"complete"``.
+RESULT_TYPE_COMPLETE = "complete"
+
+#: ``tools/list`` page size.  The largest tier (42 tools) is one page, so no
+#: caller sees a ``nextCursor`` today; the cursor path exists so a registry that
+#: outgrows one page paginates without a client change.  The order is
+#: ``ordered_names`` (registry declaration, static per process), never a
+#: database order, so a cursor stays valid for the life of the process.
+TOOLS_PAGE_SIZE = 50
+_CURSOR_PREFIX = "tools:"
 
 #: ``call_tool(name, arguments) -> ToolResult`` — injected by the transport.
 ToolExecutor = Callable[[str, dict[str, Any]], ToolResult]
@@ -155,9 +203,37 @@ EMPTY_LIST_METHODS: dict[str, str] = {
 NOOP_METHODS: frozenset[str] = frozenset({"logging/setLevel"})
 
 
+def _server_info() -> dict[str, str]:
+    """A fresh server-identity object (never a shared mutable literal)."""
+    return {"name": SERVER_NAME, "version": SERVER_VERSION}
+
+
+def annotate_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Add the fields every ordinary result carries in the modern era.
+
+    * ``resultType`` (SEP-2322) is the result discriminator: a client that
+      branches on it treats a result without it as malformed.
+    * ``_meta["io.modelcontextprotocol/serverInfo"]`` lets a client attribute
+      a result to a server even when the two sides met mid-session (a proxy
+      aggregating several servers has no other per-result identity).
+
+    Both are ``setdefault``: a result that already declares a non-``complete``
+    ``resultType`` (MRTR ``input_required``) must keep its own value.  Legacy
+    clients ignore result fields they do not know, so annotating both eras is
+    safe and keeps the surface identical.
+    """
+    result.setdefault("resultType", RESULT_TYPE_COMPLETE)
+    meta = result.get("_meta")
+    if not isinstance(meta, dict):
+        meta = {}
+        result["_meta"] = meta
+    meta.setdefault(META_SERVER_INFO, _server_info())
+    return result
+
+
 def jsonrpc_result(message_id: Any, result: dict[str, Any]) -> dict[str, Any]:
-    """A JSON-RPC success response."""
-    return {"jsonrpc": JSONRPC_VERSION, "id": message_id, "result": result}
+    """A JSON-RPC success response (every result annotated, see :func:`annotate_result`)."""
+    return {"jsonrpc": JSONRPC_VERSION, "id": message_id, "result": annotate_result(result)}
 
 
 def jsonrpc_error(
@@ -178,6 +254,20 @@ def parse_error_response(message: str = "Parse error") -> dict[str, Any]:
 # ── Methods ──────────────────────────────────────────────────────────────────
 
 
+def declared_meta_version(params: dict[str, Any] | None) -> str | None:
+    """The version a request declares in ``params._meta``, or ``None``.
+
+    Only the *body* declaration: the transport compares this against the
+    :data:`PROTOCOL_VERSION_HEADER` value to detect a header/body mismatch.
+    """
+    meta = (params or {}).get("_meta")
+    if isinstance(meta, dict):
+        declared = meta.get(META_PROTOCOL_VERSION)
+        if isinstance(declared, str) and declared.strip():
+            return declared.strip()
+    return None
+
+
 def requested_version(
     params: dict[str, Any] | None, header_version: str | None = None
 ) -> str | None:
@@ -189,14 +279,35 @@ def requested_version(
     ``None`` means *era-ambiguous* — this server serves such a request as-is,
     because its tool surface and capabilities are identical in both eras.
     """
-    meta = (params or {}).get("_meta")
-    if isinstance(meta, dict):
-        declared = meta.get(META_PROTOCOL_VERSION)
-        if isinstance(declared, str) and declared.strip():
-            return declared.strip()
+    declared = declared_meta_version(params)
+    if declared is not None:
+        return declared
     if isinstance(header_version, str) and header_version.strip():
         return header_version.strip()
     return None
+
+
+def decode_header_value(value: str) -> str:
+    """Decode a mirrored header value, honouring the Base64 sentinel.
+
+    A value outside the header-safe ASCII set travels as
+    ``=?base64?<base64-of-utf8>?=`` (spec: streamable HTTP, *Value Encoding*).
+    Servers MUST decode it before comparing it to the body value.  A malformed
+    encoding is returned unchanged, so the comparison fails and the request is
+    refused with ``-32020`` rather than accepted on a broken value.
+    """
+    if value.startswith(HEADER_BASE64_PREFIX) and value.endswith(HEADER_BASE64_SUFFIX):
+        encoded = value[len(HEADER_BASE64_PREFIX) : -len(HEADER_BASE64_SUFFIX)]
+        try:
+            return base64.b64decode(encoded, validate=True).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return value
+    return value
+
+
+def header_mismatch_error(message_id: Any, detail: str) -> dict[str, Any]:
+    """``-32020`` — a mirrored HTTP header disagreed with the request body."""
+    return jsonrpc_error(message_id, HEADER_MISMATCH, f"Header mismatch: {detail}")
 
 
 def unsupported_version_error(message_id: Any, requested: str) -> dict[str, Any]:
@@ -256,9 +367,75 @@ def discover_result() -> dict[str, Any]:
     }
 
 
-def tools_list_result(allow: Iterable[str]) -> dict[str, Any]:
-    """The ``tools/list`` result for a caller's allow-list."""
-    return {"tools": mcp_tools(ordered_names(allow))}
+class InvalidCursor(ValueError):
+    """A ``tools/list`` cursor this server did not issue (transport maps → -32602)."""
+
+
+def encode_cursor(offset: int) -> str:
+    """Opaque cursor naming the next page's offset (unpadded base64url).
+
+    Opaque on purpose: a client must echo what it received, not construct one,
+    so the pagination order can change without a client-visible break.
+    """
+    raw = f"{_CURSOR_PREFIX}{int(offset)}".encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def decode_cursor(cursor: Any) -> int:
+    """Offset carried by ``cursor``; raise :class:`InvalidCursor` for anything else."""
+    if not isinstance(cursor, str) or not cursor:
+        raise InvalidCursor("'cursor' must be a non-empty string")
+    padded = cursor + "=" * (-len(cursor) % 4)
+    try:
+        raw = base64.b64decode(padded.encode("ascii"), altchars=b"-_", validate=True)
+        text = raw.decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        raise InvalidCursor("'cursor' is not a cursor issued by this server") from None
+    if not text.startswith(_CURSOR_PREFIX):
+        raise InvalidCursor("'cursor' is not a cursor issued by this server")
+    digits = text[len(_CURSOR_PREFIX) :]
+    if not digits.isdigit():
+        raise InvalidCursor("'cursor' is not a cursor issued by this server")
+    return int(digits)
+
+
+def tools_list_result(
+    allow: Iterable[str],
+    cursor: Any = None,
+    page_size: int | None = None,
+) -> dict[str, Any]:
+    """One ``tools/list`` page for a caller's allow-list, with caching hints.
+
+    ``cursor`` is the opaque ``nextCursor`` a previous page returned (``None``
+    or ``""`` starts at the first page).  ``nextCursor`` is present only when
+    another page exists — the spec's rule, and why a one-page surface stays
+    byte-identical to the pre-pagination response.
+
+    ``cacheScope`` is ``public`` only when the payload is identical for every
+    caller — i.e. the allow-list resolves to exactly the anonymous set.  A
+    member/admin set (or one narrowed by granted scopes) is ``private``: a
+    shared cache must never replay a privileged tool list to an anonymous
+    caller.  The scope is derived here from the allow-list itself, never from
+    a client field, so a caller cannot widen the cache audience either.
+
+    Raises:
+        InvalidCursor: ``cursor`` was not issued by :func:`encode_cursor`.
+    """
+    names = ordered_names(allow)
+    size = TOOLS_PAGE_SIZE if page_size is None else int(page_size)
+    if size < 1:
+        raise ValueError(f"tools/list page_size must be >= 1, got {size!r}")
+    offset = 0 if cursor in (None, "") else decode_cursor(cursor)
+    page = names[offset : offset + size]
+    public = set(names) == set(allow_list("public"))
+    result: dict[str, Any] = {
+        "tools": mcp_tools(page),
+        "ttlMs": TTL_MS,
+        "cacheScope": CACHE_SCOPE_PUBLIC if public else CACHE_SCOPE_PRIVATE,
+    }
+    if offset + size < len(names):
+        result["nextCursor"] = encode_cursor(offset + size)
+    return result
 
 
 def tool_result_payload(result: ToolResult) -> dict[str, Any]:
@@ -380,6 +557,26 @@ def handle_message(
     if method in NOTIFICATION_METHODS:
         return None
 
+    # The binding mirrors the version into a header; the body is the source of
+    # truth, so a disagreement is refused with -32020 rather than silently
+    # trusting one side (spec: streamable HTTP, *Server Validation*).
+    meta_version = declared_meta_version(params)
+    if (
+        meta_version is not None
+        and isinstance(protocol_version, str)
+        and protocol_version.strip()
+        and meta_version != protocol_version.strip()
+    ):
+        return (
+            None
+            if notification
+            else header_mismatch_error(
+                message_id,
+                f"{PROTOCOL_VERSION_HEADER} header value "
+                f"{protocol_version.strip()!r} does not match body value {meta_version!r}",
+            )
+        )
+
     # A *declared* version we do not implement is refused before any method runs
     # (spec: versioning — this is the modern era's only negotiation mechanism,
     # and it is per-request, so a rejected request costs the client nothing).
@@ -399,11 +596,25 @@ def handle_message(
         # it could only break a caller, so this server keeps the superset.
         response = jsonrpc_result(message_id, {})
     elif method == "tools/list":
-        response = jsonrpc_result(message_id, tools_list_result(allow))
+        try:
+            page = tools_list_result(allow, cursor=(params or {}).get("cursor"))
+        except InvalidCursor as exc:
+            response = jsonrpc_error(message_id, INVALID_PARAMS, f"Invalid params: {exc}")
+        else:
+            response = jsonrpc_result(message_id, page)
     elif method == "tools/call":
         response = _call_tool_result(message_id, params or {}, allow=allow, call_tool=call_tool)
     elif method in EMPTY_LIST_METHODS:
-        response = jsonrpc_result(message_id, {EMPTY_LIST_METHODS[method]: []})
+        # Static and identical for every caller, so this list is cacheable
+        # publicly — the same hints ``tools/list`` carries.
+        response = jsonrpc_result(
+            message_id,
+            {
+                EMPTY_LIST_METHODS[method]: [],
+                "ttlMs": TTL_MS,
+                "cacheScope": CACHE_SCOPE_PUBLIC,
+            },
+        )
     elif method in NOOP_METHODS:
         response = jsonrpc_result(message_id, {})
     else:
@@ -453,43 +664,87 @@ def handle_payload(
         return 202, None
     if _is_unsupported_version(response):
         return UNSUPPORTED_VERSION_HTTP_STATUS, response
+    if _is_header_mismatch(response):
+        # The binding specifies 400 for a header/body disagreement; the error
+        # code (-32020 vs -32022) tells the client which one it was.
+        return 400, response
+    if _is_method_not_found(response) and _declares_modern(payload, protocol_version):
+        return METHOD_NOT_FOUND_HTTP_STATUS, response
     return 200, response
+
+
+def _error_code(response: Any) -> Any:
+    if isinstance(response, dict) and isinstance(response.get("error"), dict):
+        return response["error"].get("code")
+    return None
 
 
 def _is_unsupported_version(response: Any) -> bool:
     """Whether a response is the lone ``-32022`` version refusal."""
-    return (
-        isinstance(response, dict)
-        and isinstance(response.get("error"), dict)
-        and response["error"].get("code") == UNSUPPORTED_PROTOCOL_VERSION
+    return _error_code(response) == UNSUPPORTED_PROTOCOL_VERSION
+
+
+def _is_header_mismatch(response: Any) -> bool:
+    """Whether a response is a ``-32020`` header/body refusal."""
+    return _error_code(response) == HEADER_MISMATCH
+
+
+def _is_method_not_found(response: Any) -> bool:
+    """Whether a response is a ``-32601`` method refusal."""
+    return _error_code(response) == METHOD_NOT_FOUND
+
+
+def _declares_modern(payload: Any, protocol_version: str | None) -> bool:
+    """Whether a request declares the modern revision (the only era using 404)."""
+    if not isinstance(payload, dict):
+        return False
+    params = payload.get("params")
+    return requested_version(params if isinstance(params, dict) else None, protocol_version) == (
+        PROTOCOL_VERSION
     )
 
 
 __all__ = [
+    "CACHE_SCOPE_PRIVATE",
+    "CACHE_SCOPE_PUBLIC",
     "DISCOVER_CACHE_SCOPE",
-    "EMPTY_LIST_METHODS",
     "DISCOVER_TTL_MS",
+    "EMPTY_LIST_METHODS",
+    "HEADER_BASE64_PREFIX",
+    "HEADER_BASE64_SUFFIX",
+    "HEADER_MISMATCH",
     "INVALID_PARAMS",
     "INVALID_REQUEST",
     "INTERNAL_ERROR",
+    "InvalidCursor",
     "JSONRPC_VERSION",
     "META_PROTOCOL_VERSION",
     "META_SERVER_INFO",
+    "METHOD_HEADER",
     "METHOD_NOT_FOUND",
+    "METHOD_NOT_FOUND_HTTP_STATUS",
+    "NAME_HEADER",
     "NOTIFICATION_METHODS",
     "NOOP_METHODS",
     "PARSE_ERROR",
     "PROTOCOL_VERSION",
     "PROTOCOL_VERSION_HEADER",
+    "RESULT_TYPE_COMPLETE",
     "SERVER_INSTRUCTIONS",
     "SERVER_NAME",
     "SERVER_VERSION",
     "SUPPORTED_PROTOCOL_VERSIONS",
+    "TOOLS_PAGE_SIZE",
+    "TTL_MS",
     "UNSUPPORTED_PROTOCOL_VERSION",
     "UNSUPPORTED_VERSION_HTTP_STATUS",
+    "annotate_result",
+    "declared_meta_version",
+    "decode_header_value",
     "discover_result",
     "handle_message",
     "handle_payload",
+    "header_mismatch_error",
     "initialize_result",
     "jsonrpc_error",
     "jsonrpc_result",

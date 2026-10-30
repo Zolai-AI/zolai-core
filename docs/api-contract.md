@@ -213,7 +213,7 @@ envelope, like every other `/api/v1` error.
 
 | Method | Path | Params | Returns | Notes |
 |--------|------|--------|---------|-------|
-| GET | `/api/v1/auth/me` | header: any credential | `{role, key_prefix, scopes, mode, auth_source, username?, display_name?, user_id?, expires_at?}` | Public, never 401. `role`/`key_prefix`/`scopes`/`mode` are unchanged; `auth_source` ∈ `anonymous｜api_key｜session`. The `username`/`display_name`/`user_id`/`expires_at` keys appear **only** for a session. |
+| GET | `/api/v1/auth/me` | header: any credential | `{role, key_prefix, scopes, mode, auth_source, username?, display_name?, user_id?, expires_at?}` | Public, never 401. `role`/`key_prefix`/`scopes`/`mode` are unchanged; `role` ∈ `anonymous｜member｜admin｜superadmin` and `auth_source` ∈ `anonymous｜api_key｜session｜oauth` (the value is the credential the middleware actually resolved; an `api_keys` record carries no marker, so an absent one means `api_key`). The `username`/`display_name`/`user_id`/`expires_at` keys appear **only** for a session. |
 | POST | `/api/v1/auth/login` | body: `{username, password}` | `{token, token_type: "bearer", expires_at, user: {id, username, display_name, role, scopes}}` | Public. `token` is `zolai_ss_*` and is returned **once**. 422 on a bad username/password shape. |
 | POST | `/api/v1/auth/logout` | header: `Authorization: Bearer zolai_ss_*` | `{revoked: bool}` | Public. Always 200 (idempotent); revokes **only** the presented session and ignores a presented API key. |
 
@@ -228,13 +228,33 @@ envelope, like every other `/api/v1` error.
 
 ### Scope sets (strict subsets of the frozen 33 actions — no `*`)
 
+Authority: `docs/admin/permissions.md` §3; the tuples in
+`zolai/api/session_auth.py` are what tests assert on.
+
 | Role | Scopes |
 |------|--------|
-| `member` | `dataset:read`, `rag:read`, `catalog:read`, `agent:read`, `agent:run` |
-| `admin` | member + `apikey:manage`, `settings:read`, `settings:write`, `user:manage`, `role:manage` |
+| `member` | `dataset:read`, `rag:read`, `catalog:read`, `agent:read`, `agent:run`, `pos:read` |
+| `admin` | member + `apikey:manage`, `settings:read`, `settings:write`, `user:manage`, `audit:read`, `dataset:edit`, `pos:review`, `annotation:review`, `quality:read`, `pipeline:read`, `eval:read` |
+| `superadmin` | admin + `role:manage` |
 
-An unknown `users.role` degrades to `member` (never raises). An admin session
-therefore reaches `/api/v1/admin/*` with `apikey:manage` and can mint keys.
+Membership is decided by one rule, not by taste: **a role holds the action
+behind every tool and every REST read its tier advertises.** A tool that
+declares `scope = "pos:read"` is only reachable by a signed-in account whose
+role carries `pos:read`, so a tier that lists the tool without the scope makes
+the login weaker than a hand-minted key. `tests/test_role_hierarchy.py::TestTierScopeParity`
+recomputes that for all three tiers on every run; adding a scoped tool without
+adding the action to a role fails it.
+
+Each role is a strict superset of the one below it, and **`role:manage` is the
+only thing a superadmin can do that an admin cannot** — `user:manage` creates
+accounts and resets passwords, but may not change who is an admin. An unknown
+`users.role` degrades to `member` (never raises).
+
+`role_for()` reads `users.role` for a session or OAuth grant (live, so a
+promotion or demotion takes effect on the holder's next request) and falls back
+to the scopes for an API key: `*` or `role:manage` → `superadmin`;
+`apikey:manage` / `settings:write` / `user:manage` → `admin`; anything else →
+`member`.
 
 ### Storage and lifetime
 
@@ -257,8 +277,74 @@ therefore reaches `/api/v1/admin/*` with `apikey:manage` and can mint keys.
 | `ZOLAI_LOGIN_RATE_LIMIT_RPM` | `5` | Login attempts/minute per IP |
 | `ZOLAI_LOGIN_RATE_LIMIT_USER_RPM` | `10` | Login attempts/minute per username |
 
-Accounts are created only by the CLI (`zolai user create|list|disable|enable|password|revoke-sessions`);
-there is no self-registration route and no default password.
+Accounts are created by the CLI (`zolai user create|list|set-role|promote|demote|
+disable|enable|password|revoke-sessions`) **or** by an admin over HTTP
+(`/api/v1/admin/users`, `user:manage` + admin rank). There is still no
+self-registration route and no default password; `role` defaults to `member` on
+both paths, and a `role` that is not `member` needs `role:manage` — so **no HTTP
+route can create the first superadmin** (`docs/admin/permissions.md` §5.7).
+`zolai rbac-audit` reports who currently can, read-only.
+
+---
+
+## Role-request Routes (`/api/v1/role-requests`)
+
+An account asks; a superadmin decides; applying the decision goes through the
+one guarded writer. `admin` and `superadmin` are requestable — asking for
+`member` is a no-op, because every account already is one. Contributing to the
+corpus needs **no role at all**, so this queue is not a gate on participation
+(`POST /api/v1/contributions` stays public).
+
+| Method | Path | Requires | Notes |
+|--------|------|----------|-------|
+| POST | `/api/v1/role-requests` | member rank, strict, **and a session** | body `{requested_role, reason}` — `reason` 10–1000 chars. 201 `{request, message}`. A key or an OAuth token is not a person: 403 `session_required`. |
+| GET | `/api/v1/role-requests/mine` | member rank, strict, session | `{items, count}` — only the caller's own rows, newest first |
+| GET | `/api/v1/role-requests` | `role:manage` + superadmin rank, strict | `status` (default `pending`, or `all`), `limit` (default 50, `le=200`) |
+| POST | `/api/v1/role-requests/{id}/decision` | same as the queue | body `{decision: "approve"｜"reject", note}`; `note` mandatory on reject |
+
+| Status | Body `error` | When |
+|--------|--------------|------|
+| 401 | `unauthorized` | nothing resolved (strict on all four routes) |
+| 403 | `session_required` | the credential is a key or an OAuth grant, not a signed-in account |
+| 400 | `role_not_requestable` | `requested_role` outside `admin｜superadmin` |
+| 409 | `role_already_held` | the account already holds what it asked for |
+| 409 | `duplicate_pending` | a pending ask for that role already exists (also enforced by the partial unique index) |
+| 429 | `rate_limited` + `Retry-After` | more than 5 asks/minute per `user_id` |
+| 400 | `invalid_decision` / `note_required` | unknown `decision`; a reject with no note |
+| 400 | `invalid_status` | `status` outside `pending｜approved｜rejected｜all` |
+| 404 | `request_not_found` / `user_not_found` | no such request; the asking account was deleted |
+| 409 | `already_decided` | another superadmin decided it first |
+| 403 / 409 | the guard's own reason code | `set_user_role` refused the approval: `self_role_change`, `role_change_requires_superadmin`, `target_requires_superadmin`, `last_superadmin` |
+
+An approval calls `session_auth.set_user_role(..., reason="role_request #<id>
+approved")` **and nothing else** — the invariants refuse it exactly as they
+refuse a direct edit, and the queue row stays `pending` rather than recording a
+decision that did not happen. Every decision appends a `data_audit_log` row
+(`table='role_requests'`, `field='status'`) beside the writer's `users`/`role`
+row.
+
+---
+
+## Contributions and the `/records` read scope
+
+| Method | Path | Requires | Notes |
+|--------|------|----------|-------|
+| POST | `/api/v1/contributions` | **nothing** (public) | `email` stays an optional body field; a signed-in caller is attributed automatically |
+| GET | `/api/v1/contributions/mine` | member rank, strict, session | `{items, count}`; columns projected **exclude `email`** |
+| GET | `/api/v1/records?table=contributions` | `dataset:edit`, **strict** | was `dataset:read`; `email` is never in the payload or the search fields |
+
+Attribution is three nullable columns (`migrations.CONTRIBUTIONS_ATTRIBUTION_COLUMNS`):
+`user_id` only for an account-backed submission, `submitted_by` + `auth_source`
+for any credential, all three `NULL` for an anonymous post — so historical rows
+stay anonymous retroactively, which is the honest reading of a corpus that was
+open before attribution existed. `ContributionOut` gains `attributed_to`.
+
+Per-table read scopes live in `records_router.RECORDS_READ_SCOPE`; every table
+not named there keeps `dataset:read`. `RECORDS_REDACTED_COLUMNS` names the
+columns dropped from the projection, which is why the `contributions` row is
+strict: a redaction that `warn` mode could dual-accept around would not be a
+redaction. Consequence stated plainly: `/data` can no longer be used to contact
+a submitter.
 
 ---
 

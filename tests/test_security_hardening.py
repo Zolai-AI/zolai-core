@@ -41,7 +41,12 @@ _ADMIN_KEY: dict[str, str] = {}
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch) -> Iterator[TestClient]:
+def client(tmp_path, monkeypatch, scratch_db) -> Iterator[TestClient]:
+    # ``scratch_db`` matters: ``TestClient`` used as a context manager *does*
+    # run the app lifespan, which migrates ``config.paths.db``.  Without the
+    # redirect every test in this module wrote to the canonical corpus (caught
+    # by the ``no_canonical_db_writes`` fence as 12 teardown errors).
+    #
     # ``/metrics`` is on the admin-gated ops surface (``rbac.OPS_ADMIN_PREFIXES``).
     # The key lives on a throwaway DB (never the live one) via the
     # ``auth._get_manager`` seam. It is NOT attached globally: negative tests

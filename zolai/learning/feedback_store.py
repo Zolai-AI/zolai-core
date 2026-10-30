@@ -22,6 +22,8 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from zolai.shared.clock import now, stamp
+
 from ..data.repositories import get_engine
 
 logger = logging.getLogger(__name__)
@@ -69,7 +71,7 @@ class LearningSignal:
     confidence: float = 0.5  # Model's self-reported confidence
 
     # Metadata
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=now)
     metadata: dict = field(default_factory=dict)
 
 
@@ -246,9 +248,9 @@ class FeedbackStore:
             """), {
                 "signal_id": signal_id,
                 "reviewer_id": reviewer_id,
-                "reviewed_at": datetime.utcnow().isoformat(),
+                "reviewed_at": stamp(),
                 "notes": notes,
-                "updated_at": datetime.utcnow().isoformat(),
+                "updated_at": stamp(),
             })
             if result.rowcount:
                 conn.execute(text("""
@@ -257,7 +259,7 @@ class FeedbackStore:
                     WHERE signal_id = :signal_id
                 """), {
                     "signal_id": signal_id,
-                    "completed_at": datetime.utcnow().isoformat(),
+                    "completed_at": stamp(),
                 })
                 return True
         return False
@@ -274,9 +276,9 @@ class FeedbackStore:
             """), {
                 "signal_id": signal_id,
                 "reviewer_id": reviewer_id,
-                "reviewed_at": datetime.utcnow().isoformat(),
+                "reviewed_at": stamp(),
                 "notes": notes,
-                "updated_at": datetime.utcnow().isoformat(),
+                "updated_at": stamp(),
             })
             if result.rowcount:
                 conn.execute(text("""
@@ -285,7 +287,7 @@ class FeedbackStore:
                     WHERE signal_id = :signal_id
                 """), {
                     "signal_id": signal_id,
-                    "completed_at": datetime.utcnow().isoformat(),
+                    "completed_at": stamp(),
                 })
                 return True
         return False
@@ -340,7 +342,7 @@ class FeedbackStore:
                 "count": len(rows),
                 "format": format,
                 "path": str(export_path),
-                "created_at": datetime.utcnow().isoformat(),
+                "created_at": stamp(),
                 "metadata": json.dumps({"min_confidence": min_confidence, "status_filter": status_filter}),
             })
 

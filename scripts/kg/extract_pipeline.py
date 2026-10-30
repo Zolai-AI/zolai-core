@@ -1,17 +1,13 @@
 import json
-import sqlite3
 import sys
 from typing import Dict, List
 
 import requests
 from transformers import pipeline
 
-from zolai.config import config
+from store import connect, upsert_edge, upsert_node
 
 # Configuration
-# Same scratch store as ``kg/extract_zsp.py`` — see the note there for why this
-# is not ``config.paths.db``.
-DB_PATH = str(config.paths.data / "kg.db")
 GEMINI_SERVER_URL = "http://localhost:8000/v1/chat/completions"
 
 # Initialize NER (mBERT or XLM-R)
@@ -38,26 +34,16 @@ def get_relationships(text: str, entities: List[Dict]) -> List[Dict]:
         return []
 
 def save_to_kg(triples: List[Dict]):
-    """Inserts triples into KgNode and KgEdge tables."""
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-
-    for t in triples:
-        # Ensure nodes exist
-        for label in [t['s'], t['o']]:
-            cur.execute(
-                "INSERT OR IGNORE INTO kg_node (id, iri, label, kind) VALUES (?, ?, ?, ?)",
-                (label, f"zolai:{label}", label, "Entity")
-            )
-
-        # Insert Edge
-        cur.execute(
-            "INSERT OR IGNORE INTO kg_edge (fromId, toId, predicate, sourceKey) VALUES (?, ?, ?, ?)",
-            (t['s'], t['o'], t['p'], "extraction_pipeline")
-        )
-
-    conn.commit()
-    conn.close()
+    """Write triples into the canonical ``kg_nodes`` / ``kg_edges`` tables."""
+    conn = connect()
+    try:
+        for t in triples:
+            start = upsert_node(conn, label=t["s"], source_id=f"zolai:{t['s']}")
+            end = upsert_node(conn, label=t["o"], source_id=f"zolai:{t['o']}")
+            upsert_edge(conn, source_row=start, target_row=end, relation=t["p"])
+        conn.commit()
+    finally:
+        conn.close()
 
 def process_text(text: str):
     print(f"Processing: {text[:50]}...")
@@ -69,7 +55,7 @@ def process_text(text: str):
         relationships = json.loads(relationships)
 
     save_to_kg(relationships)
-    print(f"Saved {len(relationships)} triples to {DB_PATH}.")
+    print(f"Saved {len(relationships)} triples to the canonical kg_nodes / kg_edges tables.")
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:

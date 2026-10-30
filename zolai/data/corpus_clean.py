@@ -82,11 +82,11 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal, Sequence
 
 from ..config import config
+from ..shared.clock import stamp
 from ..zvs import validate
 from ..zvs.exceptions import ExceptionRegistry
 from ..zvs.rules import default_rules
@@ -789,10 +789,6 @@ def _short(value: str, limit: int = 120) -> str:
     return flat if len(flat) <= limit else flat[:limit] + "…"
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-
-
 # ---------------------------------------------------------------------------
 # Column statistics (shared by audit and apply)
 # ---------------------------------------------------------------------------
@@ -957,7 +953,7 @@ def run_audit(
         dup_total = sum(v["groups"] for v in dup.values())
         audit = {
             "db": str(db),
-            "generated_at": _utc_now(),
+            "generated_at": stamp(),
             "scanned_tables": scanned,
             "skipped_tables": skipped,
             "row_counts": row_counts,
@@ -1036,7 +1032,7 @@ def run_clean(
                     "resumed": resuming,
                     "cursors": cursors,
                     "batch_size": batch_size,
-                    "started_at": _utc_now(),
+                    "started_at": stamp(),
                 },
             )
 
@@ -1105,7 +1101,9 @@ def run_clean(
 
                 written = pending
                 if apply and pending:
-                    stamp = _utc_now()
+                    # Never rebind ``stamp``: that makes it function-local and
+                    # breaks every earlier ``stamp()`` call in this function.
+                    batch_stamp = stamp()
                     written = []
                     for spec, row_id, outcome in pending:
                         try:
@@ -1129,7 +1127,7 @@ def run_clean(
                                 spec.column,
                                 outcome.original,
                                 outcome.cleaned,
-                                stamp,
+                                batch_stamp,
                                 REASON,
                             ),
                         )
@@ -1157,7 +1155,7 @@ def run_clean(
                             "resumed": resuming,
                             "cursors": cursors,
                             "batch_size": batch_size,
-                            "started_at": _utc_now(),
+                            "started_at": stamp(),
                         },
                     )
                 if len(rows) < batch_size:
@@ -1187,8 +1185,8 @@ def run_clean(
                     "resumed": resuming,
                     "cursors": cursors,
                     "batch_size": batch_size,
-                    "started_at": _utc_now(),
-                    "finished_at": _utc_now(),
+                    "started_at": stamp(),
+                    "finished_at": stamp(),
                 },
             )
 
@@ -1421,7 +1419,7 @@ def run_revert_c1_1(
         audit_rows = 0
         conflicts_during_write = 0
         if apply and pending:
-            stamp = _utc_now()
+            batch_stamp = stamp()
             for start in range(0, len(pending), batch_size):
                 for cand in pending[start : start + batch_size]:
                     cursor = conn.execute(
@@ -1440,7 +1438,7 @@ def run_revert_c1_1(
                             cand["field"],
                             cand["corrupted"],
                             cand["old_value"],
-                            stamp,
+                            batch_stamp,
                             REVERT_REASON,
                         ),
                     )
@@ -1629,7 +1627,7 @@ def append_apply_results(
         "",
         "## Apply results",
         "",
-        f'- **Applied:** {apply_stats["generated_at"] if "generated_at" in apply_stats else _utc_now()} UTC '
+        f'- **Applied:** {apply_stats["generated_at"] if "generated_at" in apply_stats else stamp()} UTC '
         f'· db `{apply_stats["db"]}` · batch {apply_stats["batch_size"]}'
         + (" · resumed interrupted run" if apply_stats.get("resumed") else ""),
         f'- **Fresh backup before apply:** {backup_note or "see `data/backups/backup.log`"}',

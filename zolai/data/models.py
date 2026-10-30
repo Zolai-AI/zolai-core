@@ -28,6 +28,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase
 
+from zolai.shared.clock import SQL_NOW
+
 
 class Base(DeclarativeBase):
     """Base class for all ORM models."""
@@ -920,7 +922,7 @@ class MonitoringAnnotation(Base):
         String,
         nullable=False,
         default=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        server_default=sa_sql_text("datetime('now')"),
+        server_default=sa_sql_text(SQL_NOW),
     )
 
     __table_args__ = (
@@ -1162,7 +1164,7 @@ class ObservationRecord(Base):
         String,
         nullable=False,
         default=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        server_default=sa_sql_text("datetime('now')"),
+        server_default=sa_sql_text(SQL_NOW),
     )
 
     __table_args__ = (
@@ -1213,7 +1215,7 @@ class WordObservationStatsRecord(Base):
         String,
         nullable=False,
         default=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        server_default=sa_sql_text("datetime('now')"),
+        server_default=sa_sql_text(SQL_NOW),
     )
 
     def __repr__(self) -> str:
@@ -1236,7 +1238,7 @@ class AttestationIndexRecord(Base):
         String,
         nullable=False,
         default=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        server_default=sa_sql_text("datetime('now')"),
+        server_default=sa_sql_text(SQL_NOW),
     )
 
     __table_args__ = (Index("ix_attestation_source", "source"),)
@@ -1266,13 +1268,13 @@ class UserRecord(Base):
         String,
         nullable=False,
         default=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        server_default=sa_sql_text("datetime('now')"),
+        server_default=sa_sql_text(SQL_NOW),
     )
     updated_at: str = Column(
         String,
         nullable=False,
         default=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        server_default=sa_sql_text("datetime('now')"),
+        server_default=sa_sql_text(SQL_NOW),
     )
     last_login: str | None = Column(String, nullable=True)
 
@@ -1299,7 +1301,7 @@ class SessionRecord(Base):
         String,
         nullable=False,
         default=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        server_default=sa_sql_text("datetime('now')"),
+        server_default=sa_sql_text(SQL_NOW),
     )
     expires_at: str = Column(String, nullable=False)
     revoked_at: str | None = Column(String, nullable=True)

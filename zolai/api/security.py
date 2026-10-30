@@ -214,7 +214,17 @@ CORS_ALLOWED_ORIGINS: tuple[str, ...] = (
 
 #: Explicit method/header allow-lists (no ``*``) so credentials stay safe.
 CORS_METHODS: list[str] = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-CORS_HEADERS: list[str] = ["Authorization", "Content-Type", "X-API-Key", "X-Request-ID"]
+CORS_HEADERS: list[str] = [
+    "Authorization",
+    "Content-Type",
+    "X-API-Key",
+    "X-Request-ID",
+    # MCP streamable-HTTP binding: browsers (studio.zolai.space) send these on
+    # tools/call and every post-handshake request, so preflight must allow them.
+    "Mcp-Method",
+    "Mcp-Name",
+    "MCP-Protocol-Version",
+]
 CORS_EXPOSE_HEADERS: list[str] = [
     "X-Request-ID",
     "X-RateLimit-Limit",

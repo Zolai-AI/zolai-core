@@ -36,7 +36,10 @@ TIERS: tuple[str, ...] = ("public", "member", "admin")
 TIER_BLURB: dict[str, str] = {
     "public": "No credential. Anonymous callers are rate limited per IP (10/min).",
     "member": "Any valid API key (X-API-Key or Authorization: Bearer).",
-    "admin": "An admin key — one carrying apikey:manage / settings:write / user:manage / role:manage / *.",
+    "admin": "An admin credential — a key carrying apikey:manage / settings:write / "
+    "user:manage, or an account whose role is admin or above. A superadmin "
+    "(role:manage, or *) reaches this same set: the extra role power is a route "
+    "guard, not a larger tool inventory.",
 }
 
 #: The public endpoint a client points at (both are the same handler).

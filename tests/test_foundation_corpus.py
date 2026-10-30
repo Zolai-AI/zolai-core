@@ -1,6 +1,8 @@
 """Tests for Foundation Corpus Linguistics Module."""
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from zolai.foundation.corpus import (
@@ -69,6 +71,36 @@ class TestCorpusAnalyzer:
             assert isinstance(word, str)
             assert isinstance(count, int)
             assert count > 0
+
+    def test_frequency_distribution_reads_canonical_vocabulary(
+        self, tmp_path
+    ) -> None:
+        """Regression: the vocabulary boost queried the dropped ``vocab`` table.
+
+        The legacy name raised ``no such table`` inside a bare ``except``, so
+        every seeded vocabulary weight was silently dropped from the ranking.
+        """
+        db = tmp_path / "corpus.db"
+        conn = sqlite3.connect(db)
+        conn.executescript(
+            """
+            CREATE TABLE bible_verses (zo_tdb77 TEXT);
+            CREATE TABLE translations (source TEXT);
+            CREATE TABLE vocabulary (headword TEXT, frequency INTEGER);
+            INSERT INTO bible_verses VALUES ('gam leh van');
+            INSERT INTO translations VALUES ('gam');
+            INSERT INTO vocabulary VALUES ('pasian', 50);
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        analyzer = CorpusAnalyzer()
+        analyzer._db_path = db
+        freq = analyzer.get_frequency_distribution(top_k=10)
+
+        assert freq["pasian"] == 50
+        assert freq["gam"] == 2
 
     def test_detect_register_formal(self, analyzer: CorpusAnalyzer) -> None:
         """Test register detection for formal text."""

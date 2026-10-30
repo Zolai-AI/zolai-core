@@ -13,14 +13,24 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-# Data directories to scan (relative to workspace root)
+# Data directories to scan (relative to workspace root). Training outputs are
+# included on purpose: a manifest that omits them cannot answer "what trained
+# the model?" — the exact gap this tool exists to close.
 SCAN_DIRS = [
     "data/bible",
-    "data/dictionary/processed",
-    "data/parallel",
     "data/bible/knowledge_base",
     "data/bible/context",
+    "data/dictionary/processed",
+    "data/parallel",
+    "data/corpus",
+    "data/master",
+    "data/training",
+    "data/processed",
 ]
+
+#: Extensions that carry data. The old scan read ``*.jsonl`` only, so a CSV or
+#: JSON export feeding the same corpus was invisible.
+SCAN_SUFFIXES = (".jsonl", ".json", ".csv", ".tsv")
 
 DEFAULT_MANIFEST = "data/provenance.json"
 
@@ -44,8 +54,10 @@ def compute_sha256(file_path: Path) -> str:
     return sha256.hexdigest()
 
 
-def count_jsonl_rows(file_path: Path) -> int:
-    """Count lines in a JSONL file (non-empty lines)."""
+def count_jsonl_rows(file_path: Path) -> int | None:
+    """Count non-empty lines for ``.jsonl``; ``None`` for any other format."""
+    if file_path.suffix.lower() != ".jsonl":
+        return None
     try:
         with open(file_path, encoding="utf-8") as f:
             return sum(1 for line in f if line.strip())
@@ -61,18 +73,20 @@ def scan_data_files(workspace_root: Path) -> list[dict[str, Any]]:
         if not dir_path.exists():
             continue
 
-        for jsonl_file in dir_path.rglob("*.jsonl"):
-            rel_path = jsonl_file.relative_to(workspace_root)
-            stat = jsonl_file.stat()
+        for data_file in sorted(dir_path.rglob("*")):
+            if data_file.suffix.lower() not in SCAN_SUFFIXES or not data_file.is_file():
+                continue
+            rel_path = data_file.relative_to(workspace_root)
+            stat = data_file.stat()
 
             entry = {
                 "filename": str(rel_path),
                 "size_bytes": stat.st_size,
-                "sha256": compute_sha256(jsonl_file),
-                "row_count": count_jsonl_rows(jsonl_file),
+                "sha256": compute_sha256(data_file),
+                "row_count": count_jsonl_rows(data_file),
                 "last_modified": datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat(),
-                "source": determine_source(jsonl_file),
-                "generator_script": determine_generator(jsonl_file),
+                "source": determine_source(data_file),
+                "generator_script": determine_generator(data_file),
             }
             files.append(entry)
 
@@ -114,7 +128,13 @@ def determine_source(file_path: Path) -> str:
             return "canonical_dictionary_clean"
         else:
             return "dictionary_processing"
-    elif "parallel" in parts:
+    elif "master" in parts:
+        return "master_corpus"
+    elif "training" in parts:
+        return "training_dataset"
+    elif "processed" in parts:
+        return "processed_data"
+    elif "parallel" in parts or "corpus" in parts:
         return "parallel_corpus_merge"
 
     return "unknown_source"

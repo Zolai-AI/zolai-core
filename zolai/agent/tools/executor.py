@@ -22,6 +22,7 @@ from .family import assert_handlers_cover_specs
 from .foundation import FOUNDATION_HANDLERS
 from .language import LANGUAGE_HANDLERS
 from .learning import LEARNING_HANDLERS
+from .learning_runs import LEARNING_RUN_HANDLERS
 from .registry import SPECS, get_tool
 from .types import ToolCall, ToolError, ToolErrorCode, ToolResult
 
@@ -352,6 +353,8 @@ HANDLERS = {
     # The learning family (zolai/agent/tools/learning.py): study/quiz/SRS reads
     # and the SM-2 + corpus contribution write-back channels.
     **LEARNING_HANDLERS,
+    # Read-only learning-cycle introspection (zolai/agent/tools/learning_runs.py).
+    **LEARNING_RUN_HANDLERS,
 }
 
 # Import-time: a published tool with no handler would be advertised and then

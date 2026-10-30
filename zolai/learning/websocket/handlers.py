@@ -9,10 +9,11 @@ request is answered with a response frame.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+
+from zolai.shared.clock import stamp
 
 from ..agents.agent_registry import get_agent_registry
 from .server import ConnectionManager, WSMessage
@@ -246,7 +247,7 @@ class DiscussionHandler(_RegistryBackedHandler):
             {
                 "did": discussion_id,
                 "consensus": consensus,
-                "now": datetime.utcnow().isoformat(),
+                "now": stamp(),
             },
         )
 
@@ -277,7 +278,7 @@ class TaskHandler(_RegistryBackedHandler):
         """Update a task's status (update-only, never deletes)."""
         self._execute(
             "UPDATE agent_tasks SET status = :status, updated_at = :now WHERE task_id = :tid",
-            {"tid": task_id, "status": status, "now": datetime.utcnow().isoformat()},
+            {"tid": task_id, "status": status, "now": stamp()},
         )
 
     async def _submit_task(self, connection_id: str, message: WSMessage,

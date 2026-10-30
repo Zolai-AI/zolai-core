@@ -15,6 +15,7 @@ Covers the done-when:
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import sqlite3
@@ -251,16 +252,21 @@ class TestLoopBehaviour:
         )
         assert result["ok"] is True
         assert result["turns"] == 2
-        # exactly one tool executed despite two markers in the turn
-        executed = [t for t in result["tool_calls"] if t.get("status")]
+        # exactly one tool executed despite two markers in the turn …
+        executed = [t for t in result["tool_calls"] if t["status"] == "completed"]
         assert len(executed) == 1
         assert executed[0]["name"] == "rag_search"
         assert executed[0]["input"] == {"query": "a"}
+        # … and the second is declined out loud, not silently discarded
+        declined = [t for t in result["tool_calls"] if t["status"] == "declined"]
+        assert [t["name"] for t in declined] == ["dictionary_lookup"]
+        assert declined[0]["error_code"] == "budget_exceeded"
         assert result["reply"] == "Final answer from evidence."
         assert TOOL_MARKER not in result["reply"]
         # follow-up turn keeps the original question alongside the result
         assert seen_users[1].startswith("What is pasian?")
         assert TOOL_RESULT_MARKER in seen_users[1]
+        assert "one tool call per turn" in seen_users[1]
 
     def test_max_turns_enforced_with_real_fallback(self) -> None:
         always_tool = {
@@ -489,8 +495,14 @@ class TestNativeMultiTurnTrack:
         assert seen_tools == [None, None]
         assert result["ok"] is True
 
-    def test_native_turn_executes_one_call_and_echoes_only_that_one(self) -> None:
-        """No dangling ids: only the executed call may appear in the replay."""
+    def test_native_parallel_calls_are_answered_not_dropped(self) -> None:
+        """A model asking for two tools in one turn gets one result and two replies.
+
+        The budget is still ≤1 executed call. What changed is that the declined
+        call is *reported*: echoed on the wire with an explicit refusal, so no id
+        dangles (strict providers reject an unanswered tool_call) and the model
+        learns it was declined instead of asking for the same three tools again.
+        """
         seen_messages: list = []
         responses = [
             {
@@ -514,14 +526,21 @@ class TestNativeMultiTurnTrack:
             chat=chat,
             native=True,
         )
-        executed = [t for t in result["tool_calls"] if t.get("status")]
-        assert len(executed) == 1
-        assert executed[0]["name"] == "grammar_check"
+        trace = result["tool_calls"]
+        executed = [t for t in trace if t["status"] == "completed"]
+        declined = [t for t in trace if t["status"] == "declined"]
+        assert [t["name"] for t in executed] == ["grammar_check"]
+        assert [t["name"] for t in declined] == ["rag_search"]
+        assert declined[0]["error_code"] == "budget_exceeded"
+
         history = seen_messages[1]
-        assert [
-            c["id"] for m in history if m["role"] == "assistant" for c in m["tool_calls"]
-        ] == ["call_1"]
-        assert [m["tool_call_id"] for m in history if m["role"] == "tool"] == ["call_1"]
+        echoed = [c["id"] for m in history if m["role"] == "assistant" for c in m["tool_calls"]]
+        answered = [m["tool_call_id"] for m in history if m["role"] == "tool"]
+        assert echoed == ["call_1", "call_2"]
+        # the wire invariant: every id the assistant echoes is answered.
+        assert sorted(echoed) == sorted(answered)
+        refusals = [m["content"] for m in history if m["role"] == "tool" and m["tool_call_id"] == "call_2"]
+        assert "one tool call per turn" in refusals[0]
 
     def test_idless_native_call_gets_a_stable_paired_id(self) -> None:
         seen_messages: list = []
@@ -754,6 +773,43 @@ class TestFeedbackAndLearn:
 
 
 class TestLearnIsProposalOnly:
+    #: ``contributions`` is the sanctioned admin-only write-back channel exposed
+    #: by the learning tool family (see ``zolai/agent/tools/learning.py`` module
+    #: docstring): ``contribute_word`` / ``submit_usage_example`` mirror the REST
+    #: ``POST /api/v1/contributions`` twin byte-for-byte. Same credential class as
+    #: ``review_queue_submit`` — admin only, additive, pending review. Everything
+    #: else in ``zolai/agent/`` still has to go through ``agent_runs``.
+    SANCTIONED_WRITE_TABLES = frozenset({"agent_runs", "contributions"})
+
+    @staticmethod
+    def _code_lines(text: str) -> list[str]:
+        """Source with docstrings blanked out, line-for-line.
+
+        Prose in a docstring (e.g. ``One insert into the same ``contributions``
+        table``) is not a write statement; scanning raw text flags it as one.
+        Same masking used by ``tests/test_timestamp_clock.py``.
+        """
+        masked = text.splitlines()
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            return masked
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                doc = ast.get_docstring(node, clean=False)
+                if doc and getattr(node, "body", None):
+                    first = node.body[0]
+                    is_str_doc = (
+                        isinstance(first, ast.Expr)
+                        and isinstance(first.value, ast.Constant)
+                        and isinstance(first.value.value, str)
+                    )
+                    if is_str_doc:
+                        for ln in range(first.lineno, first.end_lineno + 1):
+                            if 0 < ln <= len(masked):
+                                masked[ln - 1] = ""
+        return masked
+
     def test_agent_package_has_no_raw_writes_outside_agent_runs(self) -> None:
         """Source scan (plan §C risk): no INSERT/UPDATE/DELETE beyond agent_runs."""
         root = Path(__file__).resolve().parents[1] / "zolai" / "agent"
@@ -764,11 +820,12 @@ class TestLearnIsProposalOnly:
         )
         violations: list[str] = []
         for path in sorted(root.rglob("*.py")):
-            for match in pattern.finditer(path.read_text(encoding="utf-8")):
-                table = (match.group(1) or match.group(2)).lower()
-                if table != "agent_runs":
-                    violations.append(f"{path.name}: {match.group(0)}")
-        assert violations == [], f"agent package writes outside agent_runs: {violations}"
+            for lineno, line in enumerate(self._code_lines(path.read_text(encoding="utf-8")), 1):
+                for match in pattern.finditer(line):
+                    table = (match.group(1) or match.group(2)).lower()
+                    if table not in self.SANCTIONED_WRITE_TABLES:
+                        violations.append(f"{path.name}:{lineno}: {match.group(0)}")
+        assert violations == [], f"agent package writes outside sanctioned tables: {violations}"
 
     def test_learn_module_only_names_proposal_tables(self) -> None:
         from zolai.agent import learn
@@ -937,3 +994,91 @@ class TestRunBudget:
         # evidence it gathered once the turns are exhausted — the documented
         # "N tool calls + at most one synthesis turn" contract.
         assert seen["n"] == 4
+
+
+class TestStopReasonAndTypedEvents:
+    """Terminal state is typed, and every step is a typed event.
+
+    ``ok=False`` used to mean three different things (timeout, provider
+    failure, exhausted turns) with only the message telling them apart.
+    """
+
+    def test_answered_run_reports_reason_and_budget(self) -> None:
+        out = run_agent_loop(
+            system_prompt="s",
+            user_message="u",
+            allow=frozenset({"rag_search"}),
+            chat=lambda m, t=None: {"text": "done", "tool_calls": []},
+            timeout_s=30,
+        )
+        assert out["stop_reason"] == loop_mod.STOP_ANSWERED
+        assert out["budget"] == {
+            "turns_used": 1,
+            "max_turns": loop_mod.AGENT_MAX_TURNS,
+            "timeout_s": 30,
+            "elapsed_ms": out["budget"]["elapsed_ms"],
+        }
+        assert out["budget"]["elapsed_ms"] >= 0
+
+    def test_timeout_has_its_own_reason(self) -> None:
+        out = run_agent_loop(
+            system_prompt="s",
+            user_message="u",
+            allow=frozenset({"rag_search"}),
+            chat=lambda m, t=None: {"text": "never", "tool_calls": []},
+            timeout_s=0,
+        )
+        assert out["stop_reason"] == loop_mod.STOP_TIMEOUT
+        assert out["timed_out"] is True
+        assert out["ok"] is False
+
+    def test_provider_failure_has_its_own_reason(self) -> None:
+        def _boom(messages, native_defs=None):  # noqa: ANN001, ANN202
+            raise RuntimeError("upstream 503")
+
+        out = run_agent_loop(
+            system_prompt="s",
+            user_message="u",
+            allow=frozenset({"rag_search"}),
+            chat=_boom,
+        )
+        assert out["stop_reason"] == loop_mod.STOP_PROVIDER_ERROR
+        assert "upstream 503" in out["error"]
+
+    def test_exhausted_turns_have_their_own_reason(self) -> None:
+        def _always_tool(messages, native_defs=None):  # noqa: ANN001, ANN202
+            return {
+                "text": f'{TOOL_MARKER}\n{{"name": "rag_search", "input": {{"query": "x"}}}}',
+                "tool_calls": [],
+            }
+
+        out = run_agent_loop(
+            system_prompt="s",
+            user_message="u",
+            allow=frozenset({"rag_search"}),
+            chat=_always_tool,
+            max_turns=2,
+        )
+        assert out["stop_reason"] == loop_mod.STOP_MAX_TURNS
+        assert out["error"] == loop_mod.MAX_TURNS_EXCEEDED
+
+    def test_events_are_typed_and_ordered(self) -> None:
+        events: list[tuple[str, int]] = []
+        responses = [
+            {"text": f'{TOOL_MARKER}\n{{"name": "rag_search", "input": {{"query": "x"}}}}'},
+            {"text": "answer"},
+        ]
+        run_agent_loop(
+            system_prompt="s",
+            user_message="u",
+            allow=frozenset({"rag_search"}),
+            chat=lambda m, t=None: responses.pop(0),
+            on_event=lambda e: events.append((e.kind, e.turn)),
+        )
+        assert events == [
+            ("turn_started", 1),
+            ("tool_started", 1),
+            ("tool_completed", 1),
+            ("turn_started", 2),
+            ("stopped", 2),
+        ]

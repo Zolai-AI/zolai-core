@@ -14,13 +14,13 @@ and the build path can never drift apart.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.engine import Engine
 
 from ...data.migrations import create_observation_tables
 from ...data.repositories.observation import ObservationRepository, WordStatsRepository
+from ...shared.clock import stamp
 from .sentences import Sentence
 
 __all__ = [
@@ -46,10 +46,6 @@ class _EngineOnlyManager:
 def ensure_tables(engine: Engine) -> dict[str, list[str]]:
     """Create the Phase 2 tables/indexes if missing (safe to call every run)."""
     return create_observation_tables(_EngineOnlyManager(engine))
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def build_observation_row(
@@ -115,7 +111,7 @@ def build_stats_row(
         "first_seen": seen_at,
         "last_seen": seen_at,
         "pipeline_version": pipeline_version,
-        "updated_at": _now(),
+        "updated_at": stamp(),
     }
 
 

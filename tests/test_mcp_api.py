@@ -9,13 +9,14 @@ Two halves:
   and the one refusal message shared by an unknown tool and a not-allowed one.
 * **Transport (HTTP).** `POST /api/v1/mcp` (and its bare `POST /mcp` alias)
   through the real app: anonymous is open in `warn` *and* `enforce`, the tool
-  set is derived from the presented key (anon 8 / member 31 / admin 39), a
+  set is derived from the presented key (anon 8 / member 31 / admin 42), a
   client-supplied `scope` is ignored, and both routes are declared public
   routes on the strict anonymous bucket.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import sqlite3
 from collections.abc import Iterator
@@ -145,6 +146,7 @@ class TestProtocolHandshake:
             "2025-11-25",
             "2025-06-18",
             "2025-03-26",
+            "2024-11-05",
         )
 
     def test_initialize_falls_back_to_the_latest_known_version(self) -> None:
@@ -155,7 +157,10 @@ class TestProtocolHandshake:
 
     def test_ping(self) -> None:
         response, _ = _dispatch({"jsonrpc": "2.0", "id": "p", "method": "ping"})
-        assert response["result"] == {}
+        # Every result is annotated (SEP-2322) — ping no longer answers a bare
+        # empty object, which a modern client would read as malformed.
+        assert response["result"]["resultType"] == proto.RESULT_TYPE_COMPLETE
+        assert response["result"]["_meta"][proto.META_SERVER_INFO]["name"] == proto.SERVER_NAME
 
     def test_initialized_notification_gets_no_response(self) -> None:
         response, _ = _dispatch({"jsonrpc": "2.0", "method": "notifications/initialized"})
@@ -164,7 +169,7 @@ class TestProtocolHandshake:
 
 class TestToolsList:
     @pytest.mark.parametrize(
-        ("scope", "count"), [("public", 8), ("member", 31), ("admin", 39)]
+        ("scope", "count"), [("public", 8), ("member", 31), ("admin", 42)]
     )
     def test_tool_count_per_scope(self, scope: str, count: int) -> None:
         response, _ = _dispatch(
@@ -185,6 +190,168 @@ class TestToolsList:
                 {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, allow=allow_list(scope)
             )
             assert all(t["annotations"]["readOnlyHint"] for t in response["result"]["tools"])
+
+    def test_the_anonymous_list_is_publicly_cacheable(self) -> None:
+        response, _ = _dispatch({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        result = response["result"]
+        assert result["ttlMs"] == proto.TTL_MS
+        assert result["cacheScope"] == proto.CACHE_SCOPE_PUBLIC
+
+    @pytest.mark.parametrize("scope", ["member", "admin"])
+    def test_a_privileged_list_is_private(self, scope: str) -> None:
+        """A shared cache must never replay member/admin tools to an anonymous caller."""
+        response, _ = _dispatch(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, allow=allow_list(scope)
+        )
+        assert response["result"]["cacheScope"] == proto.CACHE_SCOPE_PRIVATE
+
+
+class TestToolsPagination:
+    """Cursor pagination: absent on a one-page surface, correct when it applies."""
+
+    def test_a_one_page_surface_has_no_next_cursor(self) -> None:
+        response, _ = _dispatch(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, allow=allow_list("admin")
+        )
+        assert "nextCursor" not in response["result"]
+        assert len(response["result"]["tools"]) == 42
+
+    def test_cursor_round_trip(self) -> None:
+        assert proto.decode_cursor(proto.encode_cursor(25)) == 25
+
+    def test_pages_are_disjoint_and_cover_the_whole_surface(self, monkeypatch) -> None:
+        monkeypatch.setattr(proto, "TOOLS_PAGE_SIZE", 10)
+        allow = allow_list("admin")
+        seen: list[str] = []
+        cursor: str | None = None
+        pages = 0
+        while True:
+            params = {} if cursor is None else {"cursor": cursor}
+            response, _ = _dispatch(
+                {"jsonrpc": "2.0", "id": pages + 1, "method": "tools/list", "params": params},
+                allow=allow,
+            )
+            result = response["result"]
+            names = [tool["name"] for tool in result["tools"]]
+            assert 0 < len(names) <= 10
+            seen.extend(names)
+            pages += 1
+            assert pages <= 10  # a runaway cursor must fail, not loop
+            cursor = result.get("nextCursor")
+            if cursor is None:
+                break
+        assert len(seen) == len(set(seen)) == len(allow)
+
+    def test_a_page_keeps_the_cache_hints(self, monkeypatch) -> None:
+        monkeypatch.setattr(proto, "TOOLS_PAGE_SIZE", 4)
+        response, _ = _dispatch(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}, allow=allow_list("public")
+        )
+        assert len(response["result"]["tools"]) == 4
+        assert response["result"]["nextCursor"]
+        second, _ = _dispatch(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list",
+                "params": {"cursor": response["result"]["nextCursor"]},
+            },
+            allow=allow_list("public"),
+        )
+        assert second["result"]["cacheScope"] == proto.CACHE_SCOPE_PUBLIC
+
+    def test_empty_cursor_starts_at_the_first_page(self) -> None:
+        plain, _ = _dispatch({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        empty, _ = _dispatch(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {"cursor": ""}}
+        )
+        assert empty["result"]["tools"] == plain["result"]["tools"]
+
+    def test_cursor_past_the_end_returns_an_empty_page(self) -> None:
+        response, _ = _dispatch(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {"cursor": proto.encode_cursor(10_000)},
+            }
+        )
+        assert response["result"]["tools"] == []
+        assert "nextCursor" not in response["result"]
+
+    @pytest.mark.parametrize(
+        "cursor",
+        ["not-a-cursor", base64.urlsafe_b64encode(b"tools:x").decode().rstrip("="), 7],
+    )
+    def test_a_cursor_this_server_did_not_issue_is_refused(self, cursor) -> None:
+        response, _ = _dispatch(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {"cursor": cursor}}
+        )
+        assert response["error"]["code"] == proto.INVALID_PARAMS
+        assert "cursor" in response["error"]["message"]
+
+
+class TestModernResultConformance:
+    """SEP-2322 + caching: every result is self-describing.
+
+    A 2026-07-28 client branches on ``resultType`` and treats a result without
+    it as malformed; ``serverInfo`` in ``_meta`` attributes each result to this
+    server (needed when a proxy aggregates several).  Both are cheap and the
+    same on every method, so they are asserted on every result shape.
+    """
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "server/discover"},
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {"protocolVersion": "2025-11-25"},
+            },
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "grammar_check", "arguments": {}},
+            },
+            {"jsonrpc": "2.0", "id": 1, "method": "ping"},
+            {"jsonrpc": "2.0", "id": 1, "method": "prompts/list"},
+            {"jsonrpc": "2.0", "id": 1, "method": "logging/setLevel"},
+        ],
+        ids=["discover", "initialize", "tools-list", "tools-call", "ping", "prompts-list", "noop"],
+    )
+    def test_every_result_carries_result_type_and_server_info(self, message) -> None:
+        response, _ = _dispatch(message)
+        result = response["result"]
+        assert result["resultType"] == proto.RESULT_TYPE_COMPLETE
+        assert result["_meta"][proto.META_SERVER_INFO] == {
+            "name": proto.SERVER_NAME,
+            "version": proto.SERVER_VERSION,
+        }
+
+    def test_a_protocol_error_is_not_an_annotated_result(self) -> None:
+        response, _ = _dispatch(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "nope"}}
+        )
+        assert "result" not in response
+        assert "resultType" not in response["error"]
+
+    @pytest.mark.parametrize(
+        ("method", "key"),
+        [
+            ("resources/list", "resources"),
+            ("resources/templates/list", "resourceTemplates"),
+            ("prompts/list", "prompts"),
+        ],
+    )
+    def test_an_empty_compat_list_is_publicly_cacheable(self, method: str, key: str) -> None:
+        result = _dispatch({"jsonrpc": "2.0", "id": 1, "method": method})[0]["result"]
+        assert result[key] == []
+        assert result["ttlMs"] == proto.TTL_MS
+        assert result["cacheScope"] == proto.CACHE_SCOPE_PUBLIC
 
 
 class TestToolsCall:
@@ -405,7 +572,7 @@ class TestMcpHttpSurface:
     def test_admin_lists_its_scope(self, client, auth_db, admin_key) -> None:
         resp = client.post("/api/v1/mcp", json=_tools_list(), headers=_headers(admin_key))
         tools = resp.json()["result"]["tools"]
-        assert len(tools) == 39
+        assert len(tools) == 42
         assert {t["name"] for t in tools} == set(allow_list("admin"))
 
     def test_anonymous_cannot_reach_an_admin_tool(self, client, auth_db) -> None:
@@ -569,6 +736,251 @@ class TestMcpRootAlias:
         assert resp.status_code == 405
         assert resp.headers["allow"] == "POST"
 
+
+class TestTransportNegotiation:
+    """The two wire behaviours a heterodox MCP client depends on.
+
+    **``Accept`` negotiation.**  Streamable HTTP lets the server answer either
+    ``application/json`` or ``text/event-stream``.  Claude's stack and the MCP
+    Inspector ask for both and break on a bare JSON body, so when ``Accept``
+    names event-stream the transport wraps the *single* response in one
+    ``event: message`` frame.  Still stateless — the connection closes after it.
+
+    **Version refusal.**  A version outside ``SUPPORTED_PROTOCOL_VERSIONS`` is
+    refused with ``-32022`` inside HTTP **400**.  The status is the modern-era
+    probe: a client that gets 400 can read ``error.data.supported`` and retry,
+    while a legacy-only server would have answered something else entirely.
+    """
+
+    def _frames(self, text: str) -> list[str]:
+        return [line.removeprefix("data: ") for line in text.splitlines() if line.startswith("data: ")]
+
+    def test_accept_event_stream_wraps_the_single_response(self, client, auth_db) -> None:
+        resp = client.post(
+            "/api/v1/mcp", json=_tools_list(), headers={"Accept": "text/event-stream"}
+        )
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+        assert resp.headers["cache-control"] == "no-store"
+        events = [line for line in resp.text.splitlines() if line.startswith("event: ")]
+        assert events == ["event: message"]
+        (frame,) = self._frames(resp.text)
+        payload = json.loads(frame)
+        assert payload["id"] == 2
+        assert len(payload["result"]["tools"]) == 8
+
+    def test_the_media_type_is_matched_case_insensitively(self, client, auth_db) -> None:
+        resp = client.post(
+            "/api/v1/mcp", json=_tools_list(), headers={"Accept": "Text/Event-Stream"}
+        )
+        assert resp.headers["content-type"].startswith("text/event-stream")
+
+    def test_a_mixed_accept_prefers_event_stream(self, client, auth_db) -> None:
+        """Claude and the Inspector send both media types; SSE is the safe read."""
+        resp = client.post(
+            "/api/v1/mcp",
+            json=_tools_list(),
+            headers={"Accept": "application/json, text/event-stream"},
+        )
+        assert resp.headers["content-type"].startswith("text/event-stream")
+
+    @pytest.mark.parametrize("accept", ["application/json", "*/*", None])
+    def test_a_json_client_gets_plain_json(self, client, auth_db, accept) -> None:
+        headers = {"Accept": accept} if accept is not None else {}
+        resp = client.post("/api/v1/mcp", json=_tools_list(), headers=headers)
+        assert resp.headers["content-type"].startswith("application/json")
+        assert resp.json()["id"] == 2
+
+    def test_a_batch_over_sse_is_one_data_frame(self, client, auth_db) -> None:
+        resp = client.post(
+            "/api/v1/mcp",
+            json=[_initialize(), _tools_list(9)],
+            headers={"Accept": "text/event-stream"},
+        )
+        assert resp.status_code == 200
+        (frame,) = self._frames(resp.text)
+        payload = json.loads(frame)
+        assert [item["id"] for item in payload] == [1, 9]
+        assert len(payload[1]["result"]["tools"]) == 8
+
+    def test_a_notification_over_sse_stays_202_with_no_body(self, client, auth_db) -> None:
+        resp = client.post(
+            "/api/v1/mcp",
+            json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+            headers={"Accept": "text/event-stream"},
+        )
+        assert resp.status_code == 202
+        assert resp.content == b""
+
+    def test_an_unsupported_version_header_is_a_400_with_minus_32022(
+        self, client, auth_db
+    ) -> None:
+        resp = client.post(
+            "/api/v1/mcp",
+            json=_tools_list(),
+            headers={proto.PROTOCOL_VERSION_HEADER: "1999-01-01"},
+        )
+        assert resp.status_code == proto.UNSUPPORTED_VERSION_HTTP_STATUS == 400
+        error = resp.json()["error"]
+        assert error["code"] == proto.UNSUPPORTED_PROTOCOL_VERSION == -32022
+        assert error["data"]["requested"] == "1999-01-01"
+        assert error["data"]["supported"] == list(proto.SUPPORTED_PROTOCOL_VERSIONS)
+
+    def test_a_modern_meta_declared_version_is_refused_the_same_way(
+        self, client, auth_db
+    ) -> None:
+        resp = client.post(
+            "/api/v1/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {"_meta": {proto.META_PROTOCOL_VERSION: "1999-01-01"}},
+            },
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"]["code"] == -32022
+
+    def test_every_supported_version_is_accepted_over_http(self, client, auth_db) -> None:
+        for version in proto.SUPPORTED_PROTOCOL_VERSIONS:
+            resp = client.post(
+                "/api/v1/mcp",
+                json=_tools_list(),
+                headers={proto.PROTOCOL_VERSION_HEADER: version},
+            )
+            assert resp.status_code == 200, (version, resp.text)
+
+    def test_a_batch_keeps_a_version_refusal_inside_the_200(self, client, auth_db) -> None:
+        """A batch is JSON-RPC-level: per-message errors never move the status."""
+        resp = client.post(
+            "/api/v1/mcp",
+            json=[_tools_list(1), _tools_list(2)],
+            headers={proto.PROTOCOL_VERSION_HEADER: "1999-01-01"},
+        )
+        assert resp.status_code == 200
+        assert [item["error"]["code"] for item in resp.json()] == [-32022, -32022]
+
+    # ── Modern request metadata (spec: streamable HTTP, Server Validation) ──
+
+    def test_the_sse_frame_disables_proxy_buffering(self, client, auth_db) -> None:
+        resp = client.post(
+            "/api/v1/mcp", json=_tools_list(), headers={"Accept": "text/event-stream"}
+        )
+        assert resp.headers["x-accel-buffering"] == "no"
+
+    def test_a_version_header_that_disagrees_with_the_body_is_32020(
+        self, client, auth_db
+    ) -> None:
+        resp = client.post(
+            "/api/v1/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {"_meta": {proto.META_PROTOCOL_VERSION: "2026-07-28"}},
+            },
+            headers={proto.PROTOCOL_VERSION_HEADER: "2025-11-25"},
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["error"]["code"] == proto.HEADER_MISMATCH == -32020
+
+    def test_a_matching_version_header_and_body_is_served(self, client, auth_db) -> None:
+        resp = client.post(
+            "/api/v1/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {"_meta": {proto.META_PROTOCOL_VERSION: "2026-07-28"}},
+            },
+            headers={
+                proto.PROTOCOL_VERSION_HEADER: "2026-07-28",
+                proto.METHOD_HEADER: "tools/list",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+
+    def test_a_mcp_method_header_that_disagrees_with_the_body_is_32020(
+        self, client, auth_db
+    ) -> None:
+        resp = client.post(
+            "/api/v1/mcp", json=_tools_list(), headers={proto.METHOD_HEADER: "tools/call"}
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"]["code"] == -32020
+
+    def test_a_mcp_name_header_that_disagrees_with_the_body_is_32020(
+        self, client, auth_db
+    ) -> None:
+        resp = client.post(
+            "/api/v1/mcp",
+            json=_tools_call("grammar_check", {"text": "Pasian"}),
+            headers={proto.METHOD_HEADER: "tools/call", proto.NAME_HEADER: "dictionary_lookup"},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"]["code"] == -32020
+
+    def test_an_encoded_mcp_name_is_decoded_before_comparison(self, client, auth_db) -> None:
+        encoded = "=?base64?" + base64.b64encode(b"grammar_check").decode() + "?="
+        resp = client.post(
+            "/api/v1/mcp",
+            json=_tools_list(),
+            headers={proto.METHOD_HEADER: "tools/list", proto.NAME_HEADER: encoded},
+        )
+        # tools/list has no params.name, so only Mcp-Method is compared — the
+        # point is that a *decodable* Mcp-Name is never a reason to refuse.
+        assert resp.status_code == 200, resp.text
+        assert proto.decode_header_value("=?base64?bm90IGEgbmFtZQ==?=") == "not a name"
+        assert proto.decode_header_value("=?base64?!!!?=") == "=?base64?!!!?="
+
+    def test_absent_metadata_headers_are_tolerated(self, client, auth_db) -> None:
+        """Leniency for handshake-era clients: the body alone is authoritative."""
+        resp = client.post("/api/v1/mcp", json=_tools_list())
+        assert resp.status_code == 200
+
+    def test_an_unknown_method_declared_modern_is_a_404(self, client, auth_db) -> None:
+        resp = client.post(
+            "/api/v1/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tasks/get",
+                "params": {"_meta": {proto.META_PROTOCOL_VERSION: "2026-07-28"}},
+            },
+        )
+        assert resp.status_code == proto.METHOD_NOT_FOUND_HTTP_STATUS == 404
+        assert resp.json()["error"]["code"] == proto.METHOD_NOT_FOUND
+
+    def test_an_unknown_method_without_a_declared_era_keeps_the_200(
+        self, client, auth_db
+    ) -> None:
+        """A 404 tells a legacy client to fall back to HTTP+SSE — never send one blindly."""
+        resp = client.post("/api/v1/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tasks/get"})
+        assert resp.status_code == 200
+        assert resp.json()["error"]["code"] == proto.METHOD_NOT_FOUND
+
+    # ── Origin validation (DNS-rebinding protection) ────────────────────────
+
+    def test_an_unknown_origin_is_refused_with_403(self, client, auth_db) -> None:
+        resp = client.post(
+            "/api/v1/mcp", json=_tools_list(), headers={"Origin": "https://evil.example"}
+        )
+        assert resp.status_code == 403
+        assert resp.json()["error"]["code"] == proto.INVALID_REQUEST
+
+    def test_a_null_origin_is_refused(self, client, auth_db) -> None:
+        resp = client.post("/api/v1/mcp", json=_tools_list(), headers={"Origin": "null"})
+        assert resp.status_code == 403
+
+    def test_a_trusted_origin_is_served(self, client, auth_db) -> None:
+        from zolai.api.security import get_cors_origins
+
+        resp = client.post(
+            "/api/v1/mcp", json=_tools_list(), headers={"Origin": get_cors_origins()[0]}
+        )
+        assert resp.status_code == 200
+
+
 class TestCrossClientCompatibility:
     """Leniency a heterodox MCP client relies on, without a false claim.
 
@@ -593,7 +1005,7 @@ class TestCrossClientCompatibility:
     ) -> None:
         response, _ = _dispatch({"jsonrpc": "2.0", "id": 1, "method": method})
         assert "error" not in response, response
-        assert response["result"] == {key: []}
+        assert response["result"][key] == []
 
     def test_logging_set_level_is_accepted_as_a_no_op(self) -> None:
         response, _ = _dispatch(
@@ -605,7 +1017,7 @@ class TestCrossClientCompatibility:
             }
         )
         assert "error" not in response, response
-        assert response["result"] == {}
+        assert response["result"]["resultType"] == proto.RESULT_TYPE_COMPLETE
 
     def test_leniency_is_not_advertised_as_a_capability(self) -> None:
         response, _ = _dispatch({"jsonrpc": "2.0", "id": 1, "method": "initialize"})

@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
+from zolai.shared.clock import now
+
 from .base_agent import AgentMessage, AgentRole, AgentSkill, BaseAgent, DiscussionContext
 
 logger = logging.getLogger(__name__)
@@ -32,7 +34,7 @@ class AgentTeam:
     roles: list[AgentRole] = field(default_factory=list)
     shared_knowledge: dict = field(default_factory=dict)
     discussion_history: list[DiscussionContext] = field(default_factory=list)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=now)
     status: str = "active"  # active, paused, disbanded
 
 

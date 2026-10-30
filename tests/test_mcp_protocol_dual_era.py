@@ -117,7 +117,8 @@ class TestDiscover:
 
     def test_ping_is_still_answered(self) -> None:
         # Removed by 2026-07-28 but kept as a harmless superset for handshake clients.
-        assert _dispatch({"jsonrpc": "2.0", "id": 1, "method": "ping"})["result"] == {}
+        result = _dispatch({"jsonrpc": "2.0", "id": 1, "method": "ping"})["result"]
+        assert result["resultType"] == proto.RESULT_TYPE_COMPLETE
 
 
 class TestUnsupportedVersion:
@@ -153,13 +154,18 @@ class TestUnsupportedVersion:
             )
             assert "error" not in response, version
 
-    def test_a_supported_meta_version_with_a_bad_header_is_served(self) -> None:
-        """``_meta`` wins, so a stale header cannot reject a modern request."""
+    def test_a_header_that_disagrees_with_the_body_is_a_header_mismatch(self) -> None:
+        """The body is the source of truth; a disagreement is ``-32020``.
+
+        Trusting either side silently would let an intermediary route on the
+        header while this server executes on the body (spec: *Server
+        Validation*), so the request is refused outright.
+        """
         response = _dispatch(
             {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": _meta("2026-07-28")},
             version="1999-01-01",
         )
-        assert "error" not in response
+        assert response["error"]["code"] == proto.HEADER_MISMATCH == -32020
 
     def test_a_lone_refusal_is_http_400(self) -> None:
         status, body = proto.handle_payload(
@@ -189,7 +195,7 @@ class TestUnsupportedVersion:
         )
         assert status == 200
         assert body[0]["error"]["code"] == -32022
-        assert body[1]["result"] == {}
+        assert body[1]["result"]["resultType"] == proto.RESULT_TYPE_COMPLETE
 
     def test_a_legacy_initialize_with_a_bogus_protocol_version_still_handshakes(self) -> None:
         """``protocolVersion`` is the legacy negotiation field, not ``_meta``.

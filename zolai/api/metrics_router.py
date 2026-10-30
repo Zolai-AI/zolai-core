@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -43,6 +42,7 @@ from ..monitoring.metrics import (
     parse_window,
     window_stats,
 )
+from ..shared.clock import stamp
 from .errors import internal_http_error
 from .metrics_schemas import (
     AlertRuleState,
@@ -69,10 +69,6 @@ DEFAULT_WINDOW_S = 300.0
 
 #: Prometheus exposition media type.
 EXPOSITION_MEDIA_TYPE = "text/plain; version=0.0.4; charset=utf-8"
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +101,7 @@ def metrics_summary(
     sampled = store.db_stats()
     latest = store.latest_eval_run() or {"source": "none"}
     return {
-        "generated_at": _now(),
+        "generated_at": stamp(),
         "http": {
             "requests": http["samples"],
             "error_rate": http["error_rate"],

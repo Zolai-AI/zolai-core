@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
 import json
-import sqlite3
 
 import requests
 from rdflib import Namespace
 from transformers import pipeline
 
-from zolai.config import config
+from store import connect, upsert_edge, upsert_node
 
 # Configuration
-# Scratch KG store (``kg_node``/``kg_edge``), NOT the canonical DB, whose graph
-# table is ``kg_nodes``. It used to be the relative ``"zolai.db"``, so running
-# the script from the repo root opened -- and sqlite3 silently created -- a
-# second partial database beside the real one.
-DB_PATH = str(config.paths.data / "kg.db")
 GEMINI_SERVER_URL = "http://localhost:8080/v1/chat/completions"
 NER_MODEL = "Davlan/xlm-roberta-base-ner-hrl"
 ZK = Namespace("zolai-kg:")
@@ -60,28 +54,27 @@ def extract_relationships(text, entities):
         return []
 
 def save_to_db(entities, relationships):
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-
-    # Insert Nodes
-    for ent in entities:
-        cur.execute("""
-            INSERT OR IGNORE INTO kg_node (id, iri, kind, label, properties)
-            VALUES (?, ?, ?, ?, ?)
-        """, (ent["iri"], ent["iri"], ent["kind"], ent["label"], json.dumps({})))
-
-    # Insert Edges
-    for s, p, o in relationships:
-        # Map labels back to IRIs (simplified)
-        s_iri = f"zolai:ent:{s.lower().replace(' ', '_')}"
-        o_iri = f"zolai:ent:{o.lower().replace(' ', '_')}"
-        cur.execute("""
-            INSERT OR IGNORE INTO kg_edge (id, fromId, toId, predicate, sourceKey)
-            VALUES (?, ?, ?, ?, 'extraction-pipeline')
-        """, (f"{s_iri}-{p}-{o_iri}", s_iri, o_iri, p))
-
-    conn.commit()
-    conn.close()
+    """Write into the canonical ``kg_nodes`` / ``kg_edges`` tables."""
+    conn = connect()
+    try:
+        ids = {
+            ent["iri"]: upsert_node(
+                conn, label=ent["label"], node_type=ent["kind"], source_id=ent["iri"]
+            )
+            for ent in entities
+        }
+        for s, p, o in relationships:
+            s_iri = f"zolai:ent:{s.lower().replace(' ', '_')}"
+            o_iri = f"zolai:ent:{o.lower().replace(' ', '_')}"
+            # A triple may name endpoints the NER pass never saw.
+            start = ids.get(s_iri) or upsert_node(conn, label=s, source_id=s_iri)
+            end = ids.get(o_iri) or upsert_node(conn, label=o, source_id=o_iri)
+            ids.setdefault(s_iri, start)
+            ids.setdefault(o_iri, end)
+            upsert_edge(conn, source_row=start, target_row=end, relation=p)
+        conn.commit()
+    finally:
+        conn.close()
 
 def run_pipeline(text):
     entities = extract_entities(text)

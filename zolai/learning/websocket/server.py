@@ -15,6 +15,8 @@ from typing import Callable
 from fastapi import WebSocket, WebSocketDisconnect
 from fastapi.websockets import WebSocketState
 
+from zolai.shared.clock import now, stamp
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,7 +27,7 @@ class WSMessage:
     message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     message_type: str = ""  # message, agent_status, task_update, discussion, metrics, ping
     payload: dict = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=now)
     sender_id: str = ""
     target_id: str | None = None  # None = broadcast
 
@@ -46,7 +48,7 @@ class WSMessage:
             message_id=data.get("message_id", str(uuid.uuid4())),
             message_type=data.get("type", ""),
             payload=data.get("payload", {}),
-            timestamp=datetime.fromisoformat(data.get("timestamp", datetime.utcnow().isoformat())),
+            timestamp=datetime.fromisoformat(data.get("timestamp", stamp())),
             sender_id=data.get("sender", ""),
             target_id=data.get("target"),
         )
@@ -75,11 +77,11 @@ class ConnectionManager:
         conn_id = connection_id or str(uuid.uuid4())
         self.active_connections[conn_id] = websocket
         self.connection_metadata[conn_id] = {
-            "connected_at": datetime.utcnow().isoformat(),
+            "connected_at": stamp(),
             "agent_id": agent_id,
             "user_id": user_id,
             "topics": set(),
-            "last_ping": datetime.utcnow().isoformat(),
+            "last_ping": stamp(),
         }
 
         if agent_id:
@@ -290,11 +292,11 @@ class WebSocketServer:
         """Handle ping message."""
         meta = self.manager.connection_metadata.get(connection_id)
         if meta is not None:
-            meta["last_ping"] = datetime.utcnow().isoformat()
+            meta["last_ping"] = stamp()
 
         await self.manager.send_personal(connection_id, WSMessage(
             message_type="pong",
-            payload={"server_time": datetime.utcnow().isoformat()},
+            payload={"server_time": stamp()},
             sender_id="server",
             target_id=connection_id,
         ))

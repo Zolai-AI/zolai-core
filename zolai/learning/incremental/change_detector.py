@@ -39,6 +39,9 @@ class ChangeSet:
     changed: list[dict[str, Any]] = field(default_factory=list)
     unchanged: list[dict[str, Any]] = field(default_factory=list)
     removed: list[dict[str, Any]] = field(default_factory=list)
+    #: The JSONL path this set was detected from — the processor needs it to
+    #: resolve the canonical table, and it is not recoverable from the records.
+    source_file: str = ""
 
     @property
     def total_incoming(self) -> int:
@@ -139,7 +142,7 @@ def detect_changes(
     incoming_records = _load_jsonl_records(source_file)
     if not incoming_records:
         log.warning("No records in %s", source_file)
-        return ChangeSet()
+        return ChangeSet(source_file=source_file)
 
     # Compute hashes for incoming
     incoming_by_pk: dict[str, dict[str, Any]] = {}
@@ -168,7 +171,7 @@ def detect_changes(
     existing_hashes = _fetch_canonical_hashes(engine, canonical_table, pk_col)
 
     # Classify
-    changeset = ChangeSet()
+    changeset = ChangeSet(source_file=source_file)
     seen_pks = set()
 
     for pk_val, rec in incoming_by_pk.items():

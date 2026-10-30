@@ -5,10 +5,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Table, text
+from sqlalchemy import MetaData, Table, text
 from sqlalchemy.engine import Engine
-
-from ..models import Base
+from sqlalchemy.exc import NoSuchTableError
 
 
 class CorrectionService:
@@ -29,15 +28,20 @@ class CorrectionService:
     def corrections_table(self) -> Table:
         """Get or create corrections tracking table."""
         if self._corrections_table is None:
-            Base.metadata.reflect(bind=self.engine)
-            if "corrections" in Base.metadata.tables:
-                self._corrections_table = Base.metadata.tables["corrections"]
-            else:
-                # Create the table if it doesn't exist
-                from sqlalchemy import Column, Integer, String, Text
+            # Private MetaData: reflecting into Base.metadata leaks every table
+            # it saw into later init_db() calls (and create_all here would have
+            # created the whole ORM schema as a side effect).
+            from sqlalchemy import Column, Integer, String, Text
+
+            metadata = MetaData()
+            try:
+                self._corrections_table = Table(
+                    "corrections", metadata, autoload_with=self.engine
+                )
+            except NoSuchTableError:
                 self._corrections_table = Table(
                     "corrections",
-                    Base.metadata,
+                    metadata,
                     Column("id", Integer, primary_key=True, autoincrement=True),
                     Column("table_name", String, nullable=False, index=True),
                     Column("row_id", Integer, nullable=False),
@@ -52,7 +56,7 @@ class CorrectionService:
                     Column("review_notes", Text, nullable=True),
                     Column("applied_at", String, nullable=True),
                 )
-                Base.metadata.create_all(self.engine)
+                self._corrections_table.create(self.engine, checkfirst=True)
         return self._corrections_table
 
     def propose_correction(

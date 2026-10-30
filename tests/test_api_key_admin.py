@@ -68,6 +68,19 @@ def headers(admin_key: dict) -> dict[str, str]:
 
 
 @pytest.fixture()
+def superadmin_key() -> dict:
+    """``apikey:manage`` + ``role:manage`` — the rank that may mint a wider key."""
+    return auth.create_api_key(
+        name="superadmin-key", scopes=["apikey:manage", "role:manage"], created_by="test"
+    )
+
+
+@pytest.fixture()
+def super_headers(superadmin_key: dict) -> dict[str, str]:
+    return {"Authorization": f"Bearer {superadmin_key['plaintext']}"}
+
+
+@pytest.fixture()
 def target_key() -> dict:
     """Key under test for rotate/revoke.
 
@@ -166,15 +179,49 @@ def test_create_unknown_scope_is_422(client: TestClient, auth_db, headers) -> No
 
 
 def test_create_wildcard_and_resource_star_scopes_accepted(
-    client: TestClient, auth_db, headers
+    client: TestClient, auth_db, super_headers
 ) -> None:
     for scopes in (["*"], ["dataset:*"], ["*:read"]):
         response = client.post(
             "/api/v1/admin/api-keys",
-            headers=headers,
+            headers=super_headers,
             json={"name": f"k-{scopes[0].replace(':', '-').replace('*', 'all')}", "scopes": scopes},
         )
         assert response.status_code == 201, scopes
+
+
+def test_admin_key_cannot_mint_a_superadmin_scope(
+    client: TestClient, auth_db, headers
+) -> None:
+    """The mint cap: ``*`` and ``role:manage`` *are* superadmin
+    (:data:`zolai.api.rbac.SUPERADMIN_SCOPES`), so an ``apikey:manage`` key that
+    could issue either could issue itself a second, higher credential."""
+    for scopes in (["*"], ["role:manage"], ["apikey:manage", "role:manage"]):
+        response = client.post(
+            "/api/v1/admin/api-keys",
+            headers=headers,
+            json={"name": f"wide-{len(scopes)}", "scopes": scopes},
+        )
+        assert response.status_code == 403, scopes
+        detail = response.json()["detail"]
+        assert detail["error"] == "scope_above_actor"
+        assert detail["actor_role"] == "admin"
+        assert detail["requested_role"] == "superadmin"
+
+    # Nothing was created.
+    listed = client.get("/api/v1/admin/api-keys", headers=headers).json()["items"]
+    assert [item["name"] for item in listed] == ["admin-key"]
+
+
+def test_admin_key_mints_a_narrower_key(client: TestClient, auth_db, headers) -> None:
+    """The cap is about *rank*, not breadth: ten member scopes are still a
+    member key, and issuing those is what ``apikey:manage`` is for."""
+    response = client.post(
+        "/api/v1/admin/api-keys",
+        headers=headers,
+        json={"name": "wide-but-shallow", "scopes": ["dataset:read"]},
+    )
+    assert response.status_code == 201
 
 
 def test_create_with_expiry_records_expires_at(
@@ -237,6 +284,30 @@ def test_rotate_issues_new_key_and_revokes_old(
 
     # New plaintext never persisted.
     assert new_plaintext not in _db_values(auth_db, "api_keys")
+
+
+def test_rotate_a_wider_key_never_reproduces_it(
+    client: TestClient, auth_db, super_headers, headers
+) -> None:
+    """Rotation replays the old key's scopes, so it is capped against the
+    **caller**: an admin rotating a legacy ``*`` key does not get ``*`` back,
+    and the original key stays valid rather than being quietly downgraded."""
+    legacy = client.post(
+        "/api/v1/admin/api-keys",
+        headers=super_headers,
+        json={"name": "legacy-wildcard", "scopes": ["*"]},
+    ).json()["key"]
+
+    response = client.post(
+        f"/api/v1/admin/api-keys/{legacy['id']}/rotate", headers=headers
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"]["error"] == "scope_above_actor"
+
+    still_active = client.post(
+        f"/api/v1/admin/api-keys/{legacy['id']}/rotate", headers=super_headers
+    )
+    assert still_active.status_code == 200
 
 
 def test_rotate_unknown_key_is_404(client: TestClient, auth_db, headers) -> None:

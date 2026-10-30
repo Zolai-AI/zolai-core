@@ -59,9 +59,14 @@ import os
 import secrets
 import threading
 import time
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import text
+
+from ..shared.clock import now as _clock_now
+from ..shared.clock import parse as _clock_parse
+from ..shared.clock import stamp as _clock_stamp
 
 logger = logging.getLogger(__name__)
 
@@ -108,13 +113,6 @@ def hash_token(token: str) -> str:
     without pulling the identity layer).
     """
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def _stamp(moment: Any = None) -> str:
-    """UTC ``YYYY-MM-DD HH:MM:SS`` — the format every table here uses."""
-    from datetime import datetime, timezone
-
-    return (moment or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _env_seconds(name: str, default: int) -> int:
@@ -214,9 +212,33 @@ def public_origin(scope: Any) -> str:
     return f"{proto}://{host}" if host else f"{proto}://localhost"
 
 
-def resource_url(origin: str) -> str:
-    """The protected resource: the MCP endpoint on ``origin``."""
-    return origin.rstrip("/") + "/mcp"
+def resource_url(origin: str, path: str = "/mcp") -> str:
+    """The protected resource: an MCP endpoint on ``origin``.
+
+    ``path`` defaults to the bare alias; the versioned ``/api/v1/mcp`` mount
+    passes its own so its metadata document names the endpoint the client
+    actually connected to.
+    """
+    return origin.rstrip("/") + "/" + path.lstrip("/")
+
+
+def resource_is_served(value: str | None, origin: str) -> bool:
+    """Whether an RFC 8707 ``resource`` names an audience this server serves.
+
+    Blank/absent is allowed: older clients omit the parameter, and this server
+    has exactly one authorization server, so a token minted without it is still
+    only usable here.  Every spelling real clients send is accepted — either
+    MCP transport path (``<origin>/mcp``, the value our metadata publishes, and
+    ``<origin>/api/v1/mcp``, the versioned alias) and the bare origin —
+    normalised for a trailing slash.  Anything else names a different audience
+    and is refused with ``invalid_target`` (RFC 8707 §2.2) rather than silently
+    minting a token for the wrong resource.
+    """
+    if value is None or not value.strip():
+        return True
+    wanted = value.strip().rstrip("/")
+    base = origin.strip().rstrip("/")
+    return wanted == base or wanted in {f"{base}{path}" for path in MCP_PATHS}
 
 
 # ── Scope vocabulary (frozen, narrowing only) ────────────────────────────────
@@ -229,20 +251,37 @@ def grantable_scopes() -> list[str]:
     what :func:`zolai.api.session_auth.role_scopes` can ever hand out. The
     33-action vocabulary in :mod:`zolai.api.auth` is **not** edited by this
     module; an unknown scope is rejected at the endpoint, not silently added.
+
+    ``SUPERADMIN_EXTRA_SCOPES`` is in this list on purpose: it is the
+    discovery document's ``scopes_supported``, and a scope absent from it looks
+    unmintable to a well-behaved client even though a superadmin account may
+    hold it.  Advertising it widens nothing — :func:`granted_scopes` intersects
+    every request with :func:`zolai.api.session_auth.role_scopes` of the
+    *authenticated* user's role, so ``role:manage`` on a grant is only ever
+    reachable by an account whose role already grants it.
     """
     from ..api import session_auth
 
-    return sorted({*session_auth.MEMBER_SCOPES, *session_auth.ADMIN_EXTRA_SCOPES})
+    return sorted(
+        {
+            *session_auth.MEMBER_SCOPES,
+            *session_auth.ADMIN_EXTRA_SCOPES,
+            *session_auth.SUPERADMIN_EXTRA_SCOPES,
+        }
+    )
 
 
 def granted_scopes(user_role: str, requested: list[str] | None) -> list[str]:
     """Narrow a requested grant to the role's scopes — **can only narrow**.
 
     ``requested`` ``None``/empty means "everything the role allows"; anything
-    asked for outside the role's set is dropped, never widened. The result is
-    what lands in the token row and therefore what :func:`rbac.role_for`
-    sees later — an admin granted only member scopes resolves to ``member``
-    (26 tools, not 31).
+    asked for outside the role's set is dropped, never widened.  The result is
+    what lands in the token row, and it caps the *actions* the principal can
+    use: :func:`resolve_access_token` reports the account's live ``role`` for
+    the tier, then re-narrows this grant against the role it has now, so what
+    actually reaches a per-tool or per-route scope check is the intersection of
+    what was consented to and what the account still holds.  ``role:manage``
+    therefore only ever reaches a grant minted for a superadmin account.
     """
     from ..api import session_auth
 
@@ -289,16 +328,19 @@ def authorization_server_metadata(origin: str) -> dict[str, Any]:
     }
 
 
-def protected_resource_metadata(origin: str) -> dict[str, Any]:
-    """RFC 9728 protected-resource metadata for the MCP resource.
+def protected_resource_metadata(
+    origin: str, resource_path: str = "/mcp"
+) -> dict[str, Any]:
+    """RFC 9728 protected-resource metadata for an MCP resource.
 
-    ``resource`` is the MCP endpoint itself (``<origin>/mcp``) — the URL a
-    ChatGPT/Gemini operator enters — and ``authorization_servers`` points back
-    at this same host's RFC 8414 document.
+    ``resource`` is the MCP endpoint itself (``<origin>/mcp`` by default; the
+    versioned alias passes ``/api/v1/mcp``) — the URL a ChatGPT/Gemini
+    operator enters — and ``authorization_servers`` points back at this same
+    host's RFC 8414 document.
     """
     base = origin.rstrip("/")
     return {
-        "resource": resource_url(origin),
+        "resource": resource_url(origin, resource_path),
         "resource_name": "Zolai MCP endpoint",
         "authorization_servers": [base],
         "bearer_methods_supported": ["header"],
@@ -341,9 +383,7 @@ def ensure_oauth_tables() -> dict[str, Any]:
 
 
 def _now_plus(seconds: int) -> str:
-    from datetime import datetime, timedelta, timezone
-
-    return _stamp(datetime.now(timezone.utc) + timedelta(seconds=seconds))
+    return _clock_stamp(_clock_now() + timedelta(seconds=seconds))
 
 
 # ---------------------------------------------------------------------------
@@ -851,7 +891,8 @@ def consume_authorization_code(
     if not code:
         raise AuthorizationCodeError("missing code")
     code_hash = hash_token(str(code))
-    now = _stamp()
+    now = _clock_stamp()
+    now_dt = _clock_parse(now)
     with _get_manager().engine.begin() as conn:
         row = conn.execute(
             text(
@@ -866,7 +907,7 @@ def consume_authorization_code(
         found = dict(row._mapping)
         if found.get("consumed_at"):
             raise AuthorizationCodeError("code already consumed")
-        if str(found.get("expires_at") or "") <= now:
+        if str(found.get("expires_at") or "") and _clock_parse(str(found["expires_at"])) <= now_dt:
             raise AuthorizationCodeError("code expired")
         if str(found.get("client_id")) != str(client_id):
             raise AuthorizationCodeError("code was issued to another client")
@@ -967,7 +1008,8 @@ def refresh_tokens(*, refresh_token: str | None, client_id: str) -> dict[str, An
     if not refresh_token:
         raise TokenError("missing refresh_token")
     presented_hash = hash_token(str(refresh_token))
-    now = _stamp()
+    now = _clock_stamp()
+    now_dt = _clock_parse(now)
     with _get_manager().engine.begin() as conn:
         row = conn.execute(
             text(
@@ -981,7 +1023,7 @@ def refresh_tokens(*, refresh_token: str | None, client_id: str) -> dict[str, An
         found = dict(row._mapping)
         if found.get("revoked_at"):
             raise TokenError("refresh token revoked")
-        if str(found.get("refresh_expires_at") or "") <= now:
+        if str(found.get("refresh_expires_at") or "") and _clock_parse(str(found["refresh_expires_at"])) <= now_dt:
             raise TokenError("refresh token expired")
         if str(found.get("client_id")) != str(client_id):
             raise TokenError("refresh token was issued to another client")
@@ -1024,7 +1066,7 @@ def _touch_token_used(row_id: Any, token_hash: str) -> None:
         with _get_manager().engine.begin() as conn:
             conn.execute(
                 text("UPDATE oauth_tokens SET last_used_at = :stamp WHERE id = :id"),
-                {"stamp": _stamp(), "id": int(row_id)},
+                {"stamp": _clock_stamp(), "id": int(row_id)},
             )
     except Exception:  # noqa: BLE001 - observability only, never breaks auth
         pass
@@ -1036,10 +1078,24 @@ def resolve_access_token(token: str | None) -> dict[str, Any] | None:
     The record is deliberately the **same shape** the middleware publishes for
     an API key (``id``/``name``/``key_prefix``/``scopes``) so
     ``require_scope`` / ``role_for`` / ``has_role`` work unchanged, plus the
-    identity fields ``auth_source='oauth'``, ``user_id``, ``username`` and
-    ``client_id``.  ``scopes`` is the grant minted at the token endpoint —
-    already narrowed to the user's role at authorize time, so an OAuth
-    principal can never reach a tier its user does not hold.
+    identity fields ``auth_source='oauth'``, ``user_id``, ``username``,
+    ``client_id`` and the account's ``role``.
+
+    Two fields, two jobs, and the split is deliberate:
+
+    - ``role`` is read **live from ``users``**, not frozen into the grant, so a
+      promotion or demotion takes effect on the next request rather than at the
+      next refresh;
+    - ``scopes`` is the minted grant **re-narrowed** against
+      :func:`zolai.api.session_auth.role_scopes` of that live role.  An
+      intersection, never a union: a demotion shrinks a token that still
+      carries admin scopes, and a promotion does **not** silently widen a grant
+      the user never asked a client to hold.  Widening stays the token
+      endpoint's job, at consent time.
+
+    This is the OAuth half of "the role lives on the account": the grant is a
+    ceiling the user agreed to, the account is the truth about who they are,
+    and a token is only ever evidence of both.
 
     Returns ``None`` for missing / foreign-prefix / unknown / expired /
     revoked tokens, and for a grant whose user has since been **disabled or
@@ -1049,12 +1105,13 @@ def resolve_access_token(token: str | None) -> dict[str, Any] | None:
     if not token or not token.startswith(ACCESS_TOKEN_PREFIX):
         return None
     presented_hash = hash_token(token)
-    now = _stamp()
+    now = _clock_stamp()
+    now_dt = _clock_parse(now)
     with _get_manager().engine.connect() as conn:
         row = conn.execute(
             text(
                 "SELECT t.id, t.client_id, t.user_id, t.scopes, "
-                "       t.access_expires_at, t.revoked_at, u.username, u.enabled "
+                "       t.access_expires_at, t.revoked_at, u.username, u.enabled, u.role "
                 "FROM oauth_tokens t "
                 "LEFT JOIN users u ON u.id = t.user_id "
                 "WHERE t.access_token_hash = :h"
@@ -1066,19 +1123,27 @@ def resolve_access_token(token: str | None) -> dict[str, Any] | None:
     found = dict(row._mapping)
     if found.get("revoked_at"):
         return None
-    if str(found.get("access_expires_at") or "") <= now:
+    if str(found.get("access_expires_at") or "") and _clock_parse(str(found["access_expires_at"])) <= now_dt:
         return None
     if found.get("username") is None or not found.get("enabled"):
         # User disabled or deleted after the grant was minted.
         return None
     _touch_token_used(found["id"], presented_hash)
+    from ..api import session_auth
+
+    # role_scopes() degrades an unknown/blank role to member, never raises, so
+    # a hand-edited users.role shrinks a grant instead of 500-ing the request.
+    role = str(found.get("role") or "").strip().lower() or "member"
+    allowed = set(session_auth.role_scopes(role))
+    grant = _decode_json_list(found.get("scopes"))
     return {
         "id": f"oauth:{found['id']}",
         "name": f"oauth:{found['client_id']}",
         "key_prefix": token[:16],
-        "scopes": _decode_json_list(found.get("scopes")),
+        "scopes": [scope for scope in grant if scope in allowed],
         "auth_source": "oauth",
         "user_id": int(found["user_id"]),
         "username": str(found["username"]),
         "client_id": str(found["client_id"]),
+        "role": role,
     }

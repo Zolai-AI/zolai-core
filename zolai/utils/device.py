@@ -63,5 +63,6 @@ def setup_cpu_optimization() -> None:
         # Disable CUDA overhead
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
         # Enable CPU threading optimization
+        # (Override with OMP_NUM_THREADS on a shared/contended machine.)
         torch.set_num_threads(os.cpu_count() or 4)
         torch.set_num_interop_threads(1)

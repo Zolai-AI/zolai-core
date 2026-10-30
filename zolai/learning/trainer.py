@@ -7,6 +7,7 @@ import sqlite3
 from typing import Any
 
 from ..config import config
+from ..shared.clock import stamp
 
 logger = logging.getLogger(__name__)
 
@@ -59,13 +60,14 @@ class CorrectionTrainer:
             cur.execute(
                 """INSERT INTO data_audit_log
                    (table_name, row_id, field, old_value, new_value, changed_at, reason)
-                   VALUES (?, ?, ?, ?, ?, datetime('now'), ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     "corrections",
                     0,
                     "correction",
                     ai_response,
                     corrected_response,
+                    stamp(),
                     f"Correction by {user_id}: {original_input[:100]}",
                 ),
             )
@@ -75,13 +77,14 @@ class CorrectionTrainer:
                 cur.execute(
                     """INSERT INTO data_audit_log
                        (table_name, row_id, field, old_value, new_value, changed_at, reason)
-                       VALUES (?, ?, ?, ?, ?, datetime('now'), ?)""",
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
                     (
                         "context_improvements",
                         0,
                         "context",
                         original_input,
                         context,
+                        stamp(),
                         f"Context for correction by {user_id}",
                     ),
                 )

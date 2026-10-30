@@ -6,17 +6,22 @@ Caps, idempotent, summary dict. CLI entrypoint via `zolai discovery build`.
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy.engine import Engine
 
+from zolai.learning.run_ledger import sanitize_error
+
 from .collocation import build_collocation_hypotheses
 from .grammar import build_grammar_hypotheses
 from .morphology import build_morphology_hypotheses
 from .pos import build_pos_hypotheses
 from .sentence_patterns import build_sentence_pattern_hypotheses
+
+logger = logging.getLogger(__name__)
 
 # Default caps per capability (plan defaults)
 DEFAULT_CAPS: dict[str, int] = {
@@ -45,11 +50,14 @@ class DiscoverySummary:
     sentence_patterns: dict[str, Any] = field(default_factory=dict)
     grammar: dict[str, Any] = field(default_factory=dict)
     status_counts: dict[str, int] = field(default_factory=dict)
+    failed_capabilities: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "pipeline_version": "phase3-v1",
             "capabilities_run": self.capabilities_run,
+            "failed_capabilities": self.failed_capabilities,
+            "ok": not self.failed_capabilities,
             "dry_run": self.dry_run,
             "elapsed_seconds": round(self.elapsed_seconds, 2),
             "pos": self.pos,
@@ -116,16 +124,23 @@ def build_discovery(
                 total_status[status] = total_status.get(status, 0) + count
 
         except Exception as exc:
-            # Log and continue with other capabilities
-            result = {
-                "capability": cap,
-                "error": str(exc),
-            }
-            setattr(summary, cap, result)
+            # One capability failing must not stop the others, but it must
+            # surface: the step is WARN and the failure is named in the summary.
+            error_class, safe_message = sanitize_error(exc)
+            logger.exception("discovery capability %s failed: %s", cap, error_class)
+            summary.failed_capabilities.append(cap)
+            setattr(
+                summary,
+                cap,
+                {"capability": cap, "ok": False, "error_class": error_class,
+                 "error": safe_message},
+            )
 
     summary.status_counts = total_status
     summary.elapsed_seconds = time.time() - start
     return summary.to_dict()
+
+
 class DiscoveryPipeline:
     """Wrapper class for discovery pipeline matching test expectations."""
 

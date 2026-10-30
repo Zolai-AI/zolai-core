@@ -37,6 +37,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import random
 import threading
 import time
 from typing import Any
@@ -117,6 +119,33 @@ def _post(
     default suite opens no sockets.
     """
     return get_http_client().post(url, json=body, headers=headers, timeout=timeout)
+
+
+#: Attempts per provider request (1 disables retry). 429 / 5xx and transport
+#: errors are transient by definition; retrying them *inside* the breaker call
+#: keeps the breaker scoring the final outcome instead of an intermediate one.
+LLM_RETRY_ATTEMPTS = max(1, int(os.environ.get("ZOLAI_LLM_RETRY_ATTEMPTS", "3")))
+LLM_RETRY_BASE_S = max(0.0, float(os.environ.get("ZOLAI_LLM_RETRY_BASE_S", "0.5")))
+LLM_RETRY_CAP_S = max(0.0, float(os.environ.get("ZOLAI_LLM_RETRY_CAP_S", "4.0")))
+
+
+def _retry_delay(response: httpx.Response | None, attempt: int) -> float:
+    """Full-jitter exponential backoff, honouring ``Retry-After`` when sane."""
+    if response is not None:
+        raw = str(response.headers.get("retry-after") or "").strip()
+        if raw:
+            try:
+                return min(LLM_RETRY_CAP_S, max(0.0, float(raw)))
+            except ValueError:
+                pass
+    ceiling = min(LLM_RETRY_CAP_S, LLM_RETRY_BASE_S * (2**attempt))
+    return random.uniform(0.0, ceiling)
+
+
+def _sleep(seconds: float) -> None:
+    """Module-level seam so offline tests can observe backoff without waiting."""
+    if seconds > 0:
+        time.sleep(seconds)
 
 
 def _log_call(
@@ -380,10 +409,24 @@ def chat(
     turns = len(messages)
 
     def _do_request() -> httpx.Response:
-        response = _post(url, body=body, headers=headers, timeout=timeout)
-        if response.status_code == 429 or response.status_code >= 500:
-            raise _UnhealthyProvider(response)
-        return response
+        # Retry *inside* the breaker call so the breaker scores the outcome the
+        # caller actually sees, not an intermediate throttle.
+        for attempt in range(LLM_RETRY_ATTEMPTS):
+            last_attempt = attempt + 1 >= LLM_RETRY_ATTEMPTS
+            try:
+                response = _post(url, body=body, headers=headers, timeout=timeout)
+            except httpx.TransportError:
+                if last_attempt:
+                    raise
+                _sleep(_retry_delay(None, attempt))
+                continue
+            if response.status_code == 429 or response.status_code >= 500:
+                if last_attempt:
+                    raise _UnhealthyProvider(response)
+                _sleep(_retry_delay(response, attempt))
+                continue
+            return response
+        raise AssertionError("unreachable: retry loop always returns or raises")
 
     started = time.monotonic()
     try:

@@ -33,6 +33,7 @@ from typing import Any
 
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import text
+from ..shared.clock import stamp
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +69,6 @@ def set_fk_policy(policy: str) -> str:
         raise ValueError(f"unknown FK policy: {policy!r}")
     _FK_POLICY = policy
     return _FK_POLICY
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _has_runs_table(engine) -> bool:
@@ -147,7 +144,7 @@ def foreign_key_check(mgr: Any = None, *, write: bool = False) -> dict[str, Any]
         "kind": KIND_FOREIGN_KEY,
         "ok": not issues,
         "issues": issues,
-        "checked_at": _now(),
+        "checked_at": stamp(),
         "duration_ms": round((time.perf_counter() - started) * 1000, 2),
     }
     if write:
@@ -213,7 +210,7 @@ def full_integrity_check(mgr: Any = None, *, write: bool = True) -> dict[str, An
         "kind": KIND_FULL,
         "ok": ok,
         "issues": issues,
-        "checked_at": _now(),
+        "checked_at": stamp(),
         "duration_ms": round((time.perf_counter() - started) * 1000, 2),
     }
     if write:

@@ -487,10 +487,16 @@ class ComprehensiveAnalyzer:
         if language != "zo":
             return []
 
+        # Canonical idioms corpus. No live row carries a literal 'idiom'
+        # category — the table itself is the idiom/proverb collection — so
+        # filtering on it returned nothing.
         rows = conn.execute("""
-            SELECT zolai, english, source, category
-            FROM proverbs_idioms
-            WHERE zolai LIKE ? AND category = 'idiom'
+            SELECT zolai,
+                   english_translation AS english,
+                   source_category AS source,
+                   category
+            FROM zolai_proverbs_idioms
+            WHERE zolai LIKE ?
             LIMIT 5
         """, (f"%{word}%",)).fetchall()
 

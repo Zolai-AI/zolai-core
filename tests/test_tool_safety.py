@@ -19,7 +19,7 @@ Done-when asserted here:
 - the published surface is exactly the declared one: public/member/admin stay
   8 with byte-identical name sets, and the member/admin tiers carry the B1a
   language family, the learning reads and (admin only) the learning write-back
-  channels (public 8 / member 31 / admin 39) and nothing else.
+  and learning-run reads (public 8 / member 31 / admin 42) and nothing else.
 
 Pure: no DB, no network, no FastAPI app.
 """
@@ -69,12 +69,12 @@ _WORD = {"type": "object", "properties": {"word": {"type": "string"}}, "required
 # Captured from the registry before B0 (public 8 / member 21 / admin 26) and
 # re-asserted here.  B0 added plumbing + annotations only, so that batch changed
 # no name.  B1a (zolai/agent/tools/language.py) added exactly five member-tier
-# language tools; the learning family added five member reads and three
-# admin-only write-back channels.  Nothing was removed or
+# language tools; the learning family added five member reads, three admin-only
+# write-back channels and three admin-only ledger reads.  Nothing was removed or
 # reordered, so the public tier is still byte-identical and every earlier name
 # is still present in both grown tiers.
 
-EXPECTED_COUNTS = {"public": 8, "member": 31, "admin": 39}
+EXPECTED_COUNTS = {"public": 8, "member": 31, "admin": 42}
 
 #: The five B1a language tools — member tier, never anonymous.
 LANGUAGE_TOOL_NAMES: tuple[str, ...] = (
@@ -99,6 +99,13 @@ LEARNING_WRITE_TOOL_NAMES: tuple[str, ...] = (
     "study_record_review",
     "contribute_word",
     "submit_usage_example",
+)
+
+#: The read-only learning-cycle ledger reads — admin tier only.
+LEARNING_RUN_TOOL_NAMES: tuple[str, ...] = (
+    "learning_run_status",
+    "learning_version_history",
+    "learning_rag_status",
 )
 
 EXPECTED_TIERS: dict[str, list[str]] = {
@@ -170,6 +177,7 @@ EXPECTED_TIERS: dict[str, list[str]] = {
             "provider_status",
             "review_queue_submit",
             "web_search",
+            *LEARNING_RUN_TOOL_NAMES,
         ]
     ),
 }
@@ -474,16 +482,25 @@ class TestScopeField:
             name for name in allow_list("member") if SPECS[name].scope
         }
 
-        # A record holding the whole member read set keeps everything but the
-        # one member-tier tool whose action no session scope set carries yet:
-        # ``pos_tag``/``pos:read`` (``session_auth.MEMBER_SCOPES`` has 5
-        # entries and no ``pos:read`` — the §6.3 fix for that is a *REST*
-        # behaviour change and therefore deliberately not part of B1a).
+        # A record holding the whole member scope set keeps **the entire member
+        # tier** — every tool action a tier advertises is held by the role that
+        # tier belongs to (the RBAC task closed the last gap: ``pos_tag`` needed
+        # ``pos:read``, which no account role used to carry).  The parity rule
+        # itself is guarded by ``TestTierScopeParity`` in
+        # tests/test_role_hierarchy.py.
+        # ``ADMIN_SCOPES`` means two different things two lines apart: the one
+        # this function imported from ``rbac`` is the set that *defines* admin
+        # (the three write actions); ``session_auth``'s is everything an admin
+        # *account* holds.  Aliased rather than shadowed.
+        from zolai.api.session_auth import ADMIN_SCOPES as ACCOUNT_ADMIN_SCOPES
         from zolai.api.session_auth import MEMBER_SCOPES
 
         read_member = {"scopes": list(MEMBER_SCOPES)}
-        assert allow_list("member") - allow_list_for_record(read_member) == {"pos_tag"}
+        assert allow_list_for_record(read_member) == allow_list("member")
         assert allow_list_for_record(read_member) < allow_list("admin")
+
+        read_admin = {"scopes": list(ACCOUNT_ADMIN_SCOPES)}
+        assert allow_list_for_record(read_admin) == allow_list("admin")
 
         # A record with no readable scope list: the tier decides, unchanged.
         assert tool_tier_for_record({"scopes": None}) == "member"

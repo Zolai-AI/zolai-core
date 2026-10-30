@@ -15,6 +15,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
+from zolai.shared.clock import now, parse, stamp
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,11 +61,13 @@ class LogParser:
         """Parse a single log line."""
         # Try to extract timestamp
         ts_match = cls.PATTERNS["timestamp"].search(line)
-        timestamp = datetime.utcnow()
+        timestamp = now()
         if ts_match:
             try:
-                ts_str = ts_match.group(1).replace("T", " ")
-                timestamp = datetime.fromisoformat(ts_str)
+                # A log line carries no offset, so this parse used to return a naive
+                # datetime.  `since` below is aware, and Python raises TypeError rather
+                # than guessing when it compares the two.
+                timestamp = parse(ts_match.group(1))
             except ValueError:
                 pass
 
@@ -223,7 +227,7 @@ class AutoFixer:
                 self.fix_history.append({
                     "issue_id": issue.issue_id,
                     "fix": fix_method.__name__,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": stamp(),
                     "success": True,
                 })
                 logger.info(f"Successfully fixed {issue.issue_id}")
@@ -375,7 +379,7 @@ class ServerMonitor:
     async def run_monitoring_cycle(self) -> dict[str, Any]:
         """Run a complete monitoring cycle: scan, detect, fix."""
         # Scan logs
-        issues = await self.scan_logs(since=datetime.utcnow() - timedelta(hours=1))
+        issues = await self.scan_logs(since=now() - timedelta(hours=1))
 
         # Auto-fix issues
         fixed = 0
@@ -385,7 +389,7 @@ class ServerMonitor:
                     fixed += 1
 
         return {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": stamp(),
             "issues_found": len(issues),
             "issues_fixed": fixed,
             "open_issues": len([i for i in self.issues.values() if i.status == "open"]),

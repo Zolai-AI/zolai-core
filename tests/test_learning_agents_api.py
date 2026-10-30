@@ -16,6 +16,47 @@ from zolai.api.server import app
 PREFIX = "/api/v1/learning"
 
 
+@pytest.fixture(autouse=True)
+def scratch_corpus(scratch_db, monkeypatch: pytest.MonkeyPatch):
+    """Every route here writes, so nothing here may reach the corpus.
+
+    ``POST /run`` creates ``learning_signals`` and inserts a task row; ``GET
+    /overview`` seeds the agent registry. This file used to redirect no database at
+    all, so all of that landed in the live ``data/zolai.db`` — that is where the
+    polluted ``hypotheses``/``data_audit_log`` rows came from, and the write fence
+    only noticed at teardown, after the rows were already in the corpus. The tests
+    then "passed" by reading real corpus rows, so pinning them to a scratch DB
+    surfaced a second problem: they had no schema. Create it, and seed the handful
+    of verses the learning agents query.
+    """
+    monkeypatch.setenv("ZOLAI_API_AUTH", "off")
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    from zolai.data.models import Base, BibleVerse
+
+    engine = create_engine(f"sqlite:///{scratch_db}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add_all(
+            [
+                BibleVerse(
+                    ref="Gen.1.1", book="Genesis", chapter=1, verse=1,
+                    zo_tdb77="ṥin hnuei hlauhna Tinte a thlen salh",
+                    en_kJV="In the beginning God created the heaven and the earth.",
+                ),
+                BibleVerse(
+                    ref="John.3.16", book="John", chapter=3, verse=16,
+                    zo_tdb77="Tinte hnuai a hi humphat a hnain, Fapa thak a siam",
+                    en_kJV="For God so loved the world, that he gave his only begotten Son,",
+                ),
+            ]
+        )
+        session.commit()
+    engine.dispose()
+    return scratch_db
+
+
 @pytest.fixture()
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """Client with auth disabled.

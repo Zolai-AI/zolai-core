@@ -50,13 +50,36 @@ jobs:
             --ignore=tests/test_tokenizer.py \
             --ignore=tests/test_word_attestation.py \
             --ignore=tests/test_gemini_client.py \
-            --ignore=tests/test_enhanced_progress.py \
-            --ignore=tests/test_knowledge_promotion.py \
-            --ignore=tests/test_knowledge_consensus.py
-            # Quarantined: missing promotion/consensus API exports (collection errors)
+            --ignore=tests/test_enhanced_progress.py
+
+      - name: Split leakage gate
+        # Fails when any row appears in two splits, or when an eval fixture row
+        # is present in train. A checkout without split files skips explicitly.
+        env:
+          ZOLAI_DATA_ROOT: ${{ github.workspace }}/data
+        run: |
+          python scripts/training/check_split_leakage.py \
+            --training-dir "$ZOLAI_DATA_ROOT/training" \
+            --eval-dir "$ZOLAI_DATA_ROOT/eval"
+
+      - name: Data provenance tool smoke
+        # Generate + verify keeps the scanner honest. The drift gate itself
+        # runs against the shared data manifest outside CI (data/ is gitignored
+        # and this checkout has none of the corpus).
+        env:
+          ZOLAI_DATA_ROOT: ${{ github.workspace }}/data
+        run: |
+          python scripts/data_provenance.py --generate \
+            --data-dir "$ZOLAI_DATA_ROOT" --manifest "$ZOLAI_DATA_ROOT/provenance.json"
+          python scripts/data_provenance.py --verify \
+            --data-dir "$ZOLAI_DATA_ROOT" --manifest "$ZOLAI_DATA_ROOT/provenance.json"
 
       - name: Eval offline regression gate
-        continue-on-error: true
+        # Was `continue-on-error: true` until 2026-10-27, which made a regression
+        # gate that could not fail. The `smoke` lane reads the bundled interchange
+        # files under zolai/eval/sets/, so it needs no corpus DB and exits 0 on a
+        # fresh checkout — verified both against data/zolai.db and an empty
+        # ZOLAI_DATA_ROOT before enabling.
         run: python -m zolai.eval.cli --set smoke --baseline report/eval-baseline.json --gate
 
       - name: ZVS validate core library

@@ -12,7 +12,7 @@ teams:
   training:
     name: Training Team
     description: "Model training, evaluation, and deployment"
-    agents: [trainer, evaluator, research-tracker, dpo-builder]
+    agents: [trainer, evaluator, research-tracker, dpo-builder, learning-runner]
 
   language:
     name: Language Team
@@ -136,6 +136,13 @@ agents:
     team: training
     trigger: ["dpo", "preference pairs", "zvs alignment", "dialect alignment", "build dpo"]
     output: data/training/dpo_pairs_v1.jsonl
+
+  learning-runner:
+    name: Zolai Learning Runner
+    dir: agents/zolai-learning-runner/
+    team: training
+    trigger: ["learning run", "learn locally", "train core engines", "update rag index", "knowledge version"]
+    output: data/reports/learning_run_<run_id>.json
 
   # ── Language & Knowledge ─────────────────────────────────────────────────────
   linguistic-specialist:

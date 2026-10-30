@@ -13,8 +13,10 @@ import json
 import logging
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Callable
+
+from zolai.shared.clock import now, parse
 
 from .dashboard import MetricsDashboard
 
@@ -37,7 +39,7 @@ class MetricsExporter:
 
     def export_csv(self, hours: int = 24) -> str:
         """Render metrics as CSV."""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = now() - timedelta(hours=hours)
 
         output = io.StringIO()
         writer = csv.writer(output)
@@ -60,7 +62,7 @@ class MetricsExporter:
 
     def export_influxdb_line(self, hours: int = 24) -> str:
         """Render metrics in InfluxDB line protocol format."""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = now() - timedelta(hours=hours)
 
         lines = []
         for name in self.dashboard.collector.get_all_metric_names():
@@ -71,7 +73,7 @@ class MetricsExporter:
                 label_str = ",".join(f'{k}="{v}"' for k, v in labels.items()) if labels else ""
                 if label_str:
                     label_str = f",{label_str}"
-                nanos = int(datetime.fromisoformat(m["timestamp"]).timestamp() * 1e9)
+                nanos = int(parse(m["timestamp"]).timestamp() * 1e9)
                 lines.append(f"{safe_name}{label_str} value={m['value']} {nanos}")
 
         return "\n".join(lines)
@@ -156,7 +158,7 @@ class MetricsExporter:
             client = InfluxDBClient(url=url, token=token, org=org)
             write_api = client.write_api(write_options=SYNCHRONOUS)
 
-            since = datetime.utcnow() - timedelta(hours=hours)
+            since = now() - timedelta(hours=hours)
             for name in self.dashboard.collector.get_all_metric_names():
                 metrics = self.dashboard.collector.query_metrics(name, since=since)
                 for m in metrics:
@@ -165,7 +167,7 @@ class MetricsExporter:
                         .tag("metric", name)
                         .tag("source", m.get("source", "system"))
                         .field("value", m["value"])
-                        .time(datetime.fromisoformat(m["timestamp"]))
+                        .time(parse(m["timestamp"]))
                     )
                     write_api.write(bucket=bucket, org=org, record=point)
 

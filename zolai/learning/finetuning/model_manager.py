@@ -12,11 +12,12 @@ import json
 import logging
 import shutil
 import uuid
-from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+
+from zolai.shared.clock import stamp
 
 from ...data.repositories import get_engine
 
@@ -75,7 +76,7 @@ class ModelManager:
             return existing["id"]
 
         model_id = str(uuid.uuid4())[:8]
-        now = datetime.utcnow().isoformat()
+        now = stamp()
 
         with self.engine.begin() as conn:
             conn.execute(
@@ -163,7 +164,7 @@ class ModelManager:
                     UPDATE finetune_model_registry
                     SET is_active = 1, updated_at = :now WHERE model_id = :mid
                 """),
-                {"mid": model_id, "now": datetime.utcnow().isoformat()},
+                {"mid": model_id, "now": stamp()},
             )
         return True
 
@@ -189,7 +190,7 @@ class ModelManager:
                     UPDATE finetune_model_registry
                     SET status = :status, updated_at = :now WHERE model_id = :mid
                 """),
-                {"status": status, "mid": model_id, "now": datetime.utcnow().isoformat()},
+                {"status": status, "mid": model_id, "now": stamp()},
             )
         return True
 

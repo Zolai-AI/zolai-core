@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
+from zolai.shared.clock import now
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,7 +29,7 @@ class AgentTrackRecord:
     avg_confidence_when_correct: float = 0.5
     avg_confidence_when_wrong: float = 0.5
     calibration_error: float = 0.0  # How well confidence matches accuracy
-    last_updated: datetime = field(default_factory=datetime.utcnow)
+    last_updated: datetime = field(default_factory=now)
     recent_accuracy: float = 0.5  # Rolling window accuracy
     specialization_scores: dict[str, float] = field(default_factory=dict)  # topic -> accuracy
 
@@ -107,7 +109,7 @@ class ConfidenceScorer:
             "correct": was_correct,
             "confidence": confidence,
             "topic": topic,
-            "timestamp": datetime.utcnow(),
+            "timestamp": now(),
         })
 
         # Trim history
@@ -117,7 +119,7 @@ class ConfidenceScorer:
         # Update rolling accuracy
         self._update_rolling_metrics(agent_id)
 
-        record.last_updated = datetime.utcnow()
+        record.last_updated = now()
 
     def _update_rolling_metrics(self, agent_id: str):
         """Update rolling window metrics (exponentially decayed accuracy)."""

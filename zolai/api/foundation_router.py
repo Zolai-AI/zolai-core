@@ -280,10 +280,6 @@ class AdaptiveDifficultyResponse(FoundationResponse):
 
     model_config = ConfigDict(extra="allow")
 
-    model_config = ConfigDict(extra="allow")
-
-    model_config = ConfigDict(extra="allow")
-
     difficulty: Any = ""
     frequency_tier: Any = ""
     morphology_threshold: Any = 0.0

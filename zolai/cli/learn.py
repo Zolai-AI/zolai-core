@@ -250,6 +250,7 @@ def levels(
         lines.append(
             f"  {name:<10} docs={stats.get('documents', 0):<6} "
             f"lines={stats.get('lines', 0):<7} paragraphs={stats.get('paragraphs', 0):<6} "
+            f"non_zolai={stats.get('non_zolai_paragraphs', 0):<6} "
             f"layers={stats.get('layers', 0):<7} openers={stats.get('openers', 0)}"
         )
     _emit(result, json_out, "\n".join(lines))

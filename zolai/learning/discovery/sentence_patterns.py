@@ -15,9 +15,9 @@ Shared GrammarPatternWriter upserts by pattern_id, filling:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
-from collections import Counter
 from typing import Any
 
 from sqlalchemy import text
@@ -31,6 +31,19 @@ log = logging.getLogger(__name__)
 
 # Cap for sentence patterns (plan default: few hundred)
 PATTERN_CAP = 500
+
+
+def _pattern_id(pattern_type: str, structure: str) -> str:
+    """Stable id per (pattern type, structure).
+
+    The id is the same whether the pattern was seen in a Bible verse or in a
+    translation, and whichever verse happened to come first, so one structure
+    maps to one row. Older ids encoded the verse reference (``disc_sp_sov_JHN_1_1``)
+    or a per-process ``hash(text)`` suffix, which is why the live DB holds 500
+    copies of ``sov``.
+    """
+    digest = hashlib.sha1(structure.encode("utf-8")).hexdigest()[:10]
+    return f"disc_sp_{pattern_type}_{digest}"
 
 
 def _extract_patterns_from_bible(engine: Engine, limit: int | None = None) -> list[dict[str, Any]]:
@@ -56,7 +69,7 @@ def _extract_patterns_from_bible(engine: Engine, limit: int | None = None) -> li
         components = learner._extract_components(zo)
 
         entry = {
-            "pattern_id": f"disc_sp_{pattern_type}_{ref.replace(' ', '_').replace(':', '_')}",
+            "pattern_id": _pattern_id(pattern_type, structure),
             "pattern_type": pattern_type,
             "structure": structure,
             "example_zo": zo,
@@ -72,8 +85,7 @@ def _extract_patterns_from_bible(engine: Engine, limit: int | None = None) -> li
     # Flatten and return top patterns per type
     result: list[dict[str, Any]] = []
     for ptype, entries in patterns_by_type.items():
-        # Take top 50 per type (by frequency)
-        _freq = Counter(e["structure"] for e in entries)
+        # Take top 50 distinct structures per type
         seen_structures: set[str] = set()
         for entry in entries:
             if entry["structure"] in seen_structures:
@@ -113,7 +125,7 @@ def _extract_patterns_from_translations(engine: Engine, limit: int | None = None
             continue
         seen_structures.add(structure)
 
-        pattern_id = f"disc_sp_{pattern_type}_trans_{abs(hash(zo)) % 100000}"
+        pattern_id = _pattern_id(pattern_type, structure)
         result.append({
             "pattern_id": pattern_id,
             "pattern_type": pattern_type,
@@ -147,10 +159,11 @@ def _write_grammar_pattern(
     pattern_data: dict[str, Any],
     source_name: str,
     dry_run: bool = False,
-) -> tuple[int, list[int]]:
+) -> tuple[int, list[int], bool]:
     """Write one pattern to grammar_patterns via shared writer logic.
 
-    Returns (pattern_id, evidence_ids).
+    Returns ``(row_id, evidence_ids, created)``; ``created`` is false for a
+    pattern that was already present.
     """
     from zolai.data.repositories.grammar import GrammarRepository
 
@@ -187,7 +200,7 @@ def _write_grammar_pattern(
     existing = repo.get_by_pattern_id(pattern_id)
     if existing:
         # Already exists — skip (idempotent)
-        return (existing["id"], [])
+        return (existing["id"], [], False)
 
     # Confidence from evidence (tier 1 = 1.0)
     class _MiniEvidence:
@@ -201,17 +214,10 @@ def _write_grammar_pattern(
     normalized = _build_normalized_pattern(components)
 
     if not dry_run:
-        upsert_evidence_bulk(engine, evidence_rows)
-        # Get evidence ID
-        with engine.connect() as conn:
-            ev_row = conn.execute(
-                text(
-                    "SELECT id FROM foundation_evidence "
-                    "WHERE fact_type = 'grammar' AND fact_key = :fk AND source = :src"
-                ),
-                {"fk": f"pattern:{pattern_id}", "src": source_name},
-            ).first()
-        evidence_ids = [ev_row[0]] if ev_row else []
+        # Use the ids the upsert returns: re-querying by fact_key used the
+        # un-normalised "pattern:…" form while the row stores "grammar:pattern:…",
+        # so the evidence link came back empty.
+        evidence_ids = upsert_evidence_bulk(engine, evidence_rows)
 
         # Insert into grammar_patterns
         _now = json.dumps([], ensure_ascii=False)
@@ -241,7 +247,7 @@ def _write_grammar_pattern(
     else:
         evidence_ids = []
 
-    return (0, evidence_ids)
+    return (0, evidence_ids, True)
 
 
 def build_sentence_pattern_hypotheses(
@@ -258,12 +264,15 @@ def build_sentence_pattern_hypotheses(
         all_patterns = all_patterns[:limit]
 
     patterns_written = 0
+    already_present = 0
+    processed = 0
     status_counts: dict[str, int] = {"OBSERVED": 0, "CANDIDATE": 0}
     skipped = 0
 
     for pattern_data in all_patterns:
-        if patterns_written >= PATTERN_CAP:
+        if processed >= PATTERN_CAP:
             break
+        processed += 1
 
         source_name = (
             "bible_verses"
@@ -281,9 +290,12 @@ def build_sentence_pattern_hypotheses(
         )
 
         try:
-            _write_grammar_pattern(engine, pattern_data, source_name, dry_run)
-            patterns_written += 1
-            status_counts["OBSERVED"] += 1
+            _, _, created = _write_grammar_pattern(engine, pattern_data, source_name, dry_run)
+            if created:
+                patterns_written += 1
+                status_counts["OBSERVED"] += 1
+            else:
+                already_present += 1
         except Exception as exc:
             log.warning("Failed to write pattern %s: %s", pattern_data.get("pattern_id"), exc)
             skipped += 1
@@ -296,6 +308,7 @@ def build_sentence_pattern_hypotheses(
     return {
         "capability": "sentence_patterns",
         "patterns_written": patterns_written,
+        "already_present": already_present,
         "status_counts": status_counts,
         "skipped": skipped,
         "candidates_considered": len(all_patterns),
@@ -308,7 +321,6 @@ class SentencePatternDiscovery:
         self.engine = engine
         self.limit = limit
 
-    def run(self, conn=None):
-        from .sentence_patterns import build_sentence_pattern_hypotheses
+    def run(self):
         return build_sentence_pattern_hypotheses(self.engine, limit=self.limit)
 

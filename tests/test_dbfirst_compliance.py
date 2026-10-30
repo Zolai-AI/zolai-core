@@ -84,6 +84,8 @@ ALLOWLIST_RELS = {
     "knowledge/pdf.py",  # PDF ingest
     "knowledge/retrieve.py",  # one-time HF ingest/export bootstrap
     "learning/feedback.py",  # live user-correction store
+    "learning/core_training.py",  # gold split files for CRF training (build)
+    "learning/cycle.py",  # reads those splits + writes a per-run report artifact
     "manager/__init__.py",  # unified-corpus build utilities
     "zvs/cli.py",  # CLI
     "trainer/dataset.py",  # trainer dataset build/export

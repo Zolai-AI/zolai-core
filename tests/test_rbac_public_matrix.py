@@ -1,4 +1,4 @@
-"""P2 — RBAC: public/member/admin matrix, public routes, roles, completeness.
+"""P2 — RBAC: public/member/admin/superadmin matrix, public routes, roles, completeness.
 
 Covers the plan's done-when:
 
@@ -7,8 +7,12 @@ Covers the plan's done-when:
 - under temporary ``enforce``: public reads **and** (P4) ``POST
   /api/v1/assistant/chat`` → 200 with no key, while non-public routes and the
   admin surface still 401;
-- ``GET /api/v1/auth/me`` reports ``anonymous`` / ``member`` / ``admin`` and
-  never 401s, and carries its original four keys for every auth source;
+- ``GET /api/v1/auth/me`` reports ``anonymous`` / ``member`` / ``admin`` /
+  ``superadmin`` and never 401s, and carries its original four keys for every
+  auth source;
+- the **superadmin row** — every admin-class read answers a superadmin with
+  something other than 401/403, which is what catches an ``== "admin"``
+  regression left anywhere in the repo (``TestSuperadminRow``);
 - ``POST /api/v1/auth/login`` + ``/auth/logout`` are **public** (a login cannot
   require the credential it asks for, or ``enforce`` makes sign-in impossible);
 - scope vocabulary 31 → 33 (``agent:read`` / ``agent:run``) + rate-limit rows;
@@ -17,6 +21,7 @@ Covers the plan's done-when:
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -35,7 +40,13 @@ from zolai.api.rate_limit import SCOPE_LIMITS
 from zolai.api.server import create_app
 from zolai.config import config
 from zolai.data.database import DatabaseManager
-from zolai.data.migrations import create_api_keys_table, create_user_session_tables
+from zolai.data.migrations import (
+    create_ai_provider_tables,
+    create_api_keys_table,
+    create_assistant_chat_feedback_table,
+    create_notification_tables,
+    create_user_session_tables,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -90,12 +101,34 @@ def seed_db(tmp_path, monkeypatch) -> Iterator[Path]:
 
 @pytest.fixture()
 def auth_db(tmp_path, monkeypatch) -> Iterator[DatabaseManager]:
-    mgr = DatabaseManager(f"sqlite:///{tmp_path / 'rbac.db'}")
+    """Throwaway manager **and** ``config.paths.db`` pointed at the same file.
+
+    Both halves matter. ``auth``/``session_auth`` resolve their connection
+    through ``_get_manager``, which the patch below swaps out — but a dozen other
+    modules (``provider_settings``, the learning/finetuning stores,
+    ``assistant_router``'s feedback stats) call ``get_manager()`` or read
+    ``config.paths.db`` directly, and pointing those at the corpus meant a test
+    that only *wanted* a 200-vs-401 answer issued real DDL against the real
+    2.8 GB database. One path, one file, no ambiguity.
+    """
+    from zolai.data import database as database_mod
+
+    db_path = tmp_path / "rbac.db"
+    mgr = DatabaseManager(f"sqlite:///{db_path}")
     mgr.init_db()
     create_api_keys_table(mgr)
     create_user_session_tables(mgr)
+    # The admin read surface touches these three, and the walk in
+    # ``TestSuperadminRow`` asserts a *vocabulary* (200/404 vs 401/403).  Without
+    # their schema a missing table is a 500, which is neither answer and would
+    # have to be excused.
+    create_ai_provider_tables(mgr)
+    create_notification_tables(mgr)
+    create_assistant_chat_feedback_table(mgr)
     monkeypatch.setattr(auth, "_get_manager", lambda: mgr)
     monkeypatch.setattr(session_auth, "_get_manager", lambda: mgr)
+    monkeypatch.setattr(config.paths, "db", db_path)
+    database_mod.reset_manager()
     yield mgr
     mgr.dispose()
 
@@ -115,8 +148,48 @@ def admin_key() -> dict:
     return auth.create_api_key(name="rbac-admin", scopes=["settings:write"], created_by="test")
 
 
+@pytest.fixture()
+def superadmin_key() -> dict:
+    """A key whose *scope* makes it a superadmin (no account behind it)."""
+    return auth.create_api_key(name="rbac-superadmin", scopes=["role:manage"], created_by="test")
+
+
+@pytest.fixture()
+def wildcard_key() -> dict:
+    """``*`` subsumes ``role:manage``, so this is a superadmin key too — and the
+    only credential shape that holds every action, which is what makes it the
+    right one to prove no admin gate is a *scope* gate in disguise."""
+    return auth.create_api_key(name="rbac-wildcard", scopes=["*"], created_by="test")
+
+
+@pytest.fixture()
+def superadmin_session(auth_db, monkeypatch) -> str:
+    """A promoted account's bearer token — the credential a **browser** holds.
+
+    Built through the single writer (``set_user_role``), so this fixture is
+    itself proof that the bootstrap path exists without an HTTP route: nothing
+    here calls ``/api/v1/admin/users``.
+    """
+    monkeypatch.setenv("ZOLAI_AUTH_SESSIONS", "on")
+    created = session_auth.create_user(
+        username="matrix-root",
+        password="correct horse battery staple",
+        display_name="Bootstrap Root",
+        actor="test",
+    )
+    session_auth.set_user_role(
+        "matrix-root", role="superadmin", actor="test", actor_role="superadmin"
+    )
+    issued = session_auth.issue_session(int(created["id"]))
+    return str(issued["token"])
+
+
 def _headers(key: dict) -> dict[str, str]:
     return {"Authorization": f"Bearer {key['plaintext']}"}
+
+
+def _session_headers(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
 
 
 def _request(method: str = "GET", path: str = "/api/v1/agent/runs", state: dict | None = None) -> Request:
@@ -257,7 +330,7 @@ class TestPublicUnderEnforce:
         assert rbac.classify_route("POST", "/api/v1/auth/logout") == "public"
 
     def test_public_word_read_is_200_without_key(
-        self, client, seed_db, auth_db, monkeypatch
+        self, client, auth_db, seed_db, monkeypatch
     ) -> None:
         monkeypatch.setenv("ZOLAI_API_AUTH", "enforce")
         resp = client.get("/api/v1/lexicon/pasian")
@@ -336,7 +409,7 @@ class TestRoles:
         assert rbac.role_for({"scopes": ["dataset:read", "apikey:manage"]}) == "admin"
         assert rbac.role_for({"scopes": ["settings:write"]}) == "admin"
         assert rbac.role_for({"scopes": ["settings:read"]}) == "member"
-        assert rbac.role_for({"scopes": ["*"]}) == "admin"
+        assert rbac.role_for({"scopes": ["*"]}) == "superadmin"
 
     def test_require_role_strict_rejects_anonymous_in_warn(self, monkeypatch) -> None:
         monkeypatch.setenv("ZOLAI_API_AUTH", "warn")
@@ -385,6 +458,149 @@ class TestRoles:
         with pytest.raises(Exception) as exc:
             dep(_request("GET", "/api/v1/records"))
         assert getattr(exc.value, "status_code", None) == 401
+
+
+# ---------------------------------------------------------------------------
+# The superadmin row — a matrix that was built for three roles now has four
+# ---------------------------------------------------------------------------
+
+
+def _admin_class_routes() -> list[tuple[str, str]]:
+    spec = create_app().openapi()
+    found: list[tuple[str, str]] = []
+    for path, operations in spec["paths"].items():
+        for method in operations:
+            upper = method.upper()
+            if upper not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+                continue
+            if rbac.classify_route(upper, path) == "admin":
+                found.append((upper, path))
+    return sorted(found)
+
+
+def _concrete(path: str) -> str:
+    """Fill every ``{placeholder}`` with one inert probe value."""
+    return re.sub(r"\{[^}]+\}", "probe", path)
+
+
+class TestSuperadminRow:
+    """Every admin-class **read** answers a superadmin with something other than
+    "who are you" / "you may not".
+
+    This is the row that catches an ``== "admin"`` regression anywhere in the
+    repo: a surface widened to four roles has exactly the shape "the fourth
+    credential behaves like the third, everywhere".  A single leftover equality
+    comparison turns into a 403 on one of these routes and this walk reports it.
+
+    Asserted on the GET half only, on purpose.  Proving a *role* check by calling
+    ``POST /api/v1/learning/corpus/expand`` (thousands of rows) or
+    ``POST /api/v1/admin/ai-providers/{id}/test`` (a live provider call) would be
+    a bad way to prove a role check — the mutating half is guarded by
+    :meth:`test_the_role_check_is_a_rank_not_an_equality` instead, which reads the
+    source and cannot side-effect anything.
+
+    A 404/500 from a deliberately non-existent ``probe`` id is *not* an RBAC
+    answer and is not asserted either; only ``401``/``403`` are the interesting
+    codes here.
+    """
+
+    def test_every_superadmin_credential_shape_reports_superadmin(
+        self, client, auth_db, superadmin_key, wildcard_key, superadmin_session
+    ) -> None:
+        shapes = {
+            "key/role:manage": _headers(superadmin_key),
+            "key/*": _headers(wildcard_key),
+            "session": _session_headers(superadmin_session),
+        }
+        for label, headers in shapes.items():
+            resp = client.get("/api/v1/auth/me", headers=headers)
+            assert resp.status_code == 200, label
+            assert resp.json()["role"] == "superadmin", label
+        # The session shape is the one that carries the row, not the scopes.
+        body = client.get("/api/v1/auth/me", headers=_session_headers(superadmin_session)).json()
+        assert body["auth_source"] == "session"
+        assert body["username"] == "matrix-root"
+        assert body["key_prefix"] is None
+        assert "role:manage" in body["scopes"]
+
+    def test_admin_reads_answer_a_superadmin(self, auth_db, wildcard_key) -> None:
+        # ``raise_server_exceptions=False`` because a handler faulting on the
+        # throwaway schema (a missing column, an empty registry) is not an RBAC
+        # answer; only 401 and 403 are the codes this walk cares about.
+        client = TestClient(create_app(), raise_server_exceptions=False)
+        refused: list[str] = []
+        walked = 0
+        for method, path in _admin_class_routes():
+            if method != "GET":
+                continue
+            walked += 1
+            resp = client.get(_concrete(path), headers=_headers(wildcard_key))
+            if resp.status_code in (401, 403):
+                refused.append(f"{method} {path} -> {resp.status_code}")
+        assert walked >= 10, f"expected to walk the admin read surface, got {walked} routes"
+        assert refused == [], f"a superadmin was refused on its own surface: {refused}"
+
+    def test_the_same_walk_is_meaningless_without_the_gate(
+        self, client, auth_db, member_key, admin_key, superadmin_key
+    ) -> None:
+        """Anonymous 401s and a member 403s on the routes that just passed.
+
+        Without this, ``test_admin_reads_answer_a_superadmin`` would also pass on
+        a build where the admin surface is wide open.
+        """
+        samples = [
+            (m, p)
+            for m, p in _admin_class_routes()
+            if m == "GET" and p in ("/api/v1/admin/users", "/api/v1/admin/api-keys")
+        ]
+        assert len(samples) == 2, "the admin read surface shrank unexpectedly"
+        for method, path in samples:
+            anon = client.get(_concrete(path))
+            assert anon.status_code == 401, f"{method} {path} answered anonymous: {anon.status_code}"
+            member = client.get(_concrete(path), headers=_headers(member_key))
+            assert member.status_code == 403, f"{method} {path} let a member through"
+            # An admin key is *not* a superadmin: ``user:manage``/``settings:write``
+            # top out at admin, and role:manage-only keys are not admin-scoped
+            # reads, so both of these must be refused somewhere.
+            admin = client.get(_concrete(path), headers=_headers(admin_key))
+            assert admin.status_code in (200, 403), admin.status_code
+            assert rbac.role_for({"scopes": ["role:manage"]}) == "superadmin"
+            assert rbac.role_for({"scopes": ["settings:write"]}) == "admin"
+
+    def test_the_role_check_is_a_rank_not_an_equality(self) -> None:
+        """No module may compare a caller's role to a literal admin/superadmin.
+
+        Rank is what four roles need: ``has_role(record, "admin")`` is true for a
+        superadmin, ``role == "admin"`` is not.  The three sites below are
+        *dispatch maps* — a tool tier name and a role→scopes lookup — where
+        equality against a constant key is exactly right and no caller rank is
+        involved. Anything else that appears is a fourth place deciding, on its
+        own, who a superadmin is.
+        """
+        src_root = Path(rbac.__file__).resolve().parent.parent
+        literal = re.compile(r"""(?:==|!=)\s*["'](?:super)?admin["']|["'](?:super)?admin["']\s*(?:==|!=)""")
+        allowed = {
+            # ``allow_list(scope)`` — ``"admin"`` here is a *tool tier* name, one
+            # of three keys in a tier dispatch, not a caller's role.
+            "zolai/agent/tools/registry.py",
+            # ``role_scopes(role)`` — role → scope-set lookup table. The rank
+            # comparisons guards need go through ``rbac.ROLES``/``_RANK``.
+            "zolai/api/session_auth.py",
+        }
+        offenders: list[str] = []
+        for path in sorted(src_root.rglob("*.py")):
+            rel = str(path.relative_to(src_root.parent))
+            for number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                if line.lstrip().startswith("#"):
+                    continue
+                if literal.search(line) and rel not in allowed:
+                    offenders.append(f"{rel}:{number} {line.strip()}")
+        assert offenders == [], (
+            "a literal admin/superadmin equality outside the dispatch maps — use "
+            f"rbac.has_role()/rank_of() instead: {offenders}"
+        )
 
 
 # ---------------------------------------------------------------------------

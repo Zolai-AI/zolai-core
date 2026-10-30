@@ -11,10 +11,11 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict, dataclass
-from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+
+from zolai.shared.clock import stamp
 
 from .dataset_builder import FineTuningDatasetBuilder
 
@@ -129,7 +130,7 @@ class ZolaiTrainer:
                             :tokens_per_second, :gpu_memory_used, :gpu_memory_total, :recorded_at)
                 """),
                 dict(asdict(metrics), run_id=self.run_id,
-                     recorded_at=datetime.utcnow().isoformat()),
+                     recorded_at=stamp()),
             )
         self.metrics_history.append(metrics)
 

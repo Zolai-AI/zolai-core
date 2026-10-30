@@ -52,9 +52,10 @@ Specialized skill modules for the Zolai AI Second Brain pipeline.
 | `github-repo-manager` | Manage GitHub repo metadata, milestones, labels, project board, and CI |
 | `git-history-cleaner` | Remove secrets from git history and squash commits into a clean state |
 | `training-session-manager` | Manage session-based chunked training on Kaggle T4 GPU |
+| `zolai-local-learning-run` | Run the local learning cycle: study, retrain CRFs, re-index RAG, snapshot a version |
 
 ## Usage
 
 Skills are referenced by agents and the Kiro CLI. Each skill has a `SKILL.md` defining its interface.
 
-**Total skills: 46** | Last Updated: 2026-04-20
+**Total skills: 47** | Last Updated: 2026-10-29

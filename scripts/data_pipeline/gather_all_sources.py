@@ -2,7 +2,12 @@
 """
 Gather ALL Zolai data sources into a single master JSONL.
 Covers: corpus, parallel, dictionary, wordlists, phrases,
-        bible markdown, corpus/texts, kaggle_dataset, training files.
+        bible markdown, corpus/texts, wiki tables, news.
+
+Prior ``llm_{train,val,test}`` and ``kaggle_dataset`` splits are deliberately
+NOT sources: they are outputs of earlier runs, and re-ingesting them copies the
+old test rows into the new train split.
+Unified output schema:
 
 Unified output schema:
 {
@@ -22,7 +27,6 @@ from pathlib import Path
 
 ROOT    = Path(__file__).resolve().parents[2]
 DATA    = ROOT / "data"
-KAGGLE  = ROOT / "kaggle_dataset"
 OUT     = DATA / "master_source_v1.jsonl"
 
 NON_TEDIM = {"HCL06", "FCL"}   # exclude Falam/Hakha; keep Zokam separately tagged
@@ -343,33 +347,7 @@ with open(OUT, "w") as out:
             emit(out, rec(zo=zo, en=en, source="phrases", typ="phrase",
                           ref=d.get("type", "")))
 
-    # ── 10. TRAINING FILES (clean Tedim only) ────────────────────────────────
-    for fname, tag in [
-        ("llm_train.jsonl", "llm_train"),
-        ("llm_val.jsonl",   "llm_val"),
-        ("llm_test.jsonl",  "llm_test"),
-    ]:
-        print(f"10. {fname} (clean Tedim only) ...")
-        with open(DATA / "training" / fname) as f:
-            for line in f:
-                d = json.loads(line)
-                t = d.get("text", "").strip()
-                dialect = d.get("dialect", "unknown")
-                if is_noise(t) or dialect in NON_TEDIM: skipped += 1; continue
-                emit(out, rec(zo=t, source=tag))
-
-    # ── 11. KAGGLE DATASET (has richer metadata: level, source_type, pos) ───
-    print("11. kaggle_dataset/llm_train.jsonl (clean Tedim only) ...")
-    with open(KAGGLE / "llm_train.jsonl") as f:
-        for line in f:
-            d = json.loads(line)
-            t = d.get("text", "").strip()
-            dialect = d.get("dialect", "unknown")
-            if is_noise(t) or dialect in NON_TEDIM: skipped += 1; continue
-            emit(out, rec(zo=t, source="kaggle_train",
-                          ref=d.get("source_type", "")))
-
-    # ── 12. WIKI MARKDOWN TABLES (vocabulary, grammar, translation, literature)
+    # ── 10. WIKI MARKDOWN TABLES (vocabulary, grammar, translation, literature)
     print("12. wiki/ markdown tables (ZO/EN pairs) ...")
     WIKI = ROOT / "wiki"
     wiki_folders = ["vocabulary", "grammar", "translation", "literature",

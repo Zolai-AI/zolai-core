@@ -206,3 +206,57 @@ def test_empty_table_is_a_no_op(tmp_path: Path) -> None:
     assert summary["before"] == 0
     assert summary["deleted"] == 0
     assert _has_unique_index(db)
+
+
+# ── absent staging table ────────────────────────────────────────────────────
+
+
+def test_absent_table_is_skipped_not_an_error(tmp_path: Path) -> None:
+    """The live DB merged the import and dropped the staging table."""
+    mod = _load()
+    db = tmp_path / "zolai.db"
+    conn = sqlite3.connect(db)
+    conn.executescript("CREATE TABLE bible_verses (ref TEXT PRIMARY KEY);")
+    conn.commit()
+    conn.close()
+
+    for dry_run in (True, False):
+        summary = mod.dedupe(str(db), dry_run=dry_run)
+        assert summary["table_present"] is False
+        assert summary["skipped"]
+        assert summary["deleted"] == 0 and summary["would_delete"] == 0
+        assert summary["index_created"] is False
+
+
+def test_absent_table_cli_reports_skip(
+    tmp_path: Path, capsys: pytest.CaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mod = _load()
+    db = tmp_path / "zolai.db"
+    conn = sqlite3.connect(db)
+    conn.executescript("CREATE TABLE bible_verses (ref TEXT PRIMARY KEY);")
+    conn.commit()
+    conn.close()
+
+    # The ≥1 GB gate is covered above; this test is about the skip report.
+    monkeypatch.setattr(mod, "preflight", lambda path, **_kw: Path(path))
+
+    assert mod.main(["--db", str(db), "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "skipped" in out and "absent" in out
+
+
+def test_present_table_without_score_columns_still_refuses(tmp_path: Path) -> None:
+    """Absent is safe; unreadable is not — a schema mismatch must not pass."""
+    mod = _load()
+    db = tmp_path / "zolai.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        'CREATE TABLE bible_verses_import (ref TEXT, imported_at TEXT);'
+    )
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(RuntimeError, match="refusing to dedupe blind"):
+        mod.dedupe(str(db))
+    assert not _has_unique_index(db)

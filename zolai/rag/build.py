@@ -12,8 +12,10 @@ import time
 from typing import Any, NamedTuple
 
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from zolai.rag.vectors import encode_embedding
+from zolai.shared.clock import stamp
 
 log = logging.getLogger(__name__)
 
@@ -21,10 +23,15 @@ log = logging.getLogger(__name__)
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 VECTOR_DIM = 384
 
-# Per-document ceiling for chunked sources. Two generated vocabulary dumps in
-# the wiki exceed it by 4–6x; the remainder of those files stays reachable
-# through the ``wiki_content_fts`` lexical pass.
+# Per-document ceiling for chunked sources. A document above it is a generated
+# aggregation (two master wordlists in the wiki: 12,200 and 4,595 chunks) and is
+# skipped whole rather than embedded as an arbitrary prefix; the file stays
+# reachable through the ``wiki_content_fts`` lexical pass.
 MAX_CHUNKS_PER_DOC = 2048
+
+# Ceiling for one chunk. The model truncates far below this (256 tokens), so a
+# larger piece wastes text and can stall a build outright.
+MAX_CHUNK_CHARS = 2000
 
 # Text budget per embed call. A row-batch is a poor flush unit for chunked
 # sources: 256 documents can expand to a quarter-million chunks, and one
@@ -159,8 +166,31 @@ def _build_text_for_source(spec: SourceSpec, row: dict[str, Any]) -> str | None:
     return None
 
 
+def _split_oversized(piece: str, limit: int = MAX_CHUNK_CHARS) -> list[str]:
+    """Hard-split a boundary-less run so no single chunk can be huge.
+
+    ``_chunk_text`` only breaks on ``.``; a generated wordlist with no periods
+    becomes one multi-hundred-KB "sentence", which the tokenizer then grinds
+    through (one 746k-char piece stalled a build for 20+ minutes).
+    """
+    if len(piece) <= limit:
+        return [piece]
+    parts = []
+    start = 0
+    while start < len(piece):
+        end = min(start + limit, len(piece))
+        if end < len(piece):
+            window = piece[start:end]
+            cut = max(window.rfind("\n"), window.rfind(" "), window.rfind(","))
+            if cut > limit // 2:
+                end = start + cut + 1
+        parts.append(piece[start:end].strip())
+        start = end
+    return [p for p in parts if p]
+
+
 def _chunk_text(text: str, max_tokens: int = 256) -> list[str]:
-    """Simple chunking by sentence/word boundary."""
+    """Simple chunking by sentence/word boundary, with a hard size ceiling."""
     if len(text) <= max_tokens * 4:  # Rough char estimate
         return [text]
     # Split by sentence-ish boundaries
@@ -178,7 +208,91 @@ def _chunk_text(text: str, max_tokens: int = 256) -> list[str]:
             current += " " + sent if current else sent
     if current:
         chunks.append(current.strip())
-    return chunks
+    bounded = []
+    for chunk in chunks:
+        bounded.extend(_split_oversized(chunk))
+    return bounded
+
+
+def _insert_vectors(conn, records: list[dict[str, Any]], attempts: int = 6) -> None:
+    """``INSERT OR REPLACE`` one flush, backing off while another writer holds the lock.
+
+    A 30 s ``busy_timeout`` is not enough on a shared DB: the learning cycle and
+    the API commit while a build runs, and a lock held past the timeout used to
+    discard the whole 64-chunk flush with only an ``errors`` entry. The records
+    are regenerated from the same text on every attempt, so retrying is safe.
+    """
+    delay = 2.0
+    for attempt in range(1, attempts + 1):
+        try:
+            conn.execute(
+                text("""
+                    INSERT OR REPLACE INTO knowledge_vectors
+                    (id, text, metadata, embedding, source_type, source, version, imported_at)
+                    VALUES (:id, :text, :meta, :emb, :stype, :src, 1, :now)
+                """),
+                records,
+            )
+            conn.commit()
+            return
+        except OperationalError as exc:
+            conn.rollback()
+            if "locked" not in str(exc).lower() or attempt == attempts:
+                raise
+            log.warning(
+                "knowledge_vectors locked (attempt %d/%d); retrying in %.0fs",
+                attempt, attempts, delay,
+            )
+            time.sleep(delay)
+            delay = min(delay * 2, 60.0)
+
+
+def _vector_id(
+    table: str, source_id: str, chunk_idx: int, piece: str, *, chunked: bool
+) -> str:
+    """Stable 32-hex id covering the model and the **full** text.
+
+    The model is part of the key so switching embedding models re-embeds
+    instead of silently mixing vector spaces; the full text is hashed so an
+    edit past the first 50 characters is not mistaken for an existing vector.
+    """
+    key = (
+        f"{EMBEDDING_MODEL}:{table}:{source_id}:{chunk_idx}:{piece}"
+        if chunked
+        else f"{EMBEDDING_MODEL}:{table}:{source_id}:{piece}"
+    )
+    return hashlib.sha256(key.encode()).hexdigest()[:32]
+
+
+def _purge_foreign_vectors(conn) -> int:
+    """Delete vectors embedded by a different model; they cannot be compared.
+
+    The index is derived data, so dropping rows is safe: the current model
+    re-embeds them this run. Rows without an ``embedding_model`` predate the
+    field and are equally unusable next to current vectors.
+    """
+    stale = text(
+        "SELECT COUNT(*) FROM knowledge_vectors "
+        "WHERE json_extract(metadata, '$.embedding_model') IS NOT :m"
+    )
+    try:
+        count = int(conn.execute(stale, {"m": EMBEDDING_MODEL}).scalar() or 0)
+        if count:
+            conn.execute(
+                text(
+                    "DELETE FROM knowledge_vectors "
+                    "WHERE json_extract(metadata, '$.embedding_model') IS NOT :m"
+                ),
+                {"m": EMBEDDING_MODEL},
+            )
+            conn.commit()
+    except OperationalError as exc:
+        # No JSON1 support (or an older row shape): leave the index alone and
+        # say so rather than failing a multi-hour build.
+        conn.rollback()
+        log.warning("Cannot check embedding-model identity (%s); not purging", exc)
+        return 0
+    return count
 
 
 def build_knowledge_vectors(
@@ -222,9 +336,20 @@ def build_knowledge_vectors(
     # tens of minutes, and a single transaction around it would hold the write
     # lock (and lose every completed batch on failure).
     with engine.connect() as conn:
+        if not dry_run:
+            purged = _purge_foreign_vectors(conn)
+            if purged:
+                summary["purged_foreign_model"] = purged
+                log.warning(
+                    "Purged %d vectors embedded by another model; re-embedding",
+                    purged,
+                )
         for spec in SOURCES:
             table = spec.table
-            if source_filter and table not in source_filter:
+            # Accept either the table name or the spec name (``--source wiki``
+            # and ``--source wiki_content`` both mean the same source, matching
+            # what the retriever accepts).
+            if source_filter and table not in source_filter and spec.source_type not in source_filter:
                 continue
 
             log.info("Building vectors for %s", table)
@@ -280,7 +405,8 @@ def build_knowledge_vectors(
                 }
 
             # Process in batches
-            flush_at = max(batch_size, MAX_TEXTS_PER_EMBED)
+            # Hard ceiling: ``--batch-size`` may not raise it, only lower it.
+            flush_at = min(MAX_TEXTS_PER_EMBED, max(batch_size, 1))
             for i in range(0, len(rows), batch_size):
                 batch = rows[i:i+batch_size]
 
@@ -313,6 +439,7 @@ def build_knowledge_vectors(
                         return
 
                     records = []
+                    imported_at = stamp()
                     for idx, (content, emb) in enumerate(zip(texts, embeddings)):
                         records.append(
                             {
@@ -326,6 +453,11 @@ def build_knowledge_vectors(
                                         "source": table,
                                         "source_table": table,
                                         "source_id": ids[idx],
+                                        # Without the model identity a later
+                                        # switch silently compares vectors from
+                                        # two different spaces.
+                                        "embedding_model": EMBEDDING_MODEL,
+                                        "embedding_dim": VECTOR_DIM,
                                     }
                                 ),
                                 # base64 float32 instead of a JSON float array:
@@ -334,22 +466,14 @@ def build_knowledge_vectors(
                                 "emb": encode_embedding(emb),
                                 "stype": spec.source_type,
                                 "src": table,
+                                "now": imported_at,
                             }
                         )
 
                     if not dry_run:
                         try:
-                            conn.execute(
-                                text("""
-                                    INSERT OR REPLACE INTO knowledge_vectors
-                                    (id, text, metadata, embedding, source_type, source, version, imported_at)
-                                    VALUES (:id, :text, :meta, :emb, :stype, :src, 1, datetime('now'))
-                                """),
-                                records,
-                            )
-                            conn.commit()
+                            _insert_vectors(conn, records)
                         except Exception as e:
-                            conn.rollback()
                             log.error("Insert failed for %s batch %d: %s", table, i, e)
                             summary["errors"].append(f"{table} insert: {e}")
                             texts, ids, vec_ids = [], [], []
@@ -369,19 +493,22 @@ def build_knowledge_vectors(
                     source_id = str(row_dict.get(spec.id_col, ''))
                     pieces = _chunk_text(content) if spec.chunk else [content]
                     if len(pieces) > MAX_CHUNKS_PER_DOC:
+                        # A document this large is a generated aggregation (e.g. a
+                        # 1.8M-word master wordlist). Embedding its first 2,048
+                        # chunks would index an arbitrary prefix of a table that is
+                        # already embedded, so skip it whole and say so.
                         log.warning(
-                            "Capping %s:%s from %d to %d chunks",
+                            "Skipping %s:%s — %d chunks exceeds MAX_CHUNKS_PER_DOC=%d"
+                            " (generated aggregation; its source table is embedded)",
                             table, source_id, len(pieces), MAX_CHUNKS_PER_DOC,
                         )
-                        pieces = pieces[:MAX_CHUNKS_PER_DOC]
+                        skipped_count += 1
+                        continue
                     pieces_skipped = 0
                     for chunk_idx, piece in enumerate(pieces):
-                        key = (
-                            f"{table}:{source_id}:{chunk_idx}:{piece[:50]}"
-                            if spec.chunk
-                            else f"{table}:{source_id}:{piece[:50]}"
+                        vec_id = _vector_id(
+                            table, source_id, chunk_idx, piece, chunked=spec.chunk
                         )
-                        vec_id = hashlib.sha256(key.encode()).hexdigest()[:32]
                         if vec_id in existing_ids:
                             pieces_skipped += 1
                             continue

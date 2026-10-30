@@ -8,17 +8,13 @@ knowledge-base build).  ``version`` is the unique release identifier (TEXT);
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from pydantic import BaseModel, Field
+
+from zolai.shared.clock import stamp
 
 from .base import KnowledgeStatus
 
 __all__ = ["KnowledgeVersion"]
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class KnowledgeVersion(BaseModel):
@@ -43,4 +39,4 @@ class KnowledgeVersion(BaseModel):
     manifest_hash: str | None = None
     status: KnowledgeStatus = KnowledgeStatus.OBSERVED
     row_version: int = Field(default=1, ge=1, description="Optimistic-lock counter (not `version`)")
-    created_at: str = Field(default_factory=_now)
+    created_at: str = Field(default_factory=stamp)

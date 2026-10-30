@@ -9,9 +9,10 @@ python "$ROOT_DIR/scripts/kg/ingest_wiki.py"
 echo "== KG embed chunks =="
 python "$ROOT_DIR/scripts/kg/embed.py"
 
-echo "== Import to Prisma (web app) =="
-cd "$ROOT_DIR/website/zolai-project"
-bunx tsx scripts/import-kg.ts "$ROOT_DIR/artifacts/kg"
+# The RDF/TTL and embedded JSONL land in "$ROOT_DIR/artifacts/kg"; the web app
+# imports them from there. The old Prisma step pointed at
+# "$ROOT_DIR/website/zolai-project", a directory that no longer exists in this
+# repo (the web app is the sibling zolai-web), so it is not run from here.
 
-echo "Done."
+echo "Done: artifacts/kg"
 

@@ -8,16 +8,27 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
 
 from zolai.data.corpus_clean import clean_value
-from zolai.data.repositories import get_repositories
 from zolai.foundation.observation.pipeline import build_observations as build_observation
 from zolai.learning.discovery import build_morphology_hypotheses, build_pos_hypotheses
+from zolai.learning.incremental.change_detector import _get_table_for_source
 
 log = logging.getLogger(__name__)
+
+#: Columns the importer owns; never taken from an incoming record.
+_METADATA_COLS = frozenset(
+    {"import_batch_id", "source_file", "created_at", "updated_at"}
+)
+
+_WORD_FIELDS = (
+    "zolai", "zo_tdb77", "zo_tedim2010", "zo_tedim1932", "zo_hcl06", "zo_fcl",
+    "source", "target", "word", "headword", "pattern", "example_zo",
+)
 
 
 @dataclass
@@ -28,28 +39,33 @@ class ProcessingSummary:
     stats_updated: int = 0
     attestation_refreshed: int = 0
     errors: list[str] = field(default_factory=list)
+    #: Dry-run only — what an apply run would have written.
+    would_upsert: int = 0
+    would_extract_words: int = 0
+
+
+def _clean_word(raw: str) -> str:
+    """ZVS-normalized, whitespace-collapsed word (``clean_value`` contract)."""
+    return clean_value(raw, "word").cleaned.strip()
 
 
 def _extract_words_from_records(records: list[dict[str, Any]]) -> set[str]:
     """Extract all Zolai words from incoming records."""
     words = set()
     for rec in records:
-        # Common Zolai text fields
-        for _field in ("zolai", "zo_tdb77", "zo_tedim2010", "zo_tedim1932",
-                       "zo_hcl06", "zo_fcl", "source", "target", "word",
-                       "headword", "pattern", "example_zo"):
+        for _field in _WORD_FIELDS:
             val = rec.get(_field)
             if isinstance(val, str):
                 # Split on whitespace, clean
                 for w in val.split():
-                    cleaned = clean_value(w).strip()
+                    cleaned = _clean_word(w)
                     if cleaned and cleaned.isalpha():
                         words.add(cleaned)
             elif isinstance(val, list):
                 for item in val:
                     if isinstance(item, str):
                         for w in item.split():
-                            cleaned = clean_value(w).strip()
+                            cleaned = _clean_word(w)
                             if cleaned and cleaned.isalpha():
                                 words.add(cleaned)
     return words
@@ -61,54 +77,69 @@ def _upsert_canonical_records(
     pk_col: str,
     records: list[dict[str, Any]],
 ) -> int:
-    """Upsert records into canonical table."""
+    """Upsert records into canonical table.
+
+    The declared PK and the incoming ``content_hash`` are written, otherwise
+    change detection can never converge (every record keeps comparing against
+    a missing hash). The PK is excluded from the ``UPDATE … SET`` clause.
+    """
     if not records:
         return 0
 
-    _repos = get_repositories(engine)
-    # Use generic SQL for tables without specific repo
     upserted = 0
     with engine.begin() as conn:
-        # Get column names
         cols = conn.execute(text(f"PRAGMA table_info({table})")).fetchall()
-        col_names = [
-            c[1] for c in cols
-            if c[1] not in ("id", "import_batch_id", "source_file", "version",
-                            "imported_at", "content_hash", "created_at", "updated_at")
-        ]
+        col_names = {c[1] for c in cols}
+        writable = col_names - _METADATA_COLS
 
         for rec in records:
-            # Prepare data for upsert
-            data = {k: v for k, v in rec.items() if k in col_names and not k.startswith("_")}
+            data = {k: v for k, v in rec.items() if k in writable and not k.startswith("_")}
             if not data:
                 continue
 
-            # Add metadata
-            from datetime import datetime, timezone
             now = datetime.now(timezone.utc).isoformat()
-            data["imported_at"] = now
-            data["version"] = 1
-
-            # Build upsert (INSERT OR REPLACE for SQLite)
-            placeholders = ", ".join(f":{c}" for c in data.keys())
-            col_list = ", ".join(data.keys())
-
-            # Check if record exists
             pk_val = str(rec.get("_pk", ""))
+
+            # Keep the declared PK on insert (a real id/ref/word from the source).
+            if pk_col in data:
+                pk_val = str(data[pk_col])
+            elif pk_val.isdigit() and "id" in col_names:
+                data["id"] = int(pk_val)
+            elif not pk_val or pk_val.startswith("_nopk_"):
+                data.pop(pk_col, None)
+
+            if "content_hash" in writable and rec.get("_content_hash"):
+                data["content_hash"] = rec["_content_hash"]
+            if "imported_at" in col_names:
+                data["imported_at"] = now
+            if "version" in col_names:
+                data.setdefault("version", 1)
+
+            if not data:
+                continue
+
             existing = conn.execute(
                 text(f"SELECT 1 FROM {table} WHERE {pk_col} = :pk"),
                 {"pk": pk_val},
             ).first()
 
             if existing:
-                # Update
-                set_clause = ", ".join(f"{c} = :{c}" for c in data.keys())
+                set_cols = [c for c in data if c not in (pk_col, "id")]
+                if not set_cols:
+                    continue
+                set_clause = ", ".join(f"{c} = :{c}" for c in set_cols)
+                params = {c: data[c] for c in set_cols}
+                params.update(now=now, pk=pk_val)
                 conn.execute(
-                    text(f"UPDATE {table} SET {set_clause}, updated_at = :now WHERE {pk_col} = :pk"),
-                    {**data, "now": now, "pk": pk_val},
+                    text(
+                        f"UPDATE {table} SET {set_clause}, updated_at = :now "
+                        f"WHERE {pk_col} = :pk"
+                    ),
+                    params,
                 )
             else:
-                # Insert
+                col_list = ", ".join(data.keys())
+                placeholders = ", ".join(f":{c}" for c in data.keys())
                 conn.execute(
                     text(f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})"),
                     data,
@@ -124,12 +155,10 @@ def process_changeset(
     dry_run: bool = False,
 ) -> ProcessingSummary:
     """Process a ChangeSet: upsert canonical, run discovery, update stats/index."""
-    from zolai.data.schema_v2 import _get_table_for_source  # Reuse mapping
-
     summary = ProcessingSummary()
-    table_info = _get_table_for_source(changeset.__dict__.get("_source_file", "")) or ("", "")
+    table_info = _get_table_for_source(getattr(changeset, "source_file", "") or "")
 
-    if not table_info[0]:
+    if not table_info:
         summary.errors.append("Unknown table for source")
         return summary
 
@@ -147,6 +176,8 @@ def process_changeset(
     log.info("Processing %d records, %d affected words", len(all_changed), len(affected_words))
 
     if dry_run:
+        summary.would_upsert = len(all_changed)
+        summary.would_extract_words = len(affected_words)
         return summary
 
     # 1. Upsert canonical records

@@ -57,7 +57,7 @@ class TrainingDatasetBuilder:
             len(self.parallel_pairs),
         )
 
-    def build_translation_dataset(self, max_pairs: int = 50000) -> list[dict]:
+    def build_translation_dataset(self, max_pairs: int = 50000, seed: int = 42) -> list[dict]:
         """Build EN↔ZO translation dataset (bidirectional)."""
         all_pairs = self.bible_pairs + self.parallel_pairs
 
@@ -72,7 +72,7 @@ class TrainingDatasetBuilder:
 
         # Limit and shuffle
         if len(unique_pairs) > max_pairs:
-            unique_pairs = random.sample(unique_pairs, max_pairs)
+            unique_pairs = random.Random(seed).sample(unique_pairs, max_pairs)
 
         # Format for Alpaca-style training (bidirectional)
         dataset: list[dict] = []
@@ -97,7 +97,7 @@ class TrainingDatasetBuilder:
         )
         return dataset
 
-    def build_conversation_dataset(self, max_pairs: int = 10000) -> list[dict]:
+    def build_conversation_dataset(self, max_pairs: int = 10000, seed: int = 42) -> list[dict]:
         """Build conversation dataset from Bible dialogues (quotative patterns)."""
         conversations: list[dict] = []
 
@@ -112,12 +112,12 @@ class TrainingDatasetBuilder:
                 })
 
         if len(conversations) > max_pairs:
-            conversations = random.sample(conversations, max_pairs)
+            conversations = random.Random(seed).sample(conversations, max_pairs)
 
         log.info("Built conversation dataset: %d pairs", len(conversations))
         return conversations
 
-    def build_grammar_dataset(self, max_pairs: int = 5000) -> list[dict]:
+    def build_grammar_dataset(self, max_pairs: int = 5000, seed: int = 42) -> list[dict]:
         """Build grammar exercise dataset (SOV + ergative patterns)."""
         exercises: list[dict] = []
 
@@ -141,7 +141,7 @@ class TrainingDatasetBuilder:
                 })
 
         if len(exercises) > max_pairs:
-            exercises = random.sample(exercises, max_pairs)
+            exercises = random.Random(seed).sample(exercises, max_pairs)
 
         log.info("Built grammar dataset: %d exercises", len(exercises))
         return exercises

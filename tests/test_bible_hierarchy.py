@@ -271,11 +271,27 @@ def test_site_chrome_paragraphs_are_dropped() -> None:
         "<p>Tua ciangin khuapi sungah thu a piang hi.</p>"
         "<p>More: Lei ah daitak in kivui ~ Sia Kam Thang</p>"
         "<p>Read more</p>"
+        "<p>Related: Nungak kum 106 aphakhin khatleh tangval kum 66 aphakhin khat</p>"
         "<p>Pasian in mite a huh hi.</p>"
     )
 
     assert len(blocks) == 2
-    assert all(not block.lower().startswith(("more:", "read more")) for block in blocks)
+    assert all(
+        not block.lower().startswith(("more:", "read more", "related"))
+        for block in blocks
+    )
+
+    # Zomidaily bodies are plain text, so they arrive through the fallback
+    # split rather than element extraction; the same chrome rule must apply.
+    plain = _html_paragraphs(
+        "Tua ciangin khuapi sungah thu a piang hi.\n\n"
+        "Related:\xa0\nZomi te leh Kawlgam kumpi thak ~ Rev. Dr. Do Suan Mung\n\n"
+        "Pasian in mite a huh hi."
+    )
+    assert plain == [
+        "Tua ciangin khuapi sungah thu a piang hi.",
+        "Pasian in mite a huh hi.",
+    ]
 
 
 def test_news_paragraph_openers_carry_evidence(news_engine: Engine) -> None:
@@ -512,3 +528,284 @@ def test_tokenizer_keeps_accented_zolai_words() -> None:
 )
 def test_classify_clause_word_boundaries(text: str, expected: str) -> None:
     assert classify_clause(text) == expected
+
+
+# ── markdown parsing and the Zolai-prose gate ───────────────────────────────
+
+
+def test_markdown_structure_is_not_prose() -> None:
+    from zolai.learning.hierarchy import _markdown_paragraphs
+
+    body = (
+        "# Khanlawnna Late — Song Analysis\n"
+        "> Last updated: 2026-09-10\n"
+        "**Source:** /data/raw/Khanlawnna Late/\n\n"
+        "## Verse 1\n\n"
+        "Tua ciangin Pasian in a phat hi. Ama in mite a huh hi.\n\n"
+        "| Zolai | English |\n"
+        "|---|---|\n"
+        "| tua | then |\n\n"
+        "**Verse 2** Tu in Topa, Nang kong sang nuam ta hi.\n\n"
+        "Chorus\n"
+        "Keia' ding Kalvary lam tawntung ah pai.\n\n"
+        "- **Chorus**\n\n"
+        "```zolai\n"
+        "Tua pen la ahi hi.\n"
+        "```\n"
+    )
+
+    assert _markdown_paragraphs(body) == [
+        "Tua ciangin Pasian in a phat hi. Ama in mite a huh hi.",
+        "Tu in Topa, Nang kong sang nuam ta hi.",
+        "Keia' ding Kalvary lam tawntung ah pai.",
+    ]
+
+
+def test_looks_zolai_rejects_english_that_mentions_zolai() -> None:
+    from zolai.learning.hierarchy import _looks_zolai
+
+    assert _looks_zolai("Tua ciangin Pasian in amaute a huh hi.")
+    assert not _looks_zolai("A grammar guide in Zolai for the whole team.")
+    assert not _looks_zolai("## Verse 1: New vocabulary and key lines")
+
+
+def test_markdown_label_after_a_list_marker_is_still_structure() -> None:
+    """A bulleted ``- **Source:** …`` line is metadata, not prose.
+
+    The list marker used to be removed after the label check, so the ``- ``
+    prefix hid the label and a whole bulleted definition list was learned as
+    one paragraph.  A fully bold sentence is content, not a label, and stays.
+    """
+    from zolai.learning.hierarchy import _markdown_paragraphs
+
+    body = (
+        "- **Source:** /data/raw/x\n"
+        "- Tua ciangin Pasian in a phat hi. Ama in mite a huh hi.\n\n"
+        "**Tua ciangin Pasian in a phat hi. Ama in mite a huh hi.**\n"
+    )
+    assert _markdown_paragraphs(body) == [
+        "Tua ciangin Pasian in a phat hi. Ama in mite a huh hi.",
+        "**Tua ciangin Pasian in a phat hi. Ama in mite a huh hi.**",
+    ]
+
+
+def test_citation_and_template_labels_are_not_prose() -> None:
+    """``*Reference: …*``, ``Pattern: …`` and ``Related: …`` are furniture.
+
+    Wiki guides close sections with a citation list and grammar pages define
+    templates as ``Pattern: `[verb] ding hi` = will [verb]``.  Both cleared the
+    Zolai-density gate (titles such as "Zolai Sinna Bu" carry markers), so
+    "reference" and "pattern" were learned as paragraph openers.  The same
+    applies to a news cross-link, whose value is another article's headline.
+    """
+    from zolai.learning.hierarchy import _markdown_paragraphs
+
+    body = (
+        "*Reference: ZVS 2018, Zolai Sinna Bu, Zolai Khanggui*\n"
+        "- Pattern: `[verb] ding hi` = will [verb]\n"
+        "**Pattern:** `NP-ERG + NP-ACC + V + hi`\n"
+        "**Related:** Nungak kum 106 aphakhin khatleh tangval kum 66\n"
+        "Tua ciangin Pasian in a phat hi. Ama in mite a huh hi.\n"
+    )
+    assert _markdown_paragraphs(body) == [
+        "Tua ciangin Pasian in a phat hi. Ama in mite a huh hi.",
+    ]
+
+
+def test_english_opening_sentence_teaches_no_opener() -> None:
+    """A Zolai-dense paragraph that opens in English is not a Zolai opener.
+
+    An English sentence that quotes Zolai words ("Standard Zolai …") can clear
+    the paragraph-density gate while the opening tokens are English.  The
+    first line is therefore checked on its own; the paragraph stays in the
+    layer census.
+    """
+    manager, path = _tmp_engine()
+    try:
+        with manager.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE wiki_content (id INTEGER PRIMARY KEY, title TEXT, "
+                    "content TEXT, source_path TEXT, wiki_category TEXT)"
+                )
+            )
+            for n in range(1, 13):
+                english_led = (
+                    "Standard Zolai was codified by this project. "
+                    "Pasian in mite a it hi. Tua ciangin amaute in a za hi. "
+                    "Kei zong ka pai hi."
+                )
+                zolai = "\n\n".join(
+                    "Tua ciangin Pasian in mite a huh hi. Ama in lungdamna a pia hi. "
+                    "Bang hang hiam cih leh Topa a thupi hi."
+                    for _ in range(2)
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO wiki_content (title, content, source_path, wiki_category) "
+                        "VALUES (:title, :content, :path, 'grammar')"
+                    ),
+                    {
+                        "title": f"Guide {n}",
+                        "content": f"# Guide {n}\n\n{english_led}\n\n{zolai}",
+                        "path": f"wiki/guide-{n}.md",
+                    },
+                )
+
+        result = learn_layers(manager.engine, sources=["wiki"], levels=["paragraph"])
+        with manager.engine.connect() as conn:
+            markers = {
+                row[0]
+                for row in conn.execute(
+                    text(
+                        "SELECT pattern FROM grammar_patterns "
+                        "WHERE pattern_id LIKE 'disc_p_wiki_%'"
+                    )
+                )
+            }
+    finally:
+        _cleanup(manager, path)
+
+    assert "tua" in markers or "tua ciangin" in markers
+    assert "standard zolai" not in markers
+    assert result["per_source"]["wiki"]["non_zolai_paragraphs"] >= 12
+
+
+def test_opener_repeated_inside_one_page_is_not_learned() -> None:
+    """A marker that only opens paragraphs in one document is a page template.
+
+    ``OPENER_MIN_DOCS`` requires cross-document support: six paragraphs that
+    all start the same way inside one page can clear count, share and lift,
+    but they say nothing about the corpus.
+    """
+    manager, path = _tmp_engine()
+    try:
+        with manager.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE wiki_content (id INTEGER PRIMARY KEY, title TEXT, "
+                    "content TEXT, source_path TEXT, wiki_category TEXT)"
+                )
+            )
+            single_page = "\n\n".join(
+                "Kum khat ciangin Pasian in mite a huh hi. Ama in lungdamna a pia hi."
+                for _ in range(6)
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO wiki_content (title, content, source_path, wiki_category) "
+                    "VALUES ('Kum', :content, 'wiki/kum.md', 'culture')"
+                ),
+                {"content": single_page},
+            )
+            shared = "\n\n".join(
+                "Tua ciangin Pasian in mite a huh hi. Ama in lungdamna a pia hi."
+                for _ in range(3)
+            )
+            for n in range(1, 5):
+                conn.execute(
+                    text(
+                        "INSERT INTO wiki_content (title, content, source_path, wiki_category) "
+                        "VALUES (:title, :content, :path, 'culture')"
+                    ),
+                    {
+                        "title": f"Thu {n}",
+                        "content": shared,
+                        "path": f"wiki/thu-{n}.md",
+                    },
+                )
+
+        learn_layers(manager.engine, sources=["wiki"], levels=["paragraph"])
+        with manager.engine.connect() as conn:
+            markers = {
+                row[0]
+                for row in conn.execute(
+                    text(
+                        "SELECT pattern FROM grammar_patterns "
+                        "WHERE pattern_id LIKE 'disc_p_wiki_%'"
+                    )
+                )
+            }
+    finally:
+        _cleanup(manager, path)
+
+    assert "tua" in markers or "tua ciangin" in markers
+    assert "kum khat" not in markers
+
+
+def test_english_paragraphs_teach_no_openers_but_keep_their_layers() -> None:
+    """The gate is opener-only: English docs stay in the structural census.
+
+    Without the gate every English paragraph in the wiki ("The song …") put
+    ``the`` at the top of the opener table; the layers themselves are a
+    census of what the corpus holds and must not lose rows.
+    """
+    manager, path = _tmp_engine()
+    try:
+        with manager.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE wiki_content (id INTEGER PRIMARY KEY, title TEXT, "
+                    "content TEXT, source_path TEXT, wiki_category TEXT)"
+                )
+            )
+            for n in range(1, 13):
+                english = "\n\n".join(
+                    "The song describes the journey of the people and the land. "
+                    "The chorus repeats the theme of the whole book."
+                    for _ in range(3)
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO wiki_content (title, content, source_path, wiki_category) "
+                        "VALUES (:title, :content, :path, 'song')"
+                    ),
+                    {
+                        "title": f"Analysis {n}",
+                        "content": f"# Analysis {n}\n\n{english}",
+                        "path": f"wiki/song-{n}.md",
+                    },
+                )
+                zolai = "\n\n".join(
+                    "Tua ciangin Pasian in mite a huh hi. Ama in lungdamna a pia hi. "
+                    "Bang hang hiam cih leh Topa a thupi hi."
+                    for _ in range(3)
+                )
+                conn.execute(
+                    text(
+                        "INSERT INTO wiki_content (title, content, source_path, wiki_category) "
+                        "VALUES (:title, :content, :path, 'song')"
+                    ),
+                    {
+                        "title": f"La {n}",
+                        "content": f"# La {n}\n\n{zolai}",
+                        "path": f"wiki/la-{n}.md",
+                    },
+                )
+
+        result = learn_layers(manager.engine, sources=["wiki"], levels=["paragraph"])
+        with manager.engine.connect() as conn:
+            markers = {
+                row[0]
+                for row in conn.execute(
+                    text(
+                        "SELECT pattern FROM grammar_patterns "
+                        "WHERE pattern_id LIKE 'disc_p_wiki_%'"
+                    )
+                )
+            }
+            paragraph_rows = conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM corpus_learning_layers "
+                    "WHERE source='wiki' AND level='paragraph'"
+                )
+            ).scalar()
+    finally:
+        _cleanup(manager, path)
+
+    assert "tua" in markers or "tua ciangin" in markers
+    assert "the" not in markers
+    assert "the song" not in markers
+    assert result["per_source"]["wiki"]["non_zolai_paragraphs"] >= 36
+    # 24 documents × 3 explicit paragraphs, English ones included.
+    assert paragraph_rows == 72
