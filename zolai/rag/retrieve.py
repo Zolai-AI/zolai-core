@@ -16,7 +16,12 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from zolai.rag.evidence import EvidencePack, build_word_evidence_items, evidence_to_pack
+from zolai.rag.evidence import (
+    EvidencePack,
+    build_word_evidence_items,
+    evidence_to_pack,
+    grammar_pattern_rows,
+)
 from zolai.rag.vectors import decode_embedding
 
 log = logging.getLogger(__name__)
@@ -281,30 +286,13 @@ class UnifiedRetriever:
         return collocs
 
     def query_word_patterns(self, word: str, limit: int = 20) -> list[dict[str, Any]]:
-        """Get grammar patterns involving a word."""
-        patterns = []
-        with self.engine.connect() as conn:
-            rows = conn.execute(
-                text("""
-                    SELECT pattern_id, pattern, description, function, examples, confidence, status
-                    FROM grammar_patterns
-                    WHERE pattern LIKE :w OR description LIKE :w
-                    ORDER BY confidence DESC
-                    LIMIT :lim
-                """),
-                {"w": f"%{word}%", "lim": limit},
-            ).fetchall()
-            for r in rows:
-                patterns.append({
-                    "pattern_id": r[0],
-                    "pattern": r[1],
-                    "description": r[2],
-                    "function": r[3],
-                    "examples": json.loads(r[4]) if r[4] else [],
-                    "confidence": r[5],
-                    "status": r[6],
-                })
-        return patterns
+        """Get grammar patterns involving a word.
+
+        Same rows the entry's ``grammar_usage`` field is built from — one query
+        in ``evidence.grammar_pattern_rows``, so the Patterns tab and the entry
+        can no longer disagree about whether patterns exist (explorer#16).
+        """
+        return grammar_pattern_rows(self.engine, word, limit)
 
     def query_word_evidence(self, word: str, limit: int = 50) -> list[dict[str, Any]]:
         """Get evidence chain for a word."""

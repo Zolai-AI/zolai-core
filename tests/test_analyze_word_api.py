@@ -26,7 +26,9 @@ from zolai.config import config
 from zolai.rag.evidence import EvidenceItem, evidence_to_pack
 
 #: Every table ``build_word_evidence_items`` queries — a missing one raises
-#: (the builder has no per-source guard), so all seven must exist.
+#: (the builder has no per-source guard), so all seven must exist. The eighth,
+#: ``grammar_patterns``, is the one source that guards itself: absent, it
+#: contributes nothing instead of breaking the entry.
 _SEED_SQL = """
 CREATE TABLE dictionary (
     id INTEGER PRIMARY KEY, zolai TEXT, english TEXT, english_clean TEXT,
@@ -52,12 +54,15 @@ CREATE TABLE attestation_index (
 );
 INSERT INTO attestation_index VALUES (1, 'pasian', 'GEN 1:1');
 
+-- Column names as the live corpus has them: the builder reads ``doc_freq`` and
+-- ``sent_freq``, so the earlier fixture spelling (``document_frequency`` /
+-- ``sentence_frequency``) silently fed it nothing.
 CREATE TABLE word_observation_stats (
     id INTEGER PRIMARY KEY, normalized_form TEXT, frequency INTEGER,
-    document_frequency INTEGER, sentence_frequency INTEGER, contexts TEXT,
+    doc_freq INTEGER, sent_freq INTEGER, contexts TEXT,
     collocations TEXT, surface_forms TEXT, attestation TEXT
 );
-INSERT INTO word_observation_stats VALUES (1, 'pasian', 5223, 64, 0, '{}', '[]', '[]', '{}');
+INSERT INTO word_observation_stats VALUES (1, 'pasian', 5123, 64, 4366, '{}', '[]', '[]', '{}');
 
 CREATE TABLE knowledge_claims (
     id INTEGER PRIMARY KEY, subject TEXT, predicate TEXT, object TEXT,
@@ -69,7 +74,15 @@ CREATE TABLE kg_nodes (
     confidence REAL
 );
 INSERT INTO kg_nodes VALUES
-    (1, 'pasian', 'concept', '{"morphology": {"pos": "proper_noun", "animacy": "animate"}}', 0.9);
+    (1, 'pasian', 'concept', '{"morphology": {"pos": "proper_noun", "animacy": "animate"}, "frequency": 100}', 0.9);
+
+CREATE TABLE grammar_patterns (
+    pattern_id TEXT PRIMARY KEY, pattern TEXT, description TEXT, function TEXT,
+    examples TEXT, confidence REAL, status TEXT
+);
+INSERT INTO grammar_patterns VALUES
+    ('pat_7427d3bd', 'ciangin-Pasian', '', '', '["1CH 4:10","1CH 13:10"]', NULL, 'OBSERVED'),
+    ('pat_744419ff', 'ding-Pasian', '', '', '["1TH 2:10"]', NULL, 'OBSERVED');
 """
 
 
@@ -226,3 +239,77 @@ class TestAnalyzeWordSharesTheSource:
         client.post("/api/v1/analyze/word", json={"word": "pasian"})
         assert len(statements) >= 2
         assert len(set(statements)) < len(statements), "routes re-ran different queries"
+
+class TestEntryAgreesWithItsOwnSubResources:
+    """explorer#16 / explorer#37: the word entry contradicted its own tabs.
+
+    Live ``GET /api/v1/word/pasian`` answered ``frequency`` **5223** — the
+    corpus' 5123 *plus* a KG node's 100 — ``sentence_frequency`` **0** while its
+    own evidence metadata said 4366, and ``grammar_usage`` **[]** while
+    ``/word/pasian/patterns`` listed three OBSERVED rows.
+    """
+
+    def test_frequency_is_the_best_supported_count_not_a_sum_of_sources(
+        self, client: TestClient
+    ) -> None:
+        body = client.get("/api/v1/word/pasian").json()
+        assert body["frequency"] == 5123, "a KG node's weight is not an addend to the corpus count"
+        assert body["document_frequency"] == 64
+
+    def test_pack_takes_the_largest_reported_count(self) -> None:
+        pack = evidence_to_pack(
+            "pasian",
+            [
+                EvidenceItem(
+                    "corpus",
+                    "word_observation_stats",
+                    "word:pasian",
+                    4,
+                    0.7,
+                    "",
+                    {"frequency": 5123, "sentence_frequency": 4366},
+                ),
+                EvidenceItem("kg", "kg_nodes", "kg:pasian", 3, 0.9, "", {"frequency": 100}),
+            ],
+        )
+        assert pack.frequency == 5123
+        assert pack.sentence_frequency == 4366
+
+    def test_sentence_frequency_matches_the_evidence_that_reports_it(
+        self, client: TestClient
+    ) -> None:
+        entry = client.get("/api/v1/word/pasian").json()
+        assert entry["sentence_frequency"] == 4366
+        rows = client.get("/api/v1/word/pasian/evidence").json()["evidence"]
+        corpus = next(r for r in rows if r["source"] == "word_observation_stats")
+        assert corpus["metadata"]["sentence_frequency"] == entry["sentence_frequency"], (
+            "the entry dropped a number its own evidence chain carried"
+        )
+
+    def test_grammar_usage_lists_the_same_rows_as_the_patterns_tab(
+        self, client: TestClient
+    ) -> None:
+        entry = client.get("/api/v1/word/pasian").json()
+        patterns = client.get("/api/v1/word/pasian/patterns").json()["patterns"]
+        assert entry["grammar_usage"], "the Patterns tab had rows while the entry claimed none"
+        assert {r["pattern"] for r in entry["grammar_usage"]} == {p["pattern"] for p in patterns}
+
+    def test_pattern_templates_stay_out_of_examples(self, client: TestClient) -> None:
+        """A pattern string is a template, not a usage sentence — and a common
+        word matches the pattern limit, so folding them into ``examples`` would
+        bury the definitions and verses."""
+        entry = client.get("/api/v1/word/pasian").json()
+        assert not any("ciangin-Pasian" == e for e in entry["examples"])
+        assert entry["examples"], "the dictionary and Bible sources still supply examples"
+
+    def test_a_corpus_without_the_patterns_table_still_answers(
+        self, engine, client: TestClient
+    ) -> None:
+        """The guard is for lean databases: a missing ``grammar_patterns`` must
+        not turn a word entry that used to work into a 500."""
+        with engine.begin() as conn:
+            conn.execute(text("DROP TABLE grammar_patterns"))
+        entry = client.get("/api/v1/word/pasian")
+        assert entry.status_code == 200, entry.text
+        assert entry.json()["grammar_usage"] == []
+        assert client.get("/api/v1/word/pasian/patterns").json()["patterns"] == []
