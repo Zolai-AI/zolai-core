@@ -49,7 +49,7 @@ class WordInput(BaseModel):
 
 
 @router.get("/pos", dependencies=[Depends(auth.require_scope("pos:read"))], summary="POS-tag a Zolai sentence")
-async def pos_tag(text: str = Query(..., min_length=1)) -> dict[str, Any]:
+def pos_tag(text: str = Query(..., min_length=1)) -> dict[str, Any]:
     """Tokenize by whitespace and tag each token (closed classes first)."""
     from zolai.pos_tagger import get_pos_tagger
 
@@ -58,9 +58,9 @@ async def pos_tag(text: str = Query(..., min_length=1)) -> dict[str, Any]:
 
 
 @router.post("/pos", dependencies=[Depends(auth.require_scope("pos:read"))], summary="POS-tag a Zolai sentence")
-async def pos_tag_post(body: TextInput) -> dict[str, Any]:
+def pos_tag_post(body: TextInput) -> dict[str, Any]:
     """POST twin of ``GET /linguistics/pos`` (same handler, same shape)."""
-    return await pos_tag(text=body.text)
+    return pos_tag(text=body.text)
 
 
 # ---------------------------------------------------------------------------
@@ -68,17 +68,21 @@ async def pos_tag_post(body: TextInput) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _syllabify(word: str) -> dict[str, Any]:
+    from zolai.syllable import segment
+
+    syllables = segment(word.strip().lower())
+    return {"word": word, "syllables": syllables, "count": len(syllables)}
+
+
 @router.get(
     "/syllable",
     dependencies=[Depends(auth.require_scope("dataset:read"))],
     summary="Segment a Zolai word into syllables",
 )
-async def syllabify(word: str = Query(..., min_length=1)) -> dict[str, Any]:
+def syllabify(word: str = Query(..., min_length=1)) -> dict[str, Any]:
     """Rule-based syllable segmentation (no DB, no network)."""
-    from zolai.syllable import segment
-
-    syllables = segment(word.strip().lower())
-    return {"word": word, "syllables": syllables, "count": len(syllables)}
+    return _syllabify(word)
 
 
 @router.post(
@@ -86,9 +90,9 @@ async def syllabify(word: str = Query(..., min_length=1)) -> dict[str, Any]:
     dependencies=[Depends(auth.require_scope("dataset:read"))],
     summary="Segment a Zolai word into syllables",
 )
-async def syllabify_post(body: WordInput) -> dict[str, Any]:
+def syllabify_post(body: WordInput) -> dict[str, Any]:
     """POST twin of ``GET /linguistics/syllable`` (same handler, same shape)."""
-    return await syllabify(word=body.word)
+    return _syllabify(body.word)
 
 
 # ---------------------------------------------------------------------------

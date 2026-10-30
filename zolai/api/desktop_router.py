@@ -100,7 +100,7 @@ def rows_to_dicts(cursor, rows):
 # ═══════════════════════════════════════════
 
 @router.get("/tables")
-async def db_tables():
+def db_tables():
     """List all database tables with row counts."""
     try:
         conn = get_db()
@@ -129,7 +129,7 @@ async def db_tables():
         return {"error": detail["message"]}
 
 @router.get("/query")
-async def db_query(sql: str = Query(...)):
+def db_query(sql: str = Query(...)):
     """Run a SQL query (SELECT only)."""
     try:
         if not sql.strip().upper().startswith("SELECT"):
@@ -156,7 +156,7 @@ async def db_query(sql: str = Query(...)):
         return {"error": detail["message"]}
 
 @router.get("/stats")
-async def db_stats():
+def db_stats():
     """Get database statistics (dashboard shape)."""
     try:
         conn = get_db()
@@ -229,7 +229,7 @@ async def db_stats():
 
 
 @router.get("/table-data")
-async def table_data(
+def table_data(
     table: str = Query(...),
     page: int = Query(1),
     page_size: int = Query(25),
@@ -295,7 +295,7 @@ async def table_data(
 
 
 @router.get("/table-schema")
-async def table_schema(table: str = Query(...)):
+def table_schema(table: str = Query(...)):
     """Get column schema for a table via PRAGMA table_info."""
     try:
         conn = get_db()
@@ -347,7 +347,7 @@ async def table_schema(table: str = Query(...)):
 # ═══════════════════════════════════════════
 
 @router.get("/dict/browse")
-async def dict_browse(limit: int = 50, offset: int = 0, q: str = None, clean: bool = False):
+def dict_browse(limit: int = 50, offset: int = 0, q: str = None, clean: bool = False):
     """Browse dictionary entries with pagination, optional letter filter, and clean filter."""
     try:
         conn = get_db()
@@ -424,7 +424,7 @@ async def dict_browse(limit: int = 50, offset: int = 0, q: str = None, clean: bo
         return {"error": detail["message"]}
 
 @ router.get("/dict/stats")
-async def dict_stats():
+def dict_stats():
     """Get dictionary statistics."""
     try:
         conn = get_db()
@@ -454,7 +454,7 @@ async def dict_stats():
         return {"error": detail["message"]}
 
 @ router.get("/dict/non-zolai")
-async def dict_non_zolai():
+def dict_non_zolai():
     """Check for non-Zolai words."""
     return run_script("check_non_zolai.py", "--quiet")
 
@@ -464,27 +464,27 @@ async def dict_non_zolai():
 # ═══════════════════════════════════════════
 
 @ router.get("/bible/study")
-async def bible_study(book: str = Query(...)):
+def bible_study(book: str = Query(...)):
     """Study a Bible book."""
     return run_script("bible_engine.py", "--study", "--book", book)
 
 @ router.get("/bible/learn")
-async def bible_learn(level: str = Query(...)):
+def bible_learn(level: str = Query(...)):
     """Progressive learning exercise."""
     return run_script("bible_engine.py", "--learn", "--level", level)
 
 @ router.get("/bible/context/book")
-async def bible_context_book(book: str = Query(...)):
+def bible_context_book(book: str = Query(...)):
     """Per-book context analysis."""
     return run_script("context_deep_learner.py", "--book", book)
 
 @ router.get("/bible/context/word")
-async def bible_context_word(word: str = Query(...)):
+def bible_context_word(word: str = Query(...)):
     """Word usage profile."""
     return run_script("context_deep_learner.py", "--word", word)
 
 @ router.get("/bible/context/topics")
-async def bible_context_topics():
+def bible_context_topics():
     """List topic clusters."""
     return run_script("context_deep_learner.py", "--topics")
 
@@ -509,7 +509,7 @@ _BIBLE_ORDER_MAP = {abbr: i for i, abbr in enumerate(BIBLE_BOOK_ORDER)}
 
 
 @router.get("/bible/books")
-async def bible_books():
+def bible_books():
     """List all Bible books with verse counts in canonical order."""
     try:
         conn = get_db()
@@ -550,7 +550,7 @@ async def bible_books():
         return {"error": detail["message"]}
 
 @router.get("/bible/chapters")
-async def bible_chapters(book: str = Query(...)):
+def bible_chapters(book: str = Query(...)):
     """List chapters for a Bible book with verse counts."""
     try:
         conn = get_db()
@@ -581,7 +581,7 @@ async def bible_chapters(book: str = Query(...)):
         return {"error": detail["message"]}
 
 @router.get("/bible/verses")
-async def bible_verses(
+def bible_verses(
     book: str = Query(...),
     chapter: int = Query(...),
     verse_start: int = Query(None),
@@ -658,17 +658,17 @@ async def bible_verses(
 # ═══════════════════════════════════════════
 
 @ router.get("/gemini/fill-en")
-async def gemini_fill_en(limit: int = Query(50)):
+def gemini_fill_en(limit: int = Query(50)):
     """Fill missing English translations."""
     return run_script("gemini_translate.py", "--fill-en", "--limit", str(limit))
 
 @ router.get("/gemini/fill-my")
-async def gemini_fill_my(limit: int = Query(50)):
+def gemini_fill_my(limit: int = Query(50)):
     """Fill missing Myanmar translations."""
     return run_script("gemini_translate.py", "--fill-my", "--limit", str(limit))
 
 @router.get("/gemini/coverage")
-async def gemini_coverage():
+def gemini_coverage():
     """Check translation coverage from database."""
     try:
         conn = get_db()
@@ -702,7 +702,7 @@ async def gemini_coverage():
         return {"error": detail["message"]}
 
 @ router.get("/gemini/fill")
-async def gemini_fill(text: str = Query(...), lang: str = Query("my")):
+def gemini_fill(text: str = Query(...), lang: str = Query("my")):
     """Quick Gemini fill for a word."""
     return run_script("gemini_translate.py", "--fill", "--text", text, "--lang", lang)
 
@@ -712,47 +712,47 @@ async def gemini_fill(text: str = Query(...), lang: str = Query("my")):
 # ═══════════════════════════════════════════
 
 @ router.get("/training/generate")
-async def training_generate(type: str = Query(...), count: int = Query(1000)):
+def training_generate(type: str = Query(...), count: int = Query(1000)):
     """Generate training data."""
     return run_script("generate_training_data.py", "--type", type, "--count", str(count))
 
 @ router.get("/training/generate-sentences")
-async def training_sentences():
+def training_sentences():
     """Generate Bible-template sentences."""
     return run_script("generate_sentences.py")
 
 @ router.get("/training/validate")
-async def training_validate(text: str = Query(...)):
+def training_validate(text: str = Query(...)):
     """Validate sentences."""
     return run_script("validate_sentences.py", "--text", text)
 
 @ router.get("/training/deep-validate")
-async def training_deep_validate(text: str = Query(...)):
+def training_deep_validate(text: str = Query(...)):
     """Deep validate sentences."""
     return run_script("deep_validate.py", "--text", text)
 
 @ router.get("/training/build")
-async def training_build():
+def training_build():
     """Build training dataset."""
     return run_script("build_training_corpus.py")
 
 @ router.get("/training/build-qwen")
-async def training_build_qwen():
+def training_build_qwen():
     """Build Qwen3 format."""
     return run_script("format_training_data.py")
 
 @ router.get("/training/export")
-async def training_export(fmt: str = Query("jsonl")):
+def training_export(fmt: str = Query("jsonl")):
     """Export training data."""
     return run_script("build_training_corpus.py", "--export", fmt)
 
 @ router.get("/training/build-corpus")
-async def training_corpus_build():
+def training_corpus_build():
     """Build corpus."""
     return run_script("build_training_corpus.py", "--full")
 
 @ router.get("/training/corpus-stats")
-async def training_corpus_stats():
+def training_corpus_stats():
     """Get corpus statistics."""
     return run_script("build_training_corpus.py", "--stats")
 
@@ -762,12 +762,12 @@ async def training_corpus_stats():
 # ═══════════════════════════════════════════
 
 @ router.get("/test/quiz")
-async def test_quiz(level: str = Query("A1"), qtype: str = Query("all")):
+def test_quiz(level: str = Query("A1"), qtype: str = Query("all")):
     """Proficiency quiz."""
     return run_script("proficiency_test.py", "--level", level, "--type", qtype)
 
 @ router.get("/test/stats")
-async def test_stats():
+def test_stats():
     """Test statistics."""
     return run_script("proficiency_test.py", "--stats")
 
@@ -777,12 +777,12 @@ async def test_stats():
 # ═══════════════════════════════════════════
 
 @ router.get("/grammar/check")
-async def grammar_check(text: str = Query(...)):
+def grammar_check(text: str = Query(...)):
     """Check grammar."""
     return run_script("grammar_check.py", "--text", text)
 
 @ router.get("/grammar/negation-rules")
-async def grammar_negation():
+def grammar_negation():
     """Get negation rules reference."""
     return run_script("grammar_check.py", "--negation-rules")
 
@@ -792,17 +792,17 @@ async def grammar_negation():
 # ═══════════════════════════════════════════
 
 @ router.get("/paragraph/analyze")
-async def paragraph_analyze(text: str = Query(...)):
+def paragraph_analyze(text: str = Query(...)):
     """Analyze paragraph."""
     return run_script("paragraph_engine.py", "--analyze", "--text", text)
 
 @ router.get("/paragraph/style")
-async def paragraph_style(text: str = Query(...), style: str = Query("FORMAL")):
+def paragraph_style(text: str = Query(...), style: str = Query("FORMAL")):
     """Style transfer."""
     return run_script("paragraph_engine.py", "--style", style, "--text", text)
 
 @ router.get("/paragraph/paraphrase")
-async def paragraph_paraphrase(text: str = Query(...), level: str = Query("Minimal")):
+def paragraph_paraphrase(text: str = Query(...), level: str = Query("Minimal")):
     """Paraphrase text."""
     return run_script("paragraph_engine.py", "--paraphrase", "--level", level, "--text", text)
 
@@ -812,12 +812,12 @@ async def paragraph_paraphrase(text: str = Query(...), level: str = Query("Minim
 # ═══════════════════════════════════════════
 
 @ router.get("/zvs/validate")
-async def zvs_validate(text: str = Query(...)):
+def zvs_validate(text: str = Query(...)):
     """Validate ZVS 2018 compliance."""
     return run_script("zolai-zvs", "validate", text)
 
 @ router.get("/zvs/forbidden")
-async def zvs_forbidden():
+def zvs_forbidden():
     """List forbidden forms."""
     return run_script("zolai-zvs", "forbidden")
 
@@ -827,7 +827,7 @@ async def zvs_forbidden():
 # ═══════════════════════════════════════════
 
 @ router.get("/pattern/stats")
-async def pattern_stats():
+def pattern_stats():
     """Get grammar pattern statistics from grammar_patterns table."""
     try:
         conn = get_db()
@@ -855,7 +855,7 @@ async def pattern_stats():
 
 
 @ router.get("/pattern/learn")
-async def pattern_learn(limit: int = Query(20)):
+def pattern_learn(limit: int = Query(20)):
     """Get sample grammar patterns from grammar_patterns table."""
     try:
         conn = get_db()
@@ -890,7 +890,7 @@ async def pattern_learn(limit: int = Query(20)):
 # ═══════════════════════════════════════════
 
 @ router.get("/export/{data_type}")
-async def export_data(data_type: str, limit: int = Query(20)):
+def export_data(data_type: str, limit: int = Query(20)):
     """Export data to JSONL format — returns count + sample as formatted JSON string."""
     table_map = {
         "dictionary": "dictionary",
@@ -942,7 +942,7 @@ async def export_data(data_type: str, limit: int = Query(20)):
 # ═══════════════════════════════════════════
 
 @ router.get("/audit/recent")
-async def audit_recent(limit: int = Query(50)):
+def audit_recent(limit: int = Query(50)):
     """Get recent audit log entries from data_audit_log table."""
     try:
         conn = get_db()
@@ -984,7 +984,7 @@ async def audit_recent(limit: int = Query(50)):
 # ═══════════════════════════════════════════
 
 @router.get("/ai/models")
-async def get_ai_models():
+def get_ai_models():
     """Get available AI models from zolai-core configuration."""
     try:
         # Try to get Gemini models from environment or config

@@ -26,7 +26,6 @@ and ``run_assistant`` are stubbed, and the raw-body scan is fed a hand-built
 
 from __future__ import annotations
 
-import asyncio
 import json
 
 import pytest
@@ -75,7 +74,9 @@ def calls(monkeypatch) -> list[dict]:
 
 
 def _post(body: assistant_router.ChatIn, payload: dict) -> dict:
-    return asyncio.run(assistant_router.public_chat(body, _request(payload)))
+    # public_chat is a sync handler (FastAPI runs it in the threadpool), so the
+    # bare function is called directly — same convention as the admin probe.
+    return assistant_router.public_chat(body, _request(payload))
 
 
 class TestPublicRouteRejectsCredentials:

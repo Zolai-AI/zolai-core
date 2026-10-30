@@ -60,7 +60,7 @@ class RAGInjector:
         """
         self.db_path = db_path
 
-    async def build_context(self, user_message: str, max_tokens: int = 800) -> str:
+    def build_context(self, user_message: str, max_tokens: int = 800) -> str:
         """
         Build structured context from database tables.
 

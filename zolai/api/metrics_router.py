@@ -29,6 +29,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, Response
 from prometheus_client import generate_latest
+from starlette.concurrency import run_in_threadpool
 
 from ..monitoring import store
 from ..monitoring.alerts import evaluate_alerts
@@ -237,7 +238,9 @@ async def create_annotation(body: AnnotationIn) -> AnnotationCreated:
             ),
         ) from exc
 
-    result = store.create_annotation(data)
+    # Sync SQLite writes: on the loop they stall every in-flight request
+    # (core#24's failure mode), so they go to the worker threadpool.
+    result = await run_in_threadpool(store.create_annotation, data)
 
     grafana_body = {
         **data,
@@ -249,7 +252,7 @@ async def create_annotation(body: AnnotationIn) -> AnnotationCreated:
     pushed = await store.push_annotation_to_grafana(grafana_body)
     grafana_id = pushed.get("id") if isinstance(pushed, dict) else None
     if grafana_id is not None:
-        store.record_grafana_id(result["id"], grafana_id)
+        await run_in_threadpool(store.record_grafana_id, result["id"], grafana_id)
         result["grafana_id"] = int(grafana_id)
     return AnnotationCreated(**result)
 

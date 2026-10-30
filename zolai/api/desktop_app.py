@@ -107,7 +107,7 @@ def create_desktop_app() -> FastAPI:
     # --- API Status endpoint ---
 
     @app.get("/api/status")
-    async def api_status():
+    def api_status():
         """Detailed status for the Tauri frontend."""
         import sqlite3
 
@@ -159,7 +159,7 @@ def create_desktop_app() -> FastAPI:
     # --- Plugin endpoints ---
 
     @app.get("/plugins")
-    async def list_plugins():
+    def list_plugins():
         """List available plugins and their status."""
         try:
             from ..plugins import get_plugin_registry
@@ -190,7 +190,7 @@ def create_desktop_app() -> FastAPI:
     # --- Provider endpoints ---
 
     @app.get("/providers")
-    async def list_providers():
+    def list_providers():
         """List available LLM providers."""
         from ..llm.providers.base import get_provider_registry
         registry = get_provider_registry()
@@ -211,14 +211,14 @@ def create_desktop_app() -> FastAPI:
     # --- Settings endpoints ---
 
     @app.get("/settings")
-    async def get_settings():
+    def get_settings():
         """Get all application settings."""
         from ..core.settings import get_settings_manager
         manager = get_settings_manager()
         return manager.get_all()
 
     @app.post("/settings")
-    async def update_settings(updates: dict):
+    def update_settings(updates: dict):
         """Update application settings."""
         from ..core.settings import get_settings_manager
         manager = get_settings_manager()
@@ -228,7 +228,7 @@ def create_desktop_app() -> FastAPI:
     # --- Learning endpoints ---
 
     @app.get("/learning/grammar")
-    async def list_grammar_patterns(pattern_type: str = None, limit: int = 50):
+    def list_grammar_patterns(pattern_type: str = None, limit: int = 50):
         """List grammar patterns."""
         from ..learning.grammar_editor import GrammarEditor
         editor = GrammarEditor()
@@ -236,7 +236,7 @@ def create_desktop_app() -> FastAPI:
         return {"patterns": patterns, "count": len(patterns)}
 
     @app.get("/learning/dictionary")
-    async def search_dictionary(query: str, limit: int = 20):
+    def search_dictionary(query: str, limit: int = 20):
         """Search dictionary for learning."""
         from ..learning.dictionary_manager import DictionaryManager
         manager = DictionaryManager()
@@ -244,7 +244,7 @@ def create_desktop_app() -> FastAPI:
         return {"results": results, "count": len(results)}
 
     @app.post("/learning/translate")
-    async def translate_text(text: str, direction: str = "auto"):
+    def translate_text(text: str, direction: str = "auto"):
         """Translate text between English and Zolai."""
         from ..learning.translation import TranslationEngine
         engine = TranslationEngine()
@@ -252,7 +252,7 @@ def create_desktop_app() -> FastAPI:
         return result
 
     @app.get("/learning/progress")
-    async def get_progress(user_id: str = "default"):
+    def get_progress(user_id: str = "default"):
         """Get learning progress."""
         from ..learning.progress import ProgressTracker
         tracker = ProgressTracker(user_id=user_id)

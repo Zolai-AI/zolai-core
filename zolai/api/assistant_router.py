@@ -540,7 +540,7 @@ def _caller_is_authenticated(request: Request) -> bool:
 
 
 @public_router.post("/chat")
-async def public_chat(body: ChatIn, request: Request) -> dict[str, Any]:
+def public_chat(body: ChatIn, request: Request) -> dict[str, Any]:
     """Anonymous-safe chat — public in every auth mode (rbac.PUBLIC_ROUTES).
 
     An optional ``provider``/``model`` override is validated **before** the

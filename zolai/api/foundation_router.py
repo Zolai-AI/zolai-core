@@ -678,7 +678,7 @@ def _calculate_confidence(evidence: list[dict], consensus: Optional[dict]) -> fl
 # ---------------------------------------------------------------------------
 
 @router.get("/review/queue", response_model=ReviewQueueListResponse)
-async def list_review_queue(
+def list_review_queue(
     status: Optional[str] = Query(None, description="Filter by status: pending, approved, rejected"),
     priority: Optional[int] = Query(None, description="Filter by priority level"),
     fact_type: Optional[str] = Query(None, description="Filter by fact type: word, sentence, paragraph"),
@@ -743,7 +743,7 @@ async def list_review_queue(
 
 
 @router.get("/review/{item_id}", response_model=ReviewDetailResponse)
-async def get_review_detail(item_id: int):
+def get_review_detail(item_id: int):
     """Get detailed review item with candidate value, evidence, and consensus.
 
     Returns comprehensive information about a review item including:
@@ -817,7 +817,7 @@ async def get_review_detail(item_id: int):
 
 
 @router.post("/review/{item_id}/approve", response_model=ReviewApproveResponse)
-async def approve_review_item(item_id: int, request: ApproveRequest = ApproveRequest()):
+def approve_review_item(item_id: int, request: ApproveRequest = ApproveRequest()):
     """Approve a review item and promote to canonical.
 
     Uses FoundationETL.promote_staging_to_canonical to move the item
@@ -873,7 +873,7 @@ async def approve_review_item(item_id: int, request: ApproveRequest = ApproveReq
 
 
 @router.post("/review/{item_id}/reject", response_model=ReviewRejectResponse)
-async def reject_review_item(item_id: int, request: RejectRequest):
+def reject_review_item(item_id: int, request: RejectRequest):
     """Reject a review item with reason.
 
     Updates the item status to 'rejected' and logs the reason.
@@ -924,7 +924,7 @@ async def reject_review_item(item_id: int, request: RejectRequest):
 
 
 @router.post("/review/{item_id}/assign", response_model=ReviewAssignResponse)
-async def assign_review_item(item_id: int, request: AssignRequest):
+def assign_review_item(item_id: int, request: AssignRequest):
     """Assign a review item to a reviewer.
 
     Updates the assignee field for the review item.
@@ -967,7 +967,7 @@ async def assign_review_item(item_id: int, request: AssignRequest):
 
 
 @router.post("/review/bulk", response_model=BulkReviewResponse)
-async def bulk_review_action(request: BulkActionRequest):
+def bulk_review_action(request: BulkActionRequest):
     """Bulk approve or reject multiple review items.
 
     Processes multiple items in a single request.
@@ -1039,7 +1039,7 @@ async def bulk_review_action(request: BulkActionRequest):
 
 
 @router.get("/stats", response_model=PipelineStatsResponse)
-async def get_pipeline_stats():
+def get_pipeline_stats():
     """Get pipeline statistics including counts and health.
 
     Returns statistics for all foundation layers (raw, staging, canonical)
@@ -1114,7 +1114,7 @@ async def get_pipeline_stats():
 
 
 @router.get("/costs/summary", response_model=CostSummaryResponse)
-async def get_cost_summary(
+def get_cost_summary(
     start_date: Optional[str] = Query(None, description="Start date (ISO format)"),
     end_date: Optional[str] = Query(None, description="End date (ISO format)"),
     monthly_budget: float = Query(100.0, description="Monthly budget in USD"),
@@ -1168,7 +1168,7 @@ async def get_cost_summary(
 # ---------------------------------------------------------------------------
 
 @router.post("/analyze/corpus", response_model=CorpusAnalysisResponse)
-async def analyze_corpus(request: CorpusAnalysisRequest):
+def analyze_corpus(request: CorpusAnalysisRequest):
     """Run corpus-level analysis on input text.
 
     Returns n-grams, collocations, frequency distribution, and register detection.
@@ -1213,7 +1213,7 @@ async def analyze_corpus(request: CorpusAnalysisRequest):
 
 
 @router.post("/analyze/phonology", response_model=PhonologyAnalysisResponse)
-async def analyze_phonology(request: PhonologyAnalysisRequest):
+def analyze_phonology(request: PhonologyAnalysisRequest):
     """Run phonological analysis on a Zolai word.
 
     Returns syllable structures, tone patterns, sandhi results, phonotactic validity, stress pattern.
@@ -1264,7 +1264,7 @@ async def analyze_phonology(request: PhonologyAnalysisRequest):
 
 
 @router.post("/analyze/morphology", response_model=MorphologyAnalysisResponse)
-async def analyze_morphology(request: MorphologyAnalysisRequest):
+def analyze_morphology(request: MorphologyAnalysisRequest):
     """Run enhanced morphological analysis on a Zolai word.
 
     Returns morpheme decomposition with directional, aspect, particle detection and ZVS validation.
@@ -1307,7 +1307,7 @@ async def analyze_morphology(request: MorphologyAnalysisRequest):
 
 
 @router.post("/translate/enhanced", response_model=EnhancedTranslationResponse)
-async def translate_enhanced(request: EnhancedTranslationRequest):
+def translate_enhanced(request: EnhancedTranslationRequest):
     """Translate with 3-tier confidence scoring and evidence chain.
 
     Returns translation with confidence tier, evidence sources, and morphology breakdown.
@@ -1354,7 +1354,7 @@ async def translate_enhanced(request: EnhancedTranslationRequest):
 
 
 @router.post("/progress/adaptive-difficulty", response_model=AdaptiveDifficultyResponse)
-async def get_adaptive_difficulty(request: AdaptiveDifficultyRequest):
+def get_adaptive_difficulty(request: AdaptiveDifficultyRequest):
     """Compute adaptive quiz difficulty based on user's learning profile.
 
     Returns difficulty settings considering word frequency, morphology complexity,
@@ -1388,7 +1388,7 @@ async def get_adaptive_difficulty(request: AdaptiveDifficultyRequest):
 # ---------------------------------------------------------------------------
 
 @router.post("/search/ranked", response_model=RankedSearchResponse)
-async def search_ranked(request: RankedSearchRequest):
+def search_ranked(request: RankedSearchRequest):
     """Search with TF-IDF-inspired relevance ranking.
 
     Returns results ranked by relevance score from dictionary, Bible,
@@ -1428,7 +1428,7 @@ async def search_ranked(request: RankedSearchRequest):
 
 
 @router.post("/search/cross-lingual", response_model=CrossLingualSearchResponse)
-async def search_cross_lingual(request: CrossLingualSearchRequest):
+def search_cross_lingual(request: CrossLingualSearchRequest):
     """Cross-lingual dictionary search between English and Zolai.
 
     When source_lang="en", queries dictionary_en_zo table.
@@ -1476,7 +1476,7 @@ async def search_cross_lingual(request: CrossLingualSearchRequest):
 
 
 @router.post("/search/topical", response_model=TopicalSearchResponse)
-async def search_topical(request: TopicalSearchRequest):
+def search_topical(request: TopicalSearchRequest):
     """Search Bible verses by topic/theme keywords across books.
 
     Matches theme keywords against English and Zolai text to find
@@ -1515,7 +1515,7 @@ async def search_topical(request: TopicalSearchRequest):
 
 
 @router.get("/search/analytics", response_model=SearchAnalyticsResponse)
-async def get_search_analytics():
+def get_search_analytics():
     """Get search analytics sorted by count (descending).
 
     Returns query frequency, category breakdown, and last-seen timestamps.
@@ -1548,7 +1548,7 @@ async def get_search_analytics():
 # ---------------------------------------------------------------------------
 
 @router.post("/grammar/validate-structure", response_model=StructureValidationResponse)
-async def validate_structure(request: StructureValidationRequest):
+def validate_structure(request: StructureValidationRequest):
     """Validate SOV sentence structure and grammar markers.
 
     Checks verb position, ergative 'in' placement, negation patterns,
@@ -1586,7 +1586,7 @@ async def validate_structure(request: StructureValidationRequest):
 # ---------------------------------------------------------------------------
 
 @router.post("/translation/disambiguate", response_model=DisambiguationResponse)
-async def disambiguate_translation(request: DisambiguationRequest):
+def disambiguate_translation(request: DisambiguationRequest):
     """Disambiguate polysemous words using dictionary + word_usage context.
 
     Returns ranked candidates with confidence scores and evidence sources.
@@ -1626,7 +1626,7 @@ async def disambiguate_translation(request: DisambiguationRequest):
 # ---------------------------------------------------------------------------
 
 @router.get("/progress/streak/{user_id}", response_model=StreakResponse)
-async def get_user_streak(user_id: str, streak_type: str = "daily"):
+def get_user_streak(user_id: str, streak_type: str = "daily"):
     """Get learning streak for a user.
 
     Returns current streak, longest streak, and activity status.
@@ -1652,7 +1652,7 @@ async def get_user_streak(user_id: str, streak_type: str = "daily"):
 
 
 @router.post("/progress/error-categorize", response_model=ErrorCategorizationResponse)
-async def categorize_error(request: ErrorCategorizationRequest):
+def categorize_error(request: ErrorCategorizationRequest):
     """Categorize the type of error in a correction.
 
     Checks for ZVS forbidden forms, SOV/negation/question patterns,
@@ -1686,7 +1686,7 @@ async def categorize_error(request: ErrorCategorizationRequest):
 
 
 @router.get("/progress/error-breakdown/{user_id}", response_model=ErrorBreakdownResponse)
-async def get_error_breakdown(user_id: str):
+def get_error_breakdown(user_id: str):
     """Get error breakdown by category for a user.
 
     Aggregates from user_reviews table and categorizes each correction.

@@ -69,7 +69,7 @@ def _tables() -> dict:
 
 @router.get("/next", response_model=NextWordResponse)
 @router.post("/next", response_model=NextWordResponse)
-async def next_word(
+def next_word(
     word: str = Query(...),
     top_k: int = Query(5, ge=1, le=20),
 ):
@@ -82,7 +82,7 @@ async def next_word(
 
 @router.get("/completions", response_model=CompletionsResponse)
 @router.post("/completions", response_model=CompletionsResponse)
-async def completions(
+def completions(
     prefix: str = Query(...),
     top_k: int = Query(5, ge=1, le=20),
 ):
@@ -97,7 +97,7 @@ async def completions(
 
 @router.get("/corrections", response_model=CorrectionsResponse)
 @router.post("/corrections", response_model=CorrectionsResponse)
-async def corrections(
+def corrections(
     word: str = Query(...),
     top_k: int = Query(3, ge=1, le=10),
 ):
@@ -111,7 +111,7 @@ async def corrections(
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health():
+def health():
     """Health check — n-gram table status + the active engine mode (D2)."""
     from zolai.engines import engine_mode
 
