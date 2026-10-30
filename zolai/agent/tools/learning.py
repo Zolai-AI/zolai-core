@@ -10,8 +10,8 @@ family follows, registry-extension §2):
 | ``study_review_schedule`` | ``ProgressTracker.get_due_reviews`` | tool-only |
 | ``study_record_review`` | ``ProgressTracker.update_review`` (SM-2) | tool-only |
 | ``study_learner_stats`` | ``get_statistics`` + ``get_streak`` + ``get_cefr_level`` | tool-only |
-| ``predict_word_completion`` | ``zolai.knowledge.ngram.predict_completion`` | ``GET /api/v1/predictions/completions`` |
-| ``suggest_word_corrections`` | ``zolai.knowledge.ngram.suggest_corrections`` | ``GET /api/v1/predictions/corrections`` |
+| ``predict_word_completion`` | ``knowledge.ngram.predict_completion`` | ``GET /api/v1/predictions/completions`` |
+| ``suggest_word_corrections`` | ``knowledge.ngram.suggest_corrections`` | ``GET /api/v1/predictions/corrections`` |
 | ``contribute_word`` | ``contributions`` table insert | ``POST /api/v1/contributions`` |
 | ``submit_usage_example`` | same table, tagged ``register:<formality>`` | same route |
 
