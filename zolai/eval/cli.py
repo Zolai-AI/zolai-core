@@ -315,7 +315,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _publish_eval_metrics(identity[0], scores, duration_ms=duration_ms)
 
     if args.json:
-        payload = {"metrics": scores}
+        payload: dict[str, object] = {"metrics": scores}
         if floors is not None:
             payload["floors"] = floors
             payload["below_floor"] = regressed
@@ -323,7 +323,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         for name in sorted(scores):
             print(f"{name}: {scores[name]:.4f}")
-        if regressed:
+        if regressed and floors:
             print("regressed:")
             for name in regressed:
                 print(f"  {name}: {scores[name]:.4f} < floor {floors[name]:.4f}")

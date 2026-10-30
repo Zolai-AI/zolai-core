@@ -112,13 +112,16 @@ def evaluate(sets: str = SMOKE, *, base_dir: str | None = None) -> dict[str, flo
     """
     data = load_dataset(sets, base_dir=base_dir)
     result: dict[str, float] = {}
-    if "zvs" in data:
-        result["zvs_compliance_rate"] = zvs_compliance_rate(data["zvs"])  # type: ignore[arg-type]
-    if "translation" in data:
-        hyps, refs = data["translation"]  # type: ignore[misc]
+    zvs = data.get("zvs")
+    if isinstance(zvs, list):
+        result["zvs_compliance_rate"] = zvs_compliance_rate(zvs)
+    pair = data.get("translation")
+    if isinstance(pair, tuple):
+        hyps, refs = pair
         result["translation_bleu"] = translation_bleu(hyps, refs)
         result["translation_chrf"] = translation_chrf(hyps, refs)
-    if "qa" in data:
-        hyps, refs = data["qa"]  # type: ignore[misc]
+    pair = data.get("qa")
+    if isinstance(pair, tuple):
+        hyps, refs = pair
         result["qa_term_recall"] = qa_term_recall(hyps, refs)
     return result

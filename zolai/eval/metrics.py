@@ -171,7 +171,7 @@ def compute_pos_metrics(
         tagset = sorted(set(all_gold) | set(all_pred))
 
     per_tag_f1 = {}
-    confusion = {tag: Counter() for tag in tagset}
+    confusion: dict[str, Counter[str]] = {tag: Counter() for tag in tagset}
 
     for p, g in zip(all_pred, all_gold):
         confusion[g][p] += 1
@@ -202,8 +202,12 @@ def compute_pos_metrics(
 def compute_morphology_metrics(
     predicted: list[list[str]],
     gold: list[list[str]],
-) -> MorphologyMetrics:
-    """Compute morphological segmentation metrics (boundary-based)."""
+) -> TokenizationMetrics:
+    """Compute morphological segmentation metrics (boundary-based).
+
+    Segmentation gold carries no morphological features, so boundary numbers are
+    the whole result and ``MorphologyMetrics.feature_accuracy`` stays unmeasured.
+    """
     return compute_tokenization_metrics(predicted, gold)  # Same boundary logic
 
 
