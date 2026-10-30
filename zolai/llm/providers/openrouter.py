@@ -13,7 +13,13 @@ from .base import LLMProvider
 logger = logging.getLogger(__name__)
 
 DEFAULT_ENDPOINT = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "meta-llama/llama-3.1-8b-instruct:free"
+#: Free-only for now — mirrors the ``openrouter`` catalog row.
+DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
+FREE_MODELS: tuple[str, ...] = (
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "nvidia/nemotron-3.5-lightning:free",
+    "recursive/flint-v1.0:free",
+)
 
 
 class OpenRouterProvider(LLMProvider):
@@ -70,11 +76,5 @@ class OpenRouterProvider(LLMProvider):
             return data["choices"][0]["message"]["content"]
 
     def list_models(self) -> list[str]:
-        """List available OpenRouter models."""
-        return [
-            "meta-llama/llama-3.1-8b-instruct:free",
-            "meta-llama/llama-3.1-70b-instruct:free",
-            "google/gemma-2-9b-it:free",
-            "mistralai/mistral-7b-instruct:free",
-            "qwen/qwen-2-7b-instruct:free",
-        ]
+        """List the free OpenRouter models this adapter offers."""
+        return list(FREE_MODELS)

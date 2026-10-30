@@ -26,12 +26,13 @@ providers:
     priority: 3
     api_key_env: "OPENROUTER_API_KEY"
     endpoint: "https://openrouter.ai/api/v1"
+    # Free-only for now — mirrors the `openrouter` catalog row in
+    # zolai/llm/catalog.py. Only ids with OpenRouter's `:free` marker belong here.
     models:
-      - "meta-llama/llama-3.1-8b-instruct:free"
-      - "meta-llama/llama-3.1-70b-instruct:free"
-      - "google/gemma-2-9b-it:free"
-      - "mistralai/mistral-7b-instruct:free"
-    description: "OpenRouter (free models available)"
+      - "nvidia/nemotron-3-ultra-550b-a55b:free"
+      - "nvidia/nemotron-3.5-lightning:free"
+      - "recursive/flint-v1.0:free"
+    description: "OpenRouter (free models only for now)"
     requires_api_key: true
 
   openai:
@@ -61,7 +62,10 @@ providers:
 
 # Default settings
 defaults:
-  preferred_provider: "ollama"
+  # Operator decision (2026-10-30): OpenRouter is the default provider, free
+  # models only. The live default is also the single `is_active=1` row in
+  # `ai_providers`; this value drives the legacy registry fallback chain.
+  preferred_provider: "openrouter"
   fallback_enabled: true
   timeout_seconds: 120
   max_retries: 3

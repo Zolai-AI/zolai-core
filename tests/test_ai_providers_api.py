@@ -150,6 +150,74 @@ class TestCatalogSeed:
         ):
             assert kept in models
 
+    def test_openrouter_row_is_free_only(self) -> None:
+        # Operator decision: OpenRouter stays on free models for now. A paid id
+        # in the seed would become the default whenever a row has no
+        # `selected_model` (resolve_model falls back to models[0]).
+        entry = catalog.find_catalog("openrouter")
+        assert entry is not None
+        models = list(entry.models)
+        assert models
+        assert all(m.endswith(":free") for m in models), models
+        assert len(models) == len(set(models))
+
+    def test_openrouter_provider_lists_free_models_only(self) -> None:
+        from zolai.llm.providers.openrouter import OpenRouterProvider
+
+        models = OpenRouterProvider(api_key="x").list_models()
+        assert models
+        assert all(m.endswith(":free") for m in models), models
+
+
+# ---------------------------------------------------------------------------
+# refresh-models — openrouter stays free-only
+# ---------------------------------------------------------------------------
+
+
+class TestRefreshModelsFreeOnly:
+    def test_openrouter_remote_list_is_filtered_to_free(self, monkeypatch) -> None:
+        from zolai.api import ai_providers_router as router_mod
+
+        class _Resp:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict:
+                return {
+                    "data": [
+                        {"id": "nvidia/nemotron-3-ultra-550b-a55b:free"},
+                        {"id": "openai/gpt-4o-mini"},
+                    ]
+                }
+
+        monkeypatch.setattr("httpx.get", lambda *a, **k: _Resp())
+        row = {
+            "catalog_id": "openrouter",
+            "base_url": "https://openrouter.ai/api/v1/chat/completions",
+            "api_key_ref": None,
+        }
+        assert router_mod._fetch_remote_models(row) == [
+            "nvidia/nemotron-3-ultra-550b-a55b:free"
+        ]
+
+    def test_other_providers_keep_the_full_remote_list(self, monkeypatch) -> None:
+        from zolai.api import ai_providers_router as router_mod
+
+        class _Resp:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict:
+                return {"data": [{"id": "gpt-4o-mini"}, {"id": "gpt-4o"}]}
+
+        monkeypatch.setattr("httpx.get", lambda *a, **k: _Resp())
+        row = {
+            "catalog_id": "openai",
+            "base_url": "https://api.openai.com/v1/chat/completions",
+            "api_key_ref": None,
+        }
+        assert router_mod._fetch_remote_models(row) == ["gpt-4o-mini", "gpt-4o"]
+
 
 # ---------------------------------------------------------------------------
 # Brain URL / key resolution

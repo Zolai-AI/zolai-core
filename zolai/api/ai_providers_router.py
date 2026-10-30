@@ -188,6 +188,10 @@ def _fetch_remote_models(row: dict[str, Any], timeout_s: float = 15.0) -> list[s
     if not isinstance(data, list):
         raise ValueError("unexpected /models payload shape")
     models = [str(item.get("id")) for item in data if isinstance(item, dict) and item.get("id")]
+    if str(row.get("catalog_id") or "") == "openrouter":
+        # Free-only for now: the remote listing includes paid ids, and a
+        # refresh must not silently reintroduce them into the row.
+        models = [m for m in models if m.endswith(":free")]
     if not models:
         raise ValueError("empty model list from remote endpoint")
     return models

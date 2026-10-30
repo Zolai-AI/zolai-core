@@ -32,8 +32,9 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any
+
+from ..shared.clock import stamp
 
 logger = logging.getLogger(__name__)
 
@@ -156,17 +157,16 @@ AI_PROVIDER_CATALOG: tuple[CatalogProvider, ...] = (
         name="OpenRouter",
         adapter="openrouter",
         base_url="https://openrouter.ai/api/v1/chat/completions",
-        # ``:free`` is OpenRouter's own free-tier marker — listed first so
-        # enabling this provider defaults to a free model.  A request may also
+        # Free-only for now (operator decision): every id carries OpenRouter's
+        # own free-tier ``:free`` marker, so a boot or ``refresh-models`` can
+        # never silently select a paid model.  Order matters — a row with no
+        # ``selected_model`` falls back to ``models[0]``.  A request may also
         # address any id with the ``openrouter/`` platform prefix; the adapter's
         # ``to_wire_model()`` strips it before the wire call.
         models=(
+            "nvidia/nemotron-3-ultra-550b-a55b:free",
             "nvidia/nemotron-3.5-lightning:free",
-            "qwen/qwen3.8-27b:free",
-            "google/gemma-4-31b-it:free",
-            "openai/gpt-4o-mini",
-            "anthropic/claude-haiku-4.5",
-            "deepseek/deepseek-chat",
+            "recursive/flint-v1.0:free",
         ),
         docs="https://openrouter.ai/docs/api-reference",
         env_keys=("OPENROUTER_API_KEY",),
@@ -228,10 +228,6 @@ def read_catalog_env_key(entry: CatalogProvider) -> str:
     return ""
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-
-
 def seed_catalog(manager: Any = None) -> dict[str, Any]:
     """Idempotently insert every missing catalog row (app-boot seed).
 
@@ -290,7 +286,7 @@ def seed_catalog(manager: Any = None) -> dict[str, Any]:
                         "models": json.dumps(list(entry.models)),
                         "docs": entry.docs,
                         "requires_key": 1 if entry.requires_key else 0,
-                        "now": _utc_now(),
+                        "now": stamp(),
                     },
                 )
                 created.append(entry.id)
@@ -313,7 +309,7 @@ def seed_catalog(manager: Any = None) -> dict[str, Any]:
                             "UPDATE ai_providers SET is_active = 1, updated_at = :now "
                             "WHERE catalog_id = :cid"
                         ),
-                        {"cid": BRAIN_CATALOG_ID, "now": _utc_now()},
+                        {"cid": BRAIN_CATALOG_ID, "now": stamp()},
                     )
                     logger.info("ai_provider_seed: activated default %s", BRAIN_CATALOG_ID)
     except Exception as exc:  # pragma: no cover - defensive

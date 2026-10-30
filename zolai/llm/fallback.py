@@ -65,7 +65,7 @@ class FallbackChain:
         chain = FallbackChain()
         response = await chain.generate(
             [{"role": "user", "content": "Hello"}],
-            preferred_provider="ollama",
+            preferred_provider="openrouter",
         )
     """
 
