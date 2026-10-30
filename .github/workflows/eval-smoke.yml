@@ -45,22 +45,21 @@ jobs:
       - name: Check for failures
         run: |
           # Exit non-zero if any task failed
-          python -c "
-import json, sys
-with open('smoke_results.json') as f:
-    results = json.load(f)
-failed = any('error' in r for r in results.values())
-if failed:
-    print('❌ Smoke tests FAILED')
-    for task, result in results.items():
-        if 'error' in result:
-            print(f'  {task}: {result[\"error\"]}')
-    sys.exit(1)
-else:
-    print('✅ All smoke tests PASSED')
-    for task, result in results.items():
-        print(f'  {task}: {result}')
-"
+          python - <<'PY'
+          import json, sys
+          with open('smoke_results.json') as f:
+              results = json.load(f)
+          failed = any('error' in r for r in results.values())
+          if failed:
+              print('❌ Smoke tests FAILED')
+              for task, result in results.items():
+                  if 'error' in result:
+                      print(f'  {task}: {result["error"]}')
+              sys.exit(1)
+          print('✅ All smoke tests PASSED')
+          for task, result in results.items():
+              print(f'  {task}: {result}')
+          PY
 
       - name: Upload results as artifact
         if: always()
