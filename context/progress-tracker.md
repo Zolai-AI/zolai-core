@@ -1302,28 +1302,45 @@ hardcode, so the learner now reads structure and language.
   lines: headings, `>` metadata, tables, rules, `**Label:**` rows and
   `_Note:_` lines are dropped, a heading closes the block, a bold label is
   stripped from the front of a lyric line, and links become their text. Wiki
-  layers fell 74,864 → 56,149 because those lines are only studyable to a page
+  layers fell 74,864 → 55,494 because those lines are only studyable to a page
   renderer.
+- `_FURNITURE_RE` drops labelled furniture in both the markdown parser and the
+  HTML/plain-text article parser: `Reference: …` (wiki citation lists),
+  `Pattern: …` (grammar templates) and `Related: …` (news cross-links, whose
+  value is another article's headline). The value goes with the label — a
+  placeholder template or a linked headline is not prose. The article fallback
+  path (Zomidaily bodies are plain text, not `<p>` blocks) had to be fixed too:
+  the first cut only filtered element-extracted blocks, so `related` survived as
+  an opener.
 - `_MD_LYRICS_LABEL_RE` strips `Verse 1: …` / `Verse 1 …` / a standalone
   `Chorus` whether the label is followed by `:`, `.`, `-`, whitespace or
   end-of-line. 0 blocks now start `verse`/`chorus`.
 - `_looks_zolai` gates **opener learning only**: ≥2 Zolai function-word hits,
-  ≥5 % density, and more Zolai than English stopwords. Layers stay a full
-  census; skipped paragraphs are reported as `non_zolai_paragraphs`, and an
+  ≥5 % density, and more Zolai than English stopwords; the paragraph's
+  **opening line** is also checked on its own (`min_hits=1`) because an English
+  sentence that quotes Zolai words clears the paragraph gate. Layers stay a
+  full census; skipped paragraphs are reported as `non_zolai_paragraphs`, and an
   opener marker containing an English stopword is skipped (bilingual titles
   glued to a Zolai paragraph). Unigram markers shorter than two characters are
   skipped (a bare `b` was an enumerated label).
-- Applied to `data/zolai.db`: **599,963 layers** (zomidaily 496,965 · wiki
-  56,149 · bible 39,044 · lessons 7,805; line 401,549 · paragraph 186,285 ·
-  document 12,125 · corpus 4) and **390 openers** (bible 143 · wiki 119 ·
-  zomidaily 128), each with exactly one `foundation_evidence` row. 0 English
-  markers, 0 template words, 0 orphan evidence links.
+- `OPENER_MIN_DOCS = 3`: an opener must open paragraphs in at least three
+  distinct documents, so one page repeating its own template cannot qualify.
+- Applied to `data/zolai.db`: **597,641 layers** (zomidaily 495,298 · wiki
+  55,494 · bible 39,044 · lessons 7,805; line 400,391 · paragraph 185,122 ·
+  document 12,124 · corpus 4) and **349 openers** (bible 131 · wiki 92 ·
+  zomidaily 126), each with exactly one `foundation_evidence` row
+  (**86,809** evidence rows, **6,697** grammar patterns). 0 English markers,
+  0 template words, 0 orphan evidence links; a second `--apply` reports
+  `patterns_written=0`.
 
-Tests: `tests/test_bible_hierarchy.py` grew to 22 — `test_markdown_structure_is_not_prose`,
-`test_looks_zolai_rejects_english_that_mentions_zolai`, and
+Tests: `tests/test_bible_hierarchy.py` grew to 26 — the new ones are
+`test_markdown_structure_is_not_prose`, `test_markdown_label_after_a_list_marker_is_still_structure`,
+`test_citation_and_template_labels_are_not_prose`,
+`test_looks_zolai_rejects_english_that_mentions_zolai`,
+`test_english_opening_sentence_teaches_no_opener`,
+`test_opener_repeated_inside_one_page_is_not_learned` and
 `test_english_paragraphs_teach_no_openers_but_keep_their_layers` (72 paragraph
 rows kept, zero English openers). Docs updated: `docs/database/tables.md`
 § 2.16 + the grammar/evidence rows, `docs/database/README.md`,
 `docs/reports/SOURCE_OF_TRUTH_MATRIX.md`, `docs/OPEN-ISSUES.md` (the template
-opener item is closed; the English-tagged-row item is now a measured 24, not
-~34, and remains an owner decision).
+opener item is closed; the English-tagged-row item remains an owner decision).
