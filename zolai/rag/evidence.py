@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
@@ -126,12 +127,25 @@ def evidence_to_pack(word: str, evidence_items: list[EvidenceItem]) -> EvidenceP
             pack.forms.extend(meta["forms"])
 
         # Frequency
+        #
+        # A frequency is a *count of the same corpus made by one source*, not an
+        # addend. Summing let a KG node's weight inflate the entry: pasian's
+        # ``word_observation_stats`` row says 5123, its ``kg_nodes`` properties
+        # say 100, and the entry answered 5223 — a number no source reports
+        # (explorer#16 / explorer#37). Best-supported count wins, as it already
+        # does for document_frequency.
         freq = meta.get("frequency")
         if freq is not None:
-            pack.frequency += freq
+            pack.frequency = max(pack.frequency, freq)
         doc_freq = meta.get("document_frequency")
         if doc_freq is not None:
             pack.document_frequency = max(pack.document_frequency, doc_freq)
+        # The observation stats carry this one and the aggregator used to drop
+        # it on the floor, so every entry answered sentence_frequency 0 while
+        # its own evidence metadata said 4366 (explorer#37).
+        sent_freq = meta.get("sentence_frequency")
+        if sent_freq is not None:
+            pack.sentence_frequency = max(pack.sentence_frequency, sent_freq)
 
         # POS
         if "pos" in meta and meta["pos"] is not None:
@@ -200,6 +214,45 @@ def evidence_to_pack(word: str, evidence_items: list[EvidenceItem]) -> EvidenceP
 
     pack.evidence_items = ranked
     return pack
+
+
+def grammar_pattern_rows(engine: Engine, word: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Grammar-pattern rows naming a word — the one query behind both
+    ``GET /word/{w}/patterns`` and the entry's own ``grammar_usage`` field.
+
+    Single source on purpose: the Patterns tab listed three OBSERVED rows for
+    ``pasian`` while the entry's Grammar card said "no patterns", because the
+    entry never consulted ``grammar_patterns`` at all (explorer#16 / #37).
+
+    A corpus without the table answers empty rather than raising: the other
+    sources here assume their tables exist, but this one is new, and a lean
+    database must not start 500ing on the word entry it used to serve.
+    """
+    if not sa_inspect(engine).has_table("grammar_patterns"):
+        return []
+    rows: list[dict[str, Any]] = []
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("""
+                SELECT pattern_id, pattern, description, function, examples, confidence, status
+                FROM grammar_patterns
+                WHERE pattern LIKE :w OR description LIKE :w
+                ORDER BY confidence DESC
+                LIMIT :lim
+            """),
+            {"w": f"%{word}%", "lim": limit},
+        ).fetchall()
+        for r in result:
+            rows.append({
+                "pattern_id": r[0],
+                "pattern": r[1],
+                "description": r[2],
+                "function": r[3],
+                "examples": json.loads(r[4]) if r[4] else [],
+                "confidence": r[5],
+                "status": r[6],
+            })
+    return rows
 
 
 def build_word_evidence_items(engine: Engine, word: str, limit: int = 50) -> list[EvidenceItem]:
@@ -352,5 +405,21 @@ def build_word_evidence_items(engine: Engine, word: str, limit: int = 50) -> lis
                 text=f"KG node: {row[0]} ({row[1]})",
                 metadata=json.loads(row[2]) if isinstance(row[2], str) else row[2],
             ))
+
+    # 6. Grammar patterns (the entry's grammar_usage field)
+    for row in grammar_pattern_rows(engine, word, limit):
+        items.append(EvidenceItem(
+            source_type="grammar",
+            source="grammar_patterns",
+            fact_key=f"pattern:{row['pattern_id']}",
+            tier=3,
+            confidence=row["confidence"] if row["confidence"] is not None else 0.5,
+            # Deliberately no excerpt: the pattern string ("ciangin-Pasian") is a
+            # template, not a usage sentence, and ``pack.examples`` is built from
+            # item text — a common word like "hi" matches the pattern limit, which
+            # would bury the definitions and verses under template names.
+            text="",
+            metadata={"grammar": [row]},
+        ))
 
     return items
