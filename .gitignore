@@ -1,16 +1,21 @@
 # Zolai — local artifacts / secrets
 .env
 .env.*
+!.env.example
 !.env.production.example
 *.env.gemini
 __pycache__/
 *.pyc
+*.bak
+*.bak-*
 node_modules/
 .next/
 target/
 data/
 !scripts/data/
 artifacts/
+# Generated training runs (CRF artifacts, manifests) — never commit binaries
+models/runs/
 .venv/
 *.jsonl
 # Evaluation smoke fixtures are tracked (CI `--set smoke` requires them)
@@ -33,6 +38,9 @@ test-results/
 report/zvs-scan*
 !zolai/data/
 *.db
+*.db-shm
+*.db-wal
+*.db-journal
 
 # Prisma generated files
 prisma/migrations/

@@ -1,11 +1,16 @@
 #!/bin/bash
 # Usage: bash setup_vps.sh <vps-ip> <key.pem> <region>
 # Region examples: us-1, us-2, sgp-1, jp-1
+#
+# Requires PANEL_PASSWORD in the environment — the 3x-ui panel password is a
+# credential and must never be committed (this script previously embedded one).
 set -e
 
 VPS_IP="${1:?Usage: $0 <vps-ip> <key.pem> <region>}"
 KEY="${2:?Usage: $0 <vps-ip> <key.pem> <region>}"
 REGION="${3:?Usage: $0 <vps-ip> <key.pem> <region>}"   # e.g. us-1, sgp-1, jp-1
+PANEL_USER="${PANEL_USER:-peterlianpi}"
+PANEL_PASSWORD="${PANEL_PASSWORD:?Set PANEL_PASSWORD (3x-ui panel password)}"
 
 CF_TOKEN="${CLOUDFLARE_API_TOKEN:?Set your Cloudflare API token}"
 CF_ZONE_ID="peterlianpi.site"   # will be resolved via API
@@ -37,8 +42,8 @@ ssh -i "$KEY" -o StrictHostKeyChecking=no root@"$VPS_IP" bash <<EOF
 set -e
 bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) <<ANSWERS
 y
-peterlianpi
-Apple@298
+${PANEL_USER}
+${PANEL_PASSWORD}
 443
 ANSWERS
 echo "✅ 3x-ui installed on port 443"
