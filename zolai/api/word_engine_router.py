@@ -52,9 +52,9 @@ router.include_router(
     response_model=CompletionsResponse,
     dependencies=[Depends(auth.require_scope("dataset:read"))],
 )
-async def predictions_complete(
+def predictions_complete(
     prefix: str = Query(...),
     top_k: int = Query(5, ge=1, le=20),
 ) -> Any:
     """``/api/v1/predictions/complete`` — same handler as ``/completions``."""
-    return await completions(prefix=prefix, top_k=top_k)
+    return completions(prefix=prefix, top_k=top_k)

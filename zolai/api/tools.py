@@ -50,7 +50,7 @@ def get_db_connection():
     return sqlite3.connect(DB_PATH)
 
 @app.post("/verify-grammar", response_model=GrammarResponse)
-async def verify_grammar(payload: GrammarQuery):
+def verify_grammar(payload: GrammarQuery):
     sentence = payload.sentence
     feedback = []
     suggestions = []
@@ -77,7 +77,7 @@ async def verify_grammar(payload: GrammarQuery):
         return GrammarResponse(is_valid=False, feedback="; ".join(feedback), suggestions=suggestions)
 
 @app.post("/search-dict", response_model=List[SearchResult])
-async def search_dictionary(payload: SearchQuery):
+def search_dictionary(payload: SearchQuery):
     conn = get_db_connection()
     c = conn.cursor()
     query = payload.query.lower().strip()

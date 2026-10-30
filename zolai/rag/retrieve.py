@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -45,6 +46,20 @@ _VECTOR_CACHE_KEY: tuple[Any, ...] | None = None
 
 def _vector_search_enabled() -> bool:
     return os.environ.get("ZOLAI_VECTOR_SEARCH", "1").lower() not in {"0", "false", "no"}
+
+#: ``get_knowledge_statistics`` is twelve ``COUNT(*)`` scans of a 2.4 GB corpus:
+#: 7.9s cold / 2.8s warm in production, which is why the Studio Data page sat on
+#: "Loading…" with TOTAL ROWS 0 (explorer#35). Counts only move on import, so the
+#: payload is served from a short TTL keyed by database URL — same idiom as
+#: ``DatabaseManager.counts`` (core#24), and ``force=True`` still rescans.
+STATS_CACHE_TTL_S = 15.0
+_STATS_CACHE: dict[str, tuple[float, dict[str, int]]] = {}
+
+
+def invalidate_statistics_cache() -> None:
+    """Drop the cached counts (used by an import that must show up at once)."""
+    _STATS_CACHE.clear()
+
 
 #: (table, id_col, primary_col, matchable_cols, context_cols)
 #:
@@ -1044,8 +1059,14 @@ class UnifiedRetriever:
                 return {"version": row[0], "git_commit": row[1], "created_at": row[2]}
             return {"version": "none", "git_commit": "unknown"}
 
-    def get_knowledge_statistics(self) -> dict[str, Any]:
-        """Get aggregate knowledge statistics."""
+    def get_knowledge_statistics(self, *, force: bool = False) -> dict[str, Any]:
+        """Aggregate knowledge statistics (TTL-cached — see ``STATS_CACHE_TTL_S``)."""
+        key = str(self.engine.url)
+        now = time.monotonic()
+        cached = _STATS_CACHE.get(key)
+        if not force and cached is not None and now - cached[0] < STATS_CACHE_TTL_S:
+            return dict(cached[1])
+
         stats = {}
         tables = [
             ("dictionary", "dictionary entries"),
@@ -1070,6 +1091,7 @@ class UnifiedRetriever:
                 except Exception:
                     stats[label] = 0
 
+        _STATS_CACHE[key] = (now, dict(stats))
         return stats
 
 

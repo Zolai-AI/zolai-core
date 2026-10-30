@@ -64,7 +64,7 @@ def ensure_contributions_table() -> None:
 
 
 @router.post("/contributions", response_model=ContributionOut)
-async def submit_contribution(payload: ContributionIn) -> ContributionOut:
+def submit_contribution(payload: ContributionIn) -> ContributionOut:
     """Accept a public dictionary contribution.
 
     No authentication required. The contribution is stored for editorial review.

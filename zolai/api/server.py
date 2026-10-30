@@ -566,7 +566,7 @@ def create_app() -> FastAPI:
     _FRONTEND_DIR = config.paths.frontend
 
     @app.get("/")
-    async def serve_frontend():
+    def serve_frontend():
         """Serve the desktop app HTML."""
         html_path = _FRONTEND_DIR / "index.html"
         if html_path.exists():
@@ -708,7 +708,9 @@ def create_app() -> FastAPI:
     async def start_crawl(req: CrawlRequest):
         try:
             engine = CrawlEngine()
-            results = engine.crawl_seed(req.seed)
+            # Blocking network crawl: on the loop it freezes every request for
+            # the whole crawl, which can run minutes (core#24's failure mode).
+            results = await run_in_threadpool(engine.crawl_seed, req.seed)
             await manager.broadcast({"event": "crawl_complete", "pages": len(results)})
             return CrawlResponse(status="ok", pages_crawled=len(results), seed=req.seed)
         except Exception as exc:
@@ -729,7 +731,8 @@ def create_app() -> FastAPI:
     async def start_clean(req: CleanRequest):
         try:
             pipeline = CleanPipeline()
-            result = pipeline.run_full_pipeline()
+            # Walks and rewrites the corpus on disk — minutes of blocking I/O.
+            result = await run_in_threadpool(pipeline.run_full_pipeline)
             await manager.broadcast({"event": "clean_complete", "result": result})
             return CleanResponse(
                 status="ok",
@@ -752,7 +755,7 @@ def create_app() -> FastAPI:
     # --- Analyzer ---
 
     @app.post("/analyze", response_model=AnalyzeResponse)
-    async def analyze(req: AnalyzeRequest):
+    def analyze(req: AnalyzeRequest):
         try:
             analyzer = CorpusAnalyzer()
             stats = analyzer.full_stats()
@@ -833,7 +836,7 @@ def create_app() -> FastAPI:
     # --- Dictionary ---
 
     @app.post("/dictionary/search", response_model=DictSearchResponse)
-    async def dictionary_search(req: DictSearchRequest):
+    def dictionary_search(req: DictSearchRequest):
         try:
             from ..data.database import get_manager
             db = get_manager()
@@ -911,7 +914,7 @@ def create_app() -> FastAPI:
     # --- Bible ---
 
     @app.get("/bible/status")
-    async def bible_status():
+    def bible_status():
         """Check Bible data availability.
 
         DB-first (core#22): the corpus lives in ``bible_verses``, so ``verses``
@@ -937,7 +940,7 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/bible/search")
-    async def bible_search(q: str = "", version: str = "tdb77", limit: int = 10):
+    def bible_search(q: str = "", version: str = "tdb77", limit: int = 10):
         """Search Bible verses by Zolai or English text (LIKE match)."""
         from ..data.database import get_manager
 
@@ -989,7 +992,7 @@ def create_app() -> FastAPI:
     # ── Dictionary CRUD ────────────────────────────────────────
 
     @app.post("/dictionary/add")
-    async def dictionary_add(
+    def dictionary_add(
         word: str,
         english: str = "",
         myanmar: str = "",
@@ -1008,7 +1011,7 @@ def create_app() -> FastAPI:
         return {"success": r, "word": word}
 
     @app.put("/dictionary/update")
-    async def dictionary_update(word: str, field: str, value: str):
+    def dictionary_update(word: str, field: str, value: str):
         """Update a dictionary entry field."""
         from ..data.database import get_manager
         db = get_manager()
@@ -1016,7 +1019,7 @@ def create_app() -> FastAPI:
         return {"success": r, "word": word, "field": field}
 
     @app.delete("/dictionary/delete")
-    async def dictionary_delete(word: str, deleted_by: str = "api_user", reason: str = "api_delete"):
+    def dictionary_delete(word: str, deleted_by: str = "api_user", reason: str = "api_delete"):
         """
         Soft delete a dictionary entry with full audit trail.
 
@@ -1099,7 +1102,7 @@ def create_app() -> FastAPI:
         return results
 
     @app.get("/dictionary/search/all")
-    async def dictionary_search_all(q: str, limit: int = 20):
+    def dictionary_search_all(q: str, limit: int = 20):
         """Search dictionary with ZO↔EN↔MY."""
         from ..data.database import get_manager
 
@@ -1138,7 +1141,7 @@ def create_app() -> FastAPI:
     # --- Myanmar / Burmese endpoints ---
 
     @app.get("/dictionary/search/my")
-    async def search_myanmar_dictionary(
+    def search_myanmar_dictionary(
         q: str = Query(..., description="Myanmar search query"),
     ):
         """Search Myanmar dictionary + Bible for matching text."""
@@ -1149,7 +1152,7 @@ def create_app() -> FastAPI:
         return {"query": q, "results": results, "count": len(results)}
 
     @app.get("/dictionary/translate/zo-my")
-    async def translate_zolai_to_myanmar(
+    def translate_zolai_to_myanmar(
         word: str = Query(..., description="Zolai word"),
     ):
         """Translate Zolai → Myanmar via dictionary."""
@@ -1162,7 +1165,7 @@ def create_app() -> FastAPI:
         return {"error": f"No Myanmar translation found for '{word}'"}
 
     @app.get("/dictionary/translate/my-zo")
-    async def translate_myanmar_to_zolai(
+    def translate_myanmar_to_zolai(
         word: str = Query(..., description="Myanmar word"),
     ):
         """Translate Myanmar → Zolai via dictionary."""
@@ -1175,7 +1178,7 @@ def create_app() -> FastAPI:
         return {"error": f"No Zolai translation found for '{word}'"}
 
     @app.get("/bible/search/my")
-    async def search_judson_bible(
+    def search_judson_bible(
         q: str = Query(..., description="Myanmar search text"),
     ):
         """Search Judson Bible by Myanmar text."""
@@ -1189,7 +1192,7 @@ def create_app() -> FastAPI:
 
 
     @app.post("/knowledge/search", response_model=KnowledgeSearchResponse)
-    async def knowledge_search(req: KnowledgeSearchRequest):
+    def knowledge_search(req: KnowledgeSearchRequest):
         """Search the knowledge brain (RAG) for relevant chunks."""
         from ..knowledge.retrieve import format_context
         from ..knowledge.retrieve import retrieve as rag_retrieve
@@ -1210,7 +1213,7 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/knowledge/status")
-    async def knowledge_status():
+    def knowledge_status():
         """Check knowledge index status."""
         from sqlalchemy import text as sql_text
 
@@ -1345,7 +1348,9 @@ def create_app() -> FastAPI:
             from .rag_injector import RAGInjector
             db_path = str(config.paths.zolai_db)
             rag = RAGInjector(db_path)
-            rag_context = await rag.build_context(req.message, max_tokens=800)
+            # Seven synchronous SQLite table scans (``sqlite3``, not
+            # asyncio): off-loop or they freeze every request.
+            rag_context = await run_in_threadpool(rag.build_context, req.message, max_tokens=800)
 
             # Step 2: Build enhanced prompt
             system_prompt = get_system_prompt()
@@ -1556,7 +1561,7 @@ def create_app() -> FastAPI:
     _UI_STATIC_DIR = Path(__file__).parent.parent / "ui" / "static"
 
     @app.get("/review/static/{file_path:path}")
-    async def serve_ui_static(file_path: str):
+    def serve_ui_static(file_path: str):
         """Serve UI static files (CSS/JS/images)."""
         # Reject traversal before touching the filesystem.
         if ".." in file_path or file_path.startswith("/"):
@@ -1574,7 +1579,7 @@ def create_app() -> FastAPI:
     # === Provider Endpoints ===
 
     @app.get("/providers")
-    async def list_providers():
+    def list_providers():
         """List available LLM providers."""
         from ..llm.providers.base import get_provider_registry
         registry = get_provider_registry()
@@ -1593,7 +1598,7 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/providers/{provider_name}")
-    async def get_provider(provider_name: str):
+    def get_provider(provider_name: str):
         """Get provider details."""
         from ..llm.providers.base import get_provider_registry
         registry = get_provider_registry()
@@ -1612,14 +1617,14 @@ def create_app() -> FastAPI:
     # === Settings Endpoints ===
 
     @app.get("/settings")
-    async def get_settings():
+    def get_settings():
         """Get all application settings."""
         from ..core.settings import get_settings_manager
         manager = get_settings_manager()
         return manager.get_all()
 
     @app.post("/settings")
-    async def update_settings(updates: dict[str, Any]):
+    def update_settings(updates: dict[str, Any]):
         """Update application settings."""
         from ..core.settings import get_settings_manager
         manager = get_settings_manager()
@@ -1627,14 +1632,14 @@ def create_app() -> FastAPI:
         return {"success": True, "settings": manager.get_all()}
 
     @app.get("/settings/provider")
-    async def get_provider_settings():
+    def get_provider_settings():
         """Get provider-related settings."""
         from ..core.settings import get_settings_manager
         manager = get_settings_manager()
         return manager.get_provider_settings()
 
     @app.get("/settings/learning")
-    async def get_learning_settings():
+    def get_learning_settings():
         """Get learning-related settings."""
         from ..core.settings import get_settings_manager
         manager = get_settings_manager()
@@ -1643,7 +1648,7 @@ def create_app() -> FastAPI:
     # === Learning Endpoints ===
 
     @app.get("/learning/grammar")
-    async def list_grammar_patterns(
+    def list_grammar_patterns(
         function: str | None = None,
         query: str | None = None,
         limit: int = 50,
@@ -1655,7 +1660,7 @@ def create_app() -> FastAPI:
         return {"patterns": patterns, "count": len(patterns)}
 
     @app.post("/learning/grammar")
-    async def add_grammar_pattern(
+    def add_grammar_pattern(
         pattern: str,
         function: str,
         description: str = "",
@@ -1673,7 +1678,7 @@ def create_app() -> FastAPI:
         return result
 
     @app.post("/learning/grammar/validate")
-    async def validate_grammar_pattern(
+    def validate_grammar_pattern(
         pattern: str,
         function: str = "",
     ):
@@ -1684,7 +1689,7 @@ def create_app() -> FastAPI:
         return result
 
     @app.get("/learning/dictionary")
-    async def search_learning_dictionary(
+    def search_learning_dictionary(
         query: str,
         direction: str = "both",
         limit: int = 20,
@@ -1696,7 +1701,7 @@ def create_app() -> FastAPI:
         return {"results": results, "count": len(results)}
 
     @app.post("/learning/dictionary")
-    async def add_dictionary_entry(
+    def add_dictionary_entry(
         zolai: str,
         english: str,
         myanmar: str = "",
@@ -1709,7 +1714,7 @@ def create_app() -> FastAPI:
         return result
 
     @app.post("/learning/translate")
-    async def translate_text(
+    def translate_text(
         text: str,
         direction: str = "auto",
         context: str | None = None,
@@ -1721,7 +1726,7 @@ def create_app() -> FastAPI:
         return result
 
     @app.get("/learning/progress")
-    async def get_progress(user_id: str = "default"):
+    def get_progress(user_id: str = "default"):
         """Get learning progress."""
         from ..learning.progress import ProgressTracker
         tracker = ProgressTracker(user_id=user_id)
@@ -1734,7 +1739,7 @@ def create_app() -> FastAPI:
         }
 
     @app.post("/learning/quiz")
-    async def generate_quiz(
+    def generate_quiz(
         quiz_type: str = "vocabulary",
         count: int = 10,
         level: str | None = None,
@@ -1747,7 +1752,7 @@ def create_app() -> FastAPI:
         return {"quiz": quiz, "count": len(quiz)}
 
     @app.get("/learning/statistics")
-    async def get_learning_statistics():
+    def get_learning_statistics():
         """Get learning statistics."""
         from ..learning.progress import ProgressTracker
         from ..learning.translation import TranslationEngine
@@ -1759,7 +1764,7 @@ def create_app() -> FastAPI:
         }
 
     @app.post("/learning/translate/batch")
-    async def translate_batch(
+    def translate_batch(
         texts: list[str],
     ):
         """Translate multiple texts in batch."""
@@ -1769,7 +1774,7 @@ def create_app() -> FastAPI:
         return {"results": results, "count": len(results)}
 
     @app.get("/learning/search")
-    async def search_learning_resources(
+    def search_learning_resources(
         query: str,
         limit: int = 10,
     ):
@@ -1780,7 +1785,7 @@ def create_app() -> FastAPI:
         return results
 
     @app.get("/learning/search/vocabulary")
-    async def search_vocabulary(
+    def search_vocabulary(
         query: str,
         limit: int = 10,
     ):
@@ -1791,7 +1796,7 @@ def create_app() -> FastAPI:
         return {"results": results, "count": len(results)}
 
     @app.get("/learning/search/grammar")
-    async def search_grammar_patterns(
+    def search_grammar_patterns(
         query: str,
         limit: int = 10,
     ):
@@ -1802,7 +1807,7 @@ def create_app() -> FastAPI:
         return {"results": results, "count": len(results)}
 
     @app.get("/learning/search/bible")
-    async def search_bible_verses(
+    def search_bible_verses(
         query: str,
         limit: int = 10,
     ):
@@ -1814,7 +1819,7 @@ def create_app() -> FastAPI:
 
     # === Static File Serving (last route - catch-all) ===
     @app.get("/{path:path}", include_in_schema=False)
-    async def serve_static(path: str, request: Request):
+    def serve_static(path: str, request: Request):
         """Serve static files (CSS/JS/images only).
 
         Last route. Anything that is not a real file is a genuine 404 -- it must

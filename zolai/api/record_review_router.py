@@ -87,7 +87,7 @@ def _actor(request: Request) -> str:
 
 
 @router.patch("/{table}/{row_id}", summary="Apply a reviewed field correction (writes data_audit_log)")
-async def correct_record(
+def correct_record(
     table: str,
     row_id: int,
     body: RecordCorrectionIn,

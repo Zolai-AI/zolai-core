@@ -85,7 +85,7 @@ def _run_script(job_id: str, stage: str, cmd: list[str]) -> None:
 # ── Pipeline endpoints ──────────────────────────────────────────────────────
 
 @router.post("/pipeline/crawl", response_model=JobResponse)
-async def pipeline_crawl():
+def pipeline_crawl():
     job_id = str(uuid.uuid4())[:8]
     script = SCRIPTS / "crawlers" / "crawl_all_news.py"
     asyncio.get_event_loop().run_in_executor(
@@ -96,7 +96,7 @@ async def pipeline_crawl():
 
 
 @router.post("/pipeline/clean", response_model=JobResponse)
-async def pipeline_clean():
+def pipeline_clean():
     job_id = str(uuid.uuid4())[:8]
     script = SCRIPTS / "pipelines" / "clean.py"
     asyncio.get_event_loop().run_in_executor(
@@ -107,7 +107,7 @@ async def pipeline_clean():
 
 
 @router.post("/pipeline/dedup", response_model=JobResponse)
-async def pipeline_dedup():
+def pipeline_dedup():
     job_id = str(uuid.uuid4())[:8]
     script = SCRIPTS / "pipelines" / "deduplicate.py"
     asyncio.get_event_loop().run_in_executor(
@@ -118,7 +118,7 @@ async def pipeline_dedup():
 
 
 @router.post("/pipeline/publish-hf", response_model=JobResponse)
-async def pipeline_publish_hf():
+def pipeline_publish_hf():
     job_id = str(uuid.uuid4())[:8]
     script = SCRIPTS / "data" / "pull.py"
     asyncio.get_event_loop().run_in_executor(
@@ -129,7 +129,7 @@ async def pipeline_publish_hf():
 
 
 @router.get("/pipeline/status/{job_id}", response_model=JobStatus)
-async def pipeline_status(job_id: str):
+def pipeline_status(job_id: str):
     job = _jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
@@ -145,7 +145,7 @@ async def pipeline_trigger():
 # ── Vocab daily endpoint ────────────────────────────────────────────────────
 
 @router.get("/vocab/daily")
-async def vocab_daily(level: str = "a1"):
+def vocab_daily(level: str = "a1"):
     """Return a random vocab word for the daily lesson (DB-backed)."""
     from ..data.repositories import get_repositories
 
@@ -182,7 +182,7 @@ def _save_subs(subs: list[dict]) -> None:
 
 
 @router.post("/telegram/subscribe")
-async def telegram_subscribe(req: SubscribeRequest):
+def telegram_subscribe(req: SubscribeRequest):
     subs = _load_subs()
     existing = next((s for s in subs if s["chat_id"] == req.chat_id), None)
     if existing:
@@ -200,7 +200,7 @@ async def telegram_subscribe(req: SubscribeRequest):
 
 
 @router.post("/telegram/unsubscribe")
-async def telegram_unsubscribe(chat_id: str):
+def telegram_unsubscribe(chat_id: str):
     subs = _load_subs()
     for s in subs:
         if s["chat_id"] == chat_id:
@@ -210,7 +210,7 @@ async def telegram_unsubscribe(chat_id: str):
 
 
 @router.get("/telegram/subscribers")
-async def telegram_subscribers():
+def telegram_subscribers():
     subs = [s for s in _load_subs() if s.get("active")]
     return {"count": len(subs), "subscribers": subs}
 
@@ -233,7 +233,7 @@ class CorpusAddRequest(BaseModel):
 
 
 @router.post("/dictionary/add")
-async def dictionary_add(req: DictAddRequest):
+def dictionary_add(req: DictAddRequest):
     from ..data.repositories import get_repositories
 
     repos = get_repositories()
@@ -250,7 +250,7 @@ async def dictionary_add(req: DictAddRequest):
 
 
 @router.post("/corpus/add")
-async def corpus_add(req: CorpusAddRequest):
+def corpus_add(req: CorpusAddRequest):
     corpus_path = DATA / "parallel" / "community_contributions.jsonl"
     corpus_path.parent.mkdir(parents=True, exist_ok=True)
     with open(corpus_path, "a", encoding="utf-8") as f:

@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from zolai.api.auth import require_scope
 from zolai.api.errors import api_error
@@ -181,8 +182,12 @@ async def get_word_detail(
     the real-404 precedent of ``ce04c72``. ``/api/v1/lexicon/{word}`` keeps its
     own documented ``found`` flag — that contract is asserted by its own tests
     and is deliberately not changed here.
+
+    The retriever is synchronous SQLite; every handler in this module hands the
+    call to a worker thread so one lookup cannot freeze the event loop
+    (core#24's disease, measured here at 8–32s on the search path).
     """
-    pack = retriever.query_word(word)
+    pack = await run_in_threadpool(retriever.query_word, word)
     if not getattr(pack, "evidence_items", None):
         raise HTTPException(
             status_code=404,
@@ -206,7 +211,7 @@ async def get_word_forms(
     retriever: UnifiedRetriever = Depends(get_retriever),
 ) -> WordFormsResponse:
     """Get word forms (surface variants)."""
-    forms = retriever.query_word_forms(word, limit)
+    forms = await run_in_threadpool(retriever.query_word_forms, word, limit)
     return WordFormsResponse(word=word, forms=forms)
 
 
@@ -221,7 +226,7 @@ async def get_word_contexts(
     retriever: UnifiedRetriever = Depends(get_retriever),
 ) -> WordContextsResponse:
     """Get contexts (left/right/sentence/document) for a word."""
-    contexts = retriever.query_word_contexts(word, limit)
+    contexts = await run_in_threadpool(retriever.query_word_contexts, word, limit)
     return WordContextsResponse(word=word, contexts=contexts)
 
 
@@ -236,7 +241,7 @@ async def get_word_collocations(
     retriever: UnifiedRetriever = Depends(get_retriever),
 ) -> WordCollocationsResponse:
     """Get collocations with PMI for a word."""
-    collocations = retriever.query_word_collocations(word, limit)
+    collocations = await run_in_threadpool(retriever.query_word_collocations, word, limit)
     return WordCollocationsResponse(word=word, collocations=collocations)
 
 
@@ -251,7 +256,7 @@ async def get_word_patterns(
     retriever: UnifiedRetriever = Depends(get_retriever),
 ) -> WordPatternsResponse:
     """Get grammar patterns involving a word."""
-    patterns = retriever.query_word_patterns(word, limit)
+    patterns = await run_in_threadpool(retriever.query_word_patterns, word, limit)
     return WordPatternsResponse(word=word, patterns=patterns)
 
 
@@ -266,7 +271,7 @@ async def get_word_evidence(
     retriever: UnifiedRetriever = Depends(get_retriever),
 ) -> WordEvidenceResponse:
     """Get evidence chain for a word (attestation_index + foundation_evidence)."""
-    evidence = retriever.query_word_evidence(word, limit)
+    evidence = await run_in_threadpool(retriever.query_word_evidence, word, limit)
     return WordEvidenceResponse(word=word, evidence=evidence)
 
 
@@ -285,7 +290,7 @@ async def get_word_related(
     Same word family first (shared prefix / extension), then same-POS
     neighbours. Never includes the query word itself.
     """
-    related = retriever.related_words(word, limit)
+    related = await run_in_threadpool(retriever.related_words, word, limit)
     return WordRelatedResponse(word=word, related=related)
 
 
@@ -306,8 +311,8 @@ async def analyze_word(
     the two routes can never disagree.  ``analyze_sentence`` stays what it is —
     a sentence-level tokenizer — and only supplies the token split.
     """
-    tokens = retriever.analyze_sentence(request.word).get("tokens", [])
-    pack = retriever.query_word(request.word)
+    tokens = (await run_in_threadpool(retriever.analyze_sentence, request.word)).get("tokens", [])
+    pack = await run_in_threadpool(retriever.query_word, request.word)
     return AnalyzeWordResponse(
         word=request.word,
         tokens=tokens or [request.word],
@@ -337,7 +342,7 @@ async def analyze_sentence(
     retriever: UnifiedRetriever = Depends(get_retriever),
 ) -> AnalyzeSentenceResponse:
     """Analyze a Zolai sentence (tokenize, POS, grammar, entities)."""
-    result = retriever.analyze_sentence(request.text)
+    result = await run_in_threadpool(retriever.analyze_sentence, request.text)
     return AnalyzeSentenceResponse(
         text=request.text,
         tokens=result.get("tokens", []),
@@ -357,7 +362,7 @@ async def analyze_paragraph(
     retriever: UnifiedRetriever = Depends(get_retriever),
 ) -> AnalyzeParagraphResponse:
     """Analyze a Zolai paragraph (multi-sentence, discourse)."""
-    result = retriever.analyze_paragraph(request.text)
+    result = await run_in_threadpool(retriever.analyze_paragraph, request.text)
     return AnalyzeParagraphResponse(
         text=request.text,
         sentences=result.get("sentences", []),
@@ -374,8 +379,13 @@ async def search(
     request: SearchRequest,
     retriever: UnifiedRetriever = Depends(get_retriever),
 ) -> SearchResponse:
-    """Bilingual search (lexical + vector fallback)."""
-    results = retriever.search(request.query, request.limit, request.source_filter)
+    """Bilingual search (lexical + vector fallback).
+
+    A multi-token query lands in the semantic pass, which is 8s warm and 32s
+    cold on the production corpus — inline, that froze every other request on
+    the server (core#24's failure mode, this time in the retriever).
+    """
+    results = await run_in_threadpool(retriever.search, request.query, request.limit, request.source_filter)
     return SearchResponse(
         query=request.query,
         results=[r.__dict__ for r in results],
@@ -396,7 +406,8 @@ async def rag_query(
     Falls back to the retrieved evidence (and says so via ``retrieval_only``)
     when no provider resolves or the call fails.
     """
-    result = retriever.rag_query(
+    result = await run_in_threadpool(
+        retriever.rag_query,
         request.question,
         request.limit,
         provider=request.provider,
@@ -414,7 +425,7 @@ async def get_knowledge_version(
     retriever: UnifiedRetriever = Depends(get_retriever),
 ) -> KnowledgeVersionResponse:
     """Get current knowledge version."""
-    return KnowledgeVersionResponse(**retriever.get_knowledge_version())
+    return KnowledgeVersionResponse(**await run_in_threadpool(retriever.get_knowledge_version))
 
 
 @router.get(
@@ -426,4 +437,4 @@ async def get_knowledge_statistics(
     retriever: UnifiedRetriever = Depends(get_retriever),
 ) -> KnowledgeStatsResponse:
     """Get aggregate knowledge statistics."""
-    return KnowledgeStatsResponse(stats=retriever.get_knowledge_statistics())
+    return KnowledgeStatsResponse(stats=await run_in_threadpool(retriever.get_knowledge_statistics))

@@ -90,7 +90,7 @@ class ExportAllRequest(BaseModel):
 
 
 @router.post("/import/all", dependencies=[Depends(require_scope(WRITE_SCOPE))])
-async def import_all(request: ImportAllRequest, background_tasks: BackgroundTasks):
+def import_all(request: ImportAllRequest, background_tasks: BackgroundTasks):
     """Import all canonical JSONL files into the database."""
     batch_id = request.batch_id or str(uuid.uuid4())
 
@@ -120,7 +120,7 @@ async def import_all(request: ImportAllRequest, background_tasks: BackgroundTask
 
 
 @router.post("/import/file", dependencies=[Depends(require_scope(WRITE_SCOPE))])
-async def import_file(request: ImportFileRequest):
+def import_file(request: ImportFileRequest):
     """Import a single JSONL file."""
     file_path = Path(request.file_path)
     if not file_path.exists():
@@ -144,7 +144,7 @@ async def import_file(request: ImportFileRequest):
         ) from exc
 
 @router.get("/import/status/{batch_id}", dependencies=[Depends(require_scope(READ_SCOPE))])
-async def import_status(batch_id: str):
+def import_status(batch_id: str):
     """Check import status by batch ID."""
     logs = _pipeline.get_import_log(100)
     batch_logs = [log for log in logs if log["batch_id"] == batch_id]
@@ -165,13 +165,13 @@ async def import_status(batch_id: str):
 
 
 @router.get("/import/log", dependencies=[Depends(require_scope(READ_SCOPE))])
-async def import_log(limit: int = Query(50, ge=1, le=500)):
+def import_log(limit: int = Query(50, ge=1, le=500)):
     """Get recent import log entries."""
     return _pipeline.get_import_log(limit)
 
 
 @router.post("/export/table", dependencies=[Depends(require_scope(WRITE_SCOPE))])
-async def export_table(request: ExportTableRequest):
+def export_table(request: ExportTableRequest):
     """Export a table to JSONL format."""
     try:
         result = _pipeline.export_table(
@@ -198,7 +198,7 @@ async def export_table(request: ExportTableRequest):
         ) from exc
 
 @router.post("/export/all", dependencies=[Depends(require_scope(WRITE_SCOPE))])
-async def export_all(request: ExportAllRequest):
+def export_all(request: ExportAllRequest):
     """Export all tables to JSONL format."""
     try:
         results = _pipeline.export_all(
@@ -223,7 +223,7 @@ async def export_all(request: ExportAllRequest):
 
 
 @router.get("/tables", dependencies=[Depends(require_scope(READ_SCOPE))])
-async def list_tables():
+def list_tables():
     """List all tables that have import logs."""
     from sqlalchemy import create_engine, text
     from sqlalchemy import inspect as sa_inspect
