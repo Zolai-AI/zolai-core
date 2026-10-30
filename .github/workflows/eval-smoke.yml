@@ -35,7 +35,12 @@ jobs:
           pip install pytest ruff
 
       - name: Run ZolaiBench smoke tests
+        env:
+          # Default config resolves to repo.parent/data, which the runner has no
+          # write access to; pin it inside the workspace like ci.yml does.
+          ZOLAI_DATA_ROOT: ${{ github.workspace }}/data
         run: |
+          mkdir -p "$ZOLAI_DATA_ROOT"
           # The bundled `smoke` set scores every lane that has data in a fresh
           # checkout. POS / morphology / grammar gold lives in the gitignored
           # data/eval/*_gold_v0.jsonl corpus, so those tasks report "No gold
@@ -95,4 +100,7 @@ jobs:
         with:
           python-version: "3.14"
       - run: pip install mypy
-      - run: mypy zolai/eval --ignore-missing-imports
+        # This job types zolai/eval. Without the flag mypy also reports every
+        # pre-existing error in the modules eval imports (qa, ner, mt,
+        # classifier, data.database), which hides the eval result it exists for.
+      - run: mypy zolai/eval --ignore-missing-imports --follow-imports=silent
