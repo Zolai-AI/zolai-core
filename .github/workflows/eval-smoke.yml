@@ -1,5 +1,8 @@
 # ZolaiBench v0.1 — Evaluation Smoke Tests
-# Runs on PR/push to catch regressions in POS, Morphology, Grammar, Tokenization
+# Runs on PR/push. In CI it scores the bundled smoke set (ZVS compliance,
+# translation BLEU/chrF, QA term recall) against report/eval-baseline.json;
+# the gold-backed tasks (tokenization, POS, morphology, grammar) need the
+# gitignored data/eval corpus and are smoke-tested locally.
 
 name: ZolaiBench Smoke Tests
 
@@ -11,7 +14,7 @@ on:
 
 jobs:
   eval-smoke:
-    name: ZolaiBench Smoke (50 samples/task)
+    name: ZolaiBench Smoke (bundled set vs floors)
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -31,34 +34,35 @@ jobs:
           pip install -e .  # installs base + sklearn-crfsuite
           pip install pytest ruff
 
-      - name: Verify data directory exists
-        run: |
-          ls -la data/ || echo "data/ not found - will use bundled fixtures"
-          ls -la data/eval/ || mkdir -p data/eval
-
       - name: Run ZolaiBench smoke tests
         run: |
-          # Run all 4 tasks with --smoke flag (50 samples each)
-          zolai eval run --task all --smoke --json > smoke_results.json
+          # The bundled `smoke` set scores every lane that has data in a fresh
+          # checkout. POS / morphology / grammar gold lives in the gitignored
+          # data/eval/*_gold_v0.jsonl corpus, so those tasks report "No gold
+          # data" here and are scored locally with `zolai eval run all --smoke`.
+          python -m zolai.eval.cli --set smoke --json \
+            --baseline report/eval-baseline.json --gate > smoke_results.json
           cat smoke_results.json
 
       - name: Check for failures
         run: |
-          # Exit non-zero if any task failed
+          # --gate already exits 1 on a regression; this re-reads the artifact so
+          # the reason lands in the log, not only in the exit code.
           python - <<'PY'
           import json, sys
-          with open('smoke_results.json') as f:
-              results = json.load(f)
-          failed = any('error' in r for r in results.values())
-          if failed:
-              print('❌ Smoke tests FAILED')
-              for task, result in results.items():
-                  if 'error' in result:
-                      print(f'  {task}: {result["error"]}')
+          with open("smoke_results.json") as f:
+              report = json.load(f)
+          metrics = report["metrics"]
+          floors = report.get("floors", {})
+          below = report.get("below_floor", [])
+          if below:
+              print("❌ Smoke gate FAILED")
+              for name in below:
+                  print(f"  {name}: {metrics[name]:.4f} < floor {floors[name]:.4f}")
               sys.exit(1)
-          print('✅ All smoke tests PASSED')
-          for task, result in results.items():
-              print(f'  {task}: {result}')
+          print("✅ All smoke metrics above floor")
+          for name in sorted(metrics):
+              print(f"  {name}: {metrics[name]:.4f} (floor {floors.get(name, 0.0):.4f})")
           PY
 
       - name: Upload results as artifact
