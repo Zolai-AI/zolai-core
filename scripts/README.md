@@ -27,7 +27,7 @@ Data collection, processing, training, and maintenance scripts (~250 total).
 | `ui/` | 9 | Chat server, menu, routing agent, GTK UI |
 | `wiki/` | 15 | Wiki audit, sentence fixing, text refinement |
 | `zvs/` | 1 | ZVS 2018 compliance scanner |
-| **root** | **10** | Validate/entry scripts (see below) |
+| **root** | **31** | Validate/entry scripts (see below) |
 
 ## Root Scripts (kept at scripts/)
 
@@ -35,6 +35,7 @@ Data collection, processing, training, and maintenance scripts (~250 total).
 |--------|---------|
 | `sync-db-from-server.sh` | **POST-DEPLOY:** pull `data/zolai.db` from pcore-server (server → local) |
 | `sync-db-to-server.sh` | **PRE-DEPLOY / local data work:** push local `data/zolai.db` to pcore-server (local → server) |
+| `sync-env-to-server.sh` | **ENV SYNC:** replace server `.env` + upsert listed keys into the unit's `.env.dev`; stdin transport, backups, 600 perms, dry-run by default |
 | `gemini_webapi_setup.py` | Gemini WebAPI setup |
 | `local_translation_validator.py` | Local translation validation |
 | `translation_validator.py` | Translation quality validator |
@@ -71,10 +72,29 @@ rsync to a temp file → `PRAGMA integrity_check` → back up the local DB first
 remote snapshot; sizes echoed, `set -euo pipefail`.
 
 Push safety chain: local `sqlite3 .backup` snapshot → integrity check → rsync up → **stop the
-api container** (never swap a file the process holds open) → back up the server DB
-(`data/backups/zolai-<ts>.db.gz`) → remote integrity check → atomic replace + drop stale
-`-wal`/`-shm` → start container → **/health 200 gate** (30s).
+native API service** (`systemctl stop zolai-core-dev`; never swap a file the process holds
+open) → back up the server DB (`data/backups/zolai-<ts>.db.gz`) → remote integrity check →
+**re-stop and verify the unit is inactive** (a manual start mid-sync would leave the old
+inode open) → atomic replace + drop stale `-wal`/`-shm` → start the service → **/health 200
+gate** (30s).
 Full runbook: `docs/governance/backup-strategy.md`; deploy step: `docs/planning/AI_AGENTS_RBAC_PLAN.md` §F.
+
+## Env sync — keep secrets on the host, never in git
+
+`.env` and `.env.*` are ignored (placeholders only in `.env.example` /
+`.env.production.example`). To update the host:
+
+```bash
+scripts/sync-env-to-server.sh                # dry-run: lists files + key names only
+scripts/sync-env-to-server.sh --apply        # backup → replace .env → upsert keys into .env.dev
+scripts/sync-env-to-server.sh --apply --keys "OPENROUTER_API_KEY HF_TOKEN"
+```
+
+Values travel over **ssh stdin** (never argv), remote temp files are written under
+`umask 077` and renamed atomically, backups are `*.bak-<ts>`, everything ends mode `600`,
+and output is key names/presence only. The unit's `EnvironmentFile` is `.env.dev`, so a
+restart (`systemctl restart zolai-core-dev`) is required for new keys to take effect —
+`sync-db-to-server.sh` already restarts the service.
 
 ## Key Commands
 

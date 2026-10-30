@@ -15,7 +15,10 @@
 #   (d) server : back up existing DB first (data/backups/zolai-<ts>.db.gz)
 #   (e) server : `PRAGMA integrity_check` on the pushed file — abort unless ok
 #   (f) server : atomic replace, drop stale -wal/-shm, start the service,
-#                wait for /health to answer 200
+#                wait for /health to answer 200.  The service is stopped
+#                again (and verified inactive) immediately before the
+#                replace: a manual start during steps (c)–(e) would leave
+#                the old inode open and the mv would detach it silently.
 #   (g) --dry-run prints the plan and exits without touching anything
 #
 # The runtime is NATIVE (systemd), not Docker — the container files were retired
@@ -145,6 +148,14 @@ echo "  integrity: ok"
 # --- (f) atomic replace + drop stale WAL + restart ----------------------------
 echo "[6/7] replace server DB + restart api"
 ssh "${SSH_OPTS[@]}" "${SERVER_HOST}" "set -e
+  # Re-stop and verify: a manual start between step 3 and here would leave the
+  # old inode open, and the mv would silently detach the live process from the
+  # file it is serving (seen once on pcore-server).  Stop is idempotent.
+  sudo systemctl stop '${SERVICE}' >/dev/null 2>&1 || true
+  if systemctl is-active --quiet '${SERVICE}'; then
+    echo 'ERROR: ${SERVICE} is still active — refusing to replace an in-use DB' >&2
+    exit 1
+  fi
   mv -f '${REMOTE_TMP}' '${SERVER_DB}'
   rm -f '${SERVER_DB}-wal' '${SERVER_DB}-shm'
   sudo systemctl start '${SERVICE}'

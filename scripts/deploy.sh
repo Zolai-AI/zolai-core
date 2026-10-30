@@ -211,8 +211,15 @@ else:
     # every deploy and took the whole script down *after* the app was already
     # verified and serving. A credential from the environment is used so no
     # password is committed.
-    ADMIN_USER=${ADMIN_USER:-${ZOLAI_ADMIN_USER:-}}
-    ADMIN_PASS=${ADMIN_PASS:-${ZOLAI_ADMIN_PASS:-}}
+    # The unit's EnvironmentFile (.env.dev) carries service config, not the
+    # login account. Fall back to the repo `.env` (read-only, never echoed) so
+    # the provider probe actually runs instead of silently skipping.
+    _env_get() {
+        [[ -f "$SCRIPT_DIR/.env" ]] || return 0
+        sed -n "s/^$1=//p" "$SCRIPT_DIR/.env" 2>/dev/null | head -1
+    }
+    ADMIN_USER=${ADMIN_USER:-${ZOLAI_ADMIN_USER:-${ADMIN_USERNAME:-$(_env_get ADMIN_USERNAME)}}}
+    ADMIN_PASS=${ADMIN_PASS:-${ZOLAI_ADMIN_PASS:-${ADMIN_PASSWORD:-$(_env_get ADMIN_PASSWORD)}}}
     if [[ -z "$ADMIN_USER" || -z "$ADMIN_PASS" ]]; then
         warn "ADMIN_USER/ADMIN_PASS not set - skipping the provider connection test"
         warn "(set them, or export ZOLAI_ADMIN_USER / ZOLAI_ADMIN_PASS)"
@@ -225,17 +232,26 @@ else:
             err "Could not obtain an admin token - provider connection test failed"
             exit 1
         fi
+        # Probe whatever the operator activated — never a hardcoded provider.
+        ACTIVE_PROVIDER=$(curl -sf -H "Authorization: Bearer $ADMIN_TOKEN" \
+            http://127.0.0.1:8001/api/v1/admin/ai-providers | \
+            python3 -c "import sys, json; items=json.load(sys.stdin).get('items', []); active=[r.get('catalog_id') for r in items if r.get('is_active')]; print(active[0] if active else '')")
+        if [[ -z "$ACTIVE_PROVIDER" ]]; then
+            err "No active AI provider - activate one in Admin → Settings"
+            exit 1
+        fi
+        log "Probing active provider: $ACTIVE_PROVIDER"
         curl -sf -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
-            http://127.0.0.1:8001/api/v1/admin/ai-providers/pcore-brain/test | \
+            "http://127.0.0.1:8001/api/v1/admin/ai-providers/$ACTIVE_PROVIDER/test" | \
             python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 assert data.get('ok') == True, f'Provider test failed: {data.get(\"error\")}'
 print('OK: Provider connection successful')
-print('Model:', data.get('model'))
+print('Provider:', '$ACTIVE_PROVIDER')
 print('Latency:', data.get('latency_ms'), 'ms')
 "
-        ok "Provider connection verified"
+        ok "Provider connection verified ($ACTIVE_PROVIDER)"
     fi
 fi
 
