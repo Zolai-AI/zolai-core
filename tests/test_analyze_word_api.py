@@ -23,6 +23,7 @@ from zolai.api import auth, rag_router
 from zolai.api.auth_middleware import reset_rate_limiter
 from zolai.api.server import create_app
 from zolai.config import config
+from zolai.rag.evidence import EvidenceItem, evidence_to_pack
 
 #: Every table ``build_word_evidence_items`` queries — a missing one raises
 #: (the builder has no per-source guard), so all seven must exist.
@@ -119,6 +120,44 @@ def _sql_log(engine) -> list[str]:
     event.listen(engine, "before_cursor_execute", lambda *a: statements.append(a[2]))
     return statements
 
+
+class TestPosSpellingIsOneValue:
+    """explorer#23: live ``GET /api/v1/word/pasian`` answered ``pos: ['Noun', 'NOUN']``.
+
+    The dictionary column spells the label (``Noun``), the KG node spells the tag
+    (``NOUN``). One part of speech, two chips — so the pack collapses variants that
+    differ only by case and keeps the readable spelling.
+    """
+
+    def test_case_variants_collapse_to_the_label_spelling(self) -> None:
+        pack = evidence_to_pack(
+            "pasian",
+            [
+                EvidenceItem("dictionary", "dictionary", "word:pasian", 2, 0.9, "God", {"pos": "Noun"}),
+                EvidenceItem("kg", "kg_nodes", "node:pasian", 3, 0.6, "", {"pos": "NOUN"}),
+            ],
+        )
+        assert pack.pos == ["Noun"]
+
+    def test_tag_is_kept_when_no_label_spelling_exists(self) -> None:
+        pack = evidence_to_pack(
+            "pasian",
+            [
+                EvidenceItem("kg", "kg_nodes", "node:pasian", 3, 0.6, "", {"pos": "NOUN"}),
+                EvidenceItem("dictionary", "dictionary", "word:pasian", 2, 0.9, "God", {"pos": "noun"}),
+            ],
+        )
+        assert pack.pos == ["noun"]
+
+    def test_genuinely_different_tags_are_all_kept(self) -> None:
+        pack = evidence_to_pack(
+            "gam",
+            [
+                EvidenceItem("dictionary", "dictionary", "word:gam", 2, 0.9, "earth, land", {"pos": "Noun"}),
+                EvidenceItem("knowledge_claims", "knowledge_claims", "c:gam", 3, 0.6, "", {"pos": "VERB"}),
+            ],
+        )
+        assert pack.pos == ["Noun", "VERB"]
 
 class TestWordDetailSource:
     def test_get_word_reports_pos(self, client: TestClient) -> None:

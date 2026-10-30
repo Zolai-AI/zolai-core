@@ -35,6 +35,24 @@ SOURCE_TIER_MAP = {
 }
 
 
+def _dedupe_pos(values: list[Any]) -> list[str]:
+    """Collapse POS tags that differ only by case (``Noun`` + ``NOUN``).
+
+    The dictionary column spells the label (``Noun``), the claims/KG tiers spell
+    the tag (``NOUN``), and both describe one part of speech — so the word
+    payload used to carry two chips for it (explorer#23). The readable label
+    wins; an all-uppercase tag is kept only when no label spelling exists.
+    """
+    by_key: dict[str, str] = {}
+    for value in values:
+        text_value = str(value)
+        key = text_value.casefold()
+        kept = by_key.get(key)
+        if kept is None or (kept.isupper() and not text_value.isupper()):
+            by_key[key] = text_value
+    return list(by_key.values())
+
+
 @dataclass
 class EvidenceItem:
     """Single piece of evidence."""
@@ -168,11 +186,12 @@ def evidence_to_pack(word: str, evidence_items: list[EvidenceItem]) -> EvidenceP
         return uniq
 
     pack.forms = _dedupe(pack.forms)
-    pack.pos = _dedupe(pack.pos)
+    pack.pos = _dedupe_pos(pack.pos)
     pack.examples = _dedupe(pack.examples)
     pack.sources = _dedupe(pack.sources)
     pack.collocations = _dedupe(pack.collocations)
     pack.grammar_usage = _dedupe(pack.grammar_usage)
+
 
     # Confidence = weighted average of evidence confidences
     if tier_weights:
