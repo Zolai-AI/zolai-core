@@ -629,3 +629,599 @@ Books that were zero coverage (JUD/OBA/PHM/PHP/TIT/ZEP) now 869 / 654 / 573 /
   reload with provenance); M4.13 owner decision on book-code normalization before any zba merge.
 - Fresh pre-A backup `zolai-2026-10-28_1935.db.gz` + verify drill restore-proven; pre-vacuum
   file `zolai.db.pre-vacuum-20261028T133227Z` kept.
+
+## 2026-10-29 (Session — wiki vectors completed, canonical words promoted)
+
+### RAG build: chunking was the stall
+The wiki build (1,687 `wiki_content` docs, `chunk=True`) hung twice with no
+traceback. `PYTHONFAULTHANDLER` + `SIGABRT` stack showed the main thread inside
+`embedder.encode` → BERT → SGEMM, not SQLite: `_chunk_text` splits on `.` only,
+so one generated wordlist page (doc 1650) became a **746,415-char** single
+"chunk". Fixes in `zolai/rag/build.py`:
+- `MAX_CHUNK_CHARS = 2000` + `_split_oversized()` — hard-splits a
+  boundary-less run at a newline/space/comma if one is past halfway.
+- `MAX_TEXTS_PER_EMBED = 1024` + a `flush()` closure — a row batch is not a
+  flush unit for a chunked source (256 docs → a quarter-million texts, one
+  `encode` call, nothing committed for hours). Now ≤1,024 texts per encode and
+  per commit; the build resumes by skipping ids already present.
+- `--source` accepts the spec/source-type name as well as the table name.
+- `tests/test_rag_chunking.py` (4 tests): short text stays whole, sentences
+  split, a boundary-less run is bounded, `_split_oversized` prefers word cuts.
+- Re-chunking changed the ids, so 2,597 orphan vectors from the old chunking
+  were deleted (79 docs; doc 1650 alone had 1,036) before the rebuild.
+- **Generated master wordlists are excluded, not truncated.** Two wiki docs
+  (`master_vocab_reference.md` 8.5 MB → 12,200 chunks, `wordlist_master.md`
+  4.6 MB → 4,595) exceeded `MAX_CHUNKS_PER_DOC`; the old code capped them at
+  2,048 chunks, which indexed an arbitrary prefix of tables that are already
+  embedded. They are now skipped whole with a warning and stay reachable
+  through `wiki_content_fts`. Their 3,028 already-written vectors were deleted.
+- **Build complete: `wiki_content` = 28,738 vectors** (8 sources / 9 specs;
+  index at **269,367** rows once the 187 re-run chunks landed, **269,405** after
+  the learning cycle embedded 38 new grammar patterns — the earlier "269,330"
+  was 240,592 + 28,738 arithmetic, not a measurement). The first pass exited 0 at 28,551 — three 64-chunk flushes
+  had been dropped by `database is locked` (another writer held the lock past the
+  30 s `busy_timeout`). `_insert_vectors()` now retries a locked insert with 2→60 s
+  backoff (6 attempts), and `zolai rag build` exits 1 when the summary carries
+  `errors`; the resumable re-run wrote exactly the 187 missing chunks in 191 s
+  with `errors: []`.
+- Retrieval spot check: `--source wiki` on "Zolai syllabification rules for
+  consonant clusters" returns the ZVS phonetic-restriction pages by vector score
+  (0.70 / 0.68 / 0.67 / 0.62). Lexical hits keep their fixed high scores
+  (exact 0.95, FTS 0.95), so the semantic pass surfaces when lexical is weak —
+  that ordering is by design, not an accident of the merge.
+- A CLI search costs ~60 s cold because `_load_vector_index()` streams all
+  269k base64 embeddings per process; the in-process cache is keyed on
+  `(db url, COUNT(*), MAX(imported_at))`, so it is only warm inside a server.
+
+### Canonical words: evidence-gated promotion
+`zolai foundation promote --from-attestations --attested-threshold 0.80`
+(promotion ran 4:22; `SIGSTOP` used to keep other agents off the write lock):
+
+| Result | Count |
+| --- | ---: |
+| candidates (≥2 evidence tiers) | 38,589 |
+| **promoted → `canonical_words`** | **28,445** |
+| skipped (no dictionary/`vocabulary` gloss) | 10,144 |
+| queued (`foundation_review_queue`) | 0 |
+
+- `foundation_evidence` = **77,276** rows: 75,292 derived from `attestation_index`
+  (`dict tier 2` 28,444 · `corpus tier 4` 27,622 · `bible tier 1` 12,731 ·
+  `extra tier 2` 6,495) + 1,984 earlier hand-parsed rows
+  (`word_observation_stats` 848, bible/grammar/sentence 1,136).
+- `foundation_consensus` = 28,445 `weighted_evidence` verdicts.
+- Threshold 0.80 (not the 0.85 default) because the ≥2-tier rule already
+  excludes single-source candidates; at 0.85 every dictionary+corpus pair
+  (aggregate 0.8125) fails, and that tier set is **15,711 of the 28,445**
+  promoted words — legitimate words backed by two independent attestations
+  plus a real gloss.
+- The 10,144 skips are scraped junk from `online_unified` (`-a`, `-day`,
+  `-foot-wide`, numeric-only glosses) correctly rejected by `_merge_glosses`.
+  Spot checks: pasian → ["God (P-ZVS)"], zvs 1, 2 syllables, evidence
+  `attestation_index:bible` conf 1.0; leitung → ["Earth, World"]; tua →
+  ["that those"].
+- Still 0: `canonical_sentences`, `canonical_paragraphs`,
+  `foundation_verifications` — there is no sentence-level promotion path yet.
+
+### Learning cycle `--apply` and the snapshot drift guard
+- `lr_20261029T124047Z_1f85eb`: steps 1–10 applied and committed; step 11
+  `version_snapshot` raised `VersionDriftError` on `word_usage` — recorded
+  `92883bb8…`, live `530131eb…` ~20 s later, no audit rows, row count unchanged
+  (485,360). A concurrent writer, not a hash bug.
+- Fix in `zolai/learning/cycle.py` `_step_version_snapshot`: when verification
+  reports drift the step now allocates a fresh tag and re-snapshots (up to 3
+  attempts, 3 s apart) instead of aborting a run whose data steps already
+  committed. `tests/test_learning_cycle.py`
+  `test_snapshot_retries_when_another_writer_drifts_the_db` stubs the first
+  verify as drifted and asserts two tags, the `.2` suffix and two version rows.
+- Snapshots: `v2026.10.29.1` (id 39) is **permanently drifted** (the concurrent
+  writer touched `word_usage` after hashing); `v2026.10.29.2` (id 40, manual
+  `zolai knowledge version`) and `v2026.10.29.3` (id 41, from the targeted
+  re-run `lr_20261029T125853Z_4161bb`, 2 steps / 0 failed) both verify
+  `ok: true` — `.3`: `checked 19`, `drift {}`.
+- Cycle effects (measured, not estimated): `attestation_index` **142,624**
+  (rebuilt), `foundation_evidence` **86,450** (+9,164 bible-tier),
+  `hypotheses` **4,028** (+12; the 3,151 bulk came from the 2026-10-28 evening
+  run), `grammar_patterns` **6,348** (+48), `data_audit_log` **49,241**,
+  `knowledge_vectors` **269,425**.
+- RAG stays in step with learning: a discovery pass at 13:21 added 10
+  `disc_g_*` grammar patterns (source `bible_verses`, `OBSERVED`), so
+  `zolai rag build --source grammar_patterns` was re-run — it embedded **20**
+  rows (the 10 new ones plus 10 that the cycle's batch had left unembedded),
+  `errors: []`, 0.5 s, and `grammar_patterns` now has 6,348 rows / 6,348
+  vectors.
+
+### Discovery was not idempotent — the corpus grew on every run
+- Measured in `data/zolai.db`: **268 `disc_g_*` rows** for 37 phenomena (10 have
+  22 copies each = 22 runs; 22 have 2; 4 have 1) and **513 `disc_sp_*` rows**,
+  500 of them `sov`. Evidence followed the ids: 265
+  `grammar_phenomenon_extraction` + 500 `bible_parallel_lookup` rows. Whole
+  table: **48 duplicate `pattern` groups / 5,048 rows**.
+- Root cause: ids ended in `abs(hash(text)) % 100000`; `hash()` of a str is
+  salted per process, so `get_by_pattern_id()` never matched on the next run.
+  `tests/test_discovery_patterns.py` also used `get_engine()`, so every suite
+  run wrote 10 more rows into the live corpus.
+- Fixes: `grammar._phenomenon_id(ptype, marker)` (no suffix);
+  `sentence_patterns._pattern_id(pattern_type, structure)` = `sha1(structure)`
+  used by **both** the Bible and translation paths, so a structure has one row
+  regardless of which verse or source saw it first; `_freq` dead code dropped.
+  Writers now return `created`, summaries carry `already_present`, and
+  `zolai discovery` prints it.
+- Tests: the fixture is a throwaway `DatabaseManager(sqlite:///<tmp>)` DB with
+  2 verses, 2 translations and 1 legacy row; new twin-run tests assert
+  `patterns_written == 0` and identical id sets on the second run. `11 passed`
+  (`tests/test_discovery_patterns.py` + `tests/test_discovery_ids.py`).
+- Read-only dry run against the live DB after the fix: grammar would write
+  **26**, sentence **6**, zero already present — none of the canonical ids
+  exist because every legacy row carries a hash or ref suffix. No live write
+  was made in this pass.
+- Second defect found by the same audit: **278 of 781** legacy `disc_*` rows have
+  `evidence_ids = '[]'`. Both writers re-queried `foundation_evidence` with
+  `fact_key = 'pattern:<id>'`, but `upsert_evidence_bulk` stores
+  `'grammar:pattern:<id>'`, so the lookup always missed. They now take the ids
+  the upsert returns (also one fewer round-trip per pattern); tests assert
+  `json.loads(evidence_ids)` is non-empty.
+- Still open: collapsing the legacy `disc_*` rows, their 765 evidence rows and
+  their `knowledge_vectors` entries is one owner-approved migration, planned
+  against the `v2026.10.29.3` snapshot.
+
+
+## 2026-10-29 (Session — one timestamp format, applied to the live DB)
+
+The code side of the clock migration shipped on 2026-10-28; the data side was
+blocked on owner approval. All four approved migrations ran today against
+`data/zolai.db` (2.40 GB, 125 user tables), backup-first
+(`data/backups/zolai-pre-ddl-20261029T124025Z.db`, `integrity_check` ok).
+
+### 84 column DEFAULTs across 50 tables → `clock.SQL_DEFAULT`
+`scripts/migration/rebuild_timestamp_defaults.py` (new): create-with-correct-
+default → `INSERT … SELECT` → drop → rename → recreate indexes → restore
+`sqlite_sequence`. Details that mattered:
+- `PRAGMA table_info.dflt_value` is the **bare** expression (`datetime('now')`),
+  not the `DEFAULT (...)` wrapper stored in the DDL — two different regexes, one
+  per context. The first dry-run matched the DDL form against the bare value and
+  reported 0 tables.
+- `wiki_content` is the external-content parent of `wiki_content_fts`; the FTS
+  index is rebuilt after the swap (1,687 = 1,687).
+- `PRAGMA legacy_alter_table=ON` around the swap so the rename does not chase FK
+  references to the transient `_<table>__rebuild` name.
+- `sqlite_sequence` is restored to `max(original, max(rowid))` — bulk
+  `INSERT … SELECT` does not advance it, and resetting to `max(rowid)` would let
+  AUTOINCREMENT reuse ids that deletions had retired.
+- Generated columns (`table_xinfo` hidden ∈ {2,3}) are excluded from the copy.
+- Verified: 0 stale defaults, 125 tables before/after, `foreign_key_check` empty,
+  `quick_check` ok, no `__rebuild` leftovers. Ledger:
+  `data/backups/ddl_default_rebuild.jsonl`.
+
+### 1,427,855 stored values across 18 columns → canonical
+`scripts/normalize_timestamps.py --apply`. Dry-run predicted 12 columns /
+346,045 rows ten minutes earlier; the rebuilt DEFAULTs had meanwhile let the
+concurrent `learn run` insert a few canonical rows into three previously
+100 %-space columns, which made them MIXED and pulled the whole column in.
+- Rewrites are instant-preserving: 1,400 sampled values across 7 columns parse
+  to the same datetime before and after.
+- The writer now commits in 5,000-row chunks instead of one long transaction;
+  its old `locking_mode=EXCLUSIVE` gate refused whenever *any* PID (even a
+  read-only `rag search`) held the file, and a single 1.4 M-row transaction
+  would have outlived the learning cycle's 60 s busy timeout.
+- Result: **0 mixed columns**; `quick_check` ok. Ledger:
+  `data/backups/timestamp_normalization.jsonl`.
+
+### Gate
+`test_live_schema_has_no_space_format_defaults` lost its `xfail(strict=True)`.
+`tests/test_timestamp_clock.py` = **28 passed, 0 xfailed**.
+
+### Collateral, repaired
+`lr_20261029T124047Z_1f85eb` failed step 11 `version_snapshot` with
+`VersionDriftError` — it hashed `word_usage` before the rewrite and re-hashed a
+different table afterwards. Steps 1–10 had committed and succeeded. A fresh
+snapshot `v2026.10.29.3` was recorded and verified green; the drift guard
+refused a baseline it could not re-verify, which is the intended behaviour.
+
+### Still open
+74 pure-space columns (~1.76 M rows: `articles`, `dictionary`, `syllable_data`,
+`translations`, `bible_verses`, `vocabulary`, …). Within a column they still
+sort correctly; they only mis-sort against canonical values in another column.
+Each flips to MIXED — and gets repaired by the normaliser — the first time a
+writer inserts into it, now that the DEFAULT is canonical. Wholesale rewrite is
+its own decision.
+
+## 2026-10-29 (Session — MCP transport interop pinned by tests)
+
+The streamable-HTTP transport's two client-critical branches had no coverage;
+they do now (`tests/test_mcp_api.py::TestTransportNegotiation`, 11 cases):
+
+- **`Accept` negotiation.** `Accept` naming `text/event-stream` — alone or
+  alongside `application/json`, as Claude's stack and the MCP Inspector send —
+  gets the single response wrapped as one `event: message` frame with
+  `Cache-Control: no-store`; a JSON-only client still gets bare JSON. Matched
+  case-insensitively now (`Text/Event-Stream`, RFC 9110 §8.3.1) — the earlier
+  literal compare silently fell through to JSON.
+- **Version refusal.** A version outside `SUPPORTED_PROTOCOL_VERSIONS`, declared
+  via `MCP-Protocol-Version` *or* `params._meta`, answers HTTP **400** with
+  `-32022` and `data.supported`; every supported version answers 200; inside a
+  batch the refusal stays in the 200, because a batch is JSON-RPC-level.
+- Notifications stay `202` with an empty body even when `Accept` is SSE.
+
+Live probes against `https://mcp.zolai.space/mcp` confirm the deployed surface
+matches: SSE framing with `cache-control: no-store`, `server/discover` with the
+four supported versions, `dictionary_lookup` returning corpus rows, `GET /mcp`
+answering `405` + `Allow: POST`, and `-32022` inside a 400.
+`tests/test_mcp_api.py` = **75 passed**; ruff clean on the changed files.
+
+### Single-source DB: the last scratch store is gone
+`scripts/kg/extract_zsp.py` and `extract_pipeline.py` opened
+`data/kg.db` and wrote `kg_node` / `kg_edge` — a schema that no migration in
+this repo creates, in a file that did not exist. Every run failed on the
+missing table. Both now persist through the new `scripts/kg/store.py`, which
+targets the canonical `config.paths.db` and the `kg_nodes` / `kg_edges` schema
+from `zolai.data.migrations`, with identity `(source, source_id)` so a relabelled
+entity updates instead of forking, `busy_timeout = 60s` (the learning cycle and
+RAG build share the file), and `foreign_keys = ON`. `build_kg.sh` no longer
+`cd`s into the nonexistent `website/zolai-project`.
+`tests/test_kg_store.py` (4 cases) pins: `connect()` opens the canonical file,
+no `kg.db` is created, node/edge upserts are idempotent, and an orphan edge is
+refused by the FK.
+
+### Suite triage — two real defects, not flakes
+1. **`zolai clean --apply` was dead on arrival.** `run_clean` did
+   `stamp = stamp()`, which makes ``stamp`` function-local at compile time, so
+   the earlier `stamp()` call raised `UnboundLocalError` before any row was
+   written. Renamed to ``batch_stamp`` in both the apply and the revert path
+   (`zolai/data/corpus_clean.py`). All 30 `test_corpus_clean.py` cases green.
+2. **The CORS module migrated the canonical corpus.** `test_cors_allowlist.py`
+   opened `create_app()` with no DB redirect, so the app's lifespan ran
+   `run_all_migrations` against `data/zolai.db` — 43 writes, caught by the
+   `no_canonical_db_writes` fence (15 telemetry-only errors). The fixture now
+   takes the shared `scratch_db`; 29/29 green.
+3. `test_dbfirst_compliance.py` allowlist gained `learning/core_training.py`
+   (gold-split reads for CRF training) and `learning/cycle.py` (same splits in
+   preflight + the per-run disagreement report artifact). Both are build/export
+   paths, not serving reads.
+
+`ruff check zolai/ tests/` passes.
+
+### Learning engine: SM-2 state moved to the learner
+`ProgressTracker.update_review` wrote `ease_factor` / `interval` /
+`repetitions` / `next_review` onto the shared `vocabulary` row — a corpus table
+with no user column — while `get_error_breakdown`, `get_adaptive_difficulty`
+and the learner-stats surface all read the empty `user_reviews` table. Three
+consequences, all fixed:
+- **Cross-learner overwrite.** Reviews now append to `user_reviews`
+  (`user_id`, `word`, `quality`, `reviewed_at`, `next_review`, SM-2 state) and
+  state is read back from that learner's latest row. Two learners no longer
+  share a schedule.
+- **Corpus pollution.** A review of an unknown word inserted a bare headword
+  row into `vocabulary`. Learner actions no longer write the corpus at all.
+- **Wrong schedule / zero stats.** `get_due_reviews` returned the newest 20
+  corpus words (same for every learner); it now returns *this* learner's cards
+  whose latest `next_review` has passed. `get_statistics` gained a `reviews`
+  block (total, words reviewed, passed, success rate, due now); `/learning/statistics`
+  takes `user_id`.
+- **Streak.** `update_review` now touches `user_streaks` (type `daily`, UTC
+  calendar days), and `get_streak` compares UTC dates instead of machine-local
+  time. A 10-day gap resets to 1; same-day reviews do not double-count.
+
+`tests/test_progress_srs.py` (8 cases) pins isolation, the SM-2 interval
+sequence, latest-row due logic, stats and streak behaviour.
+
+### Research sweep (2026-10-29): MCP, datasets, RAG, learning, agents
+Five parallel readers against the published specs and current practice; the
+critic's gaps were folded into the roadmap below. Implemented immediately (all
+S-effort, all spec-cited):
+
+1. **`resultType` on every result** (SEP-2322). `jsonrpc_result` now annotates
+   every success with `resultType: "complete"` and
+   `_meta["io.modelcontextprotocol/serverInfo"]`; a modern client treats a
+   result without the discriminator as malformed, and `serverInfo` per result
+   is what lets a proxy attribute a call when it aggregates servers.
+2. **`ttlMs` + `cacheScope` on `tools/list`** (caching). `public` only when the
+   allow-list equals the anonymous set; member/admin lists are `private` so a
+   shared cache cannot replay privileged tools to an anonymous caller. The
+   empty compatibility lists (`resources/list`, `prompts/list`, …) carry the
+   same hints with `public`.
+3. **`Origin` validation → 403** (streamable HTTP, *Security*). Unknown origins
+   and `Origin: null` are refused; requests with no Origin (ChatGPT, Claude
+   Desktop, CLIs) stay open. The allowlist is the existing CORS list, so a
+   browser that may read the API is exactly the set that may speak MCP.
+4. **Header/body validation → 400 + `-32020`** (*Server Validation*).
+   `MCP-Protocol-Version` vs `_meta` and `Mcp-Method`/`Mcp-Name` vs the body are
+   compared; a disagreement is `HeaderMismatch`. `Mcp-Name` is Base64-decoded
+   first (`=?base64?…?=`). Absent headers remain tolerated — handshake-era
+   clients never send them, and leniency cannot change which request runs.
+   Tested explicitly.
+5. **404 for an unknown method, modern era only.** A request that *declared*
+   `2026-07-28` gets the binding's `404` + `-32601`; era-ambiguous requests keep
+   `200`, because legacy clients read a 404 as "fall back to HTTP+SSE".
+6. **`X-Accel-Buffering: no`** on the SSE response so nginx (mcp.zolai.space)
+   does not buffer the frame.
+
+Next by value/cost (from the same sweep, not yet done):
+- **MCP:** cursor pagination (surface is < page size today), `outputSchema` per
+  tool, progress notifications for `kb_research`, per-tool rate buckets,
+  RFC 8707 audience binding, MCP Inspector/conformance gate in CI.
+- **Datasets:** row-level lineage, manifest-hash dataset versions, leakage-safe
+  splits, contamination gate between eval and training/RAG.
+- **RAG:** FTS5 BM25 over the same chunk text (the wiki FTS pass currently
+  returns insertion order at a constant 0.95), weighted RRF fusion, retrieval
+  golden set gating recall@10, multilingual embedder A/B.
+- **Learning:** FSRS-6 with 4-point ratings behind a versioned state blob,
+  append-only review log (the SM-2 move is the prerequisite), simulation gate
+  before switching the scheduler.
+- **Agents:** pass^k replay of the real tool surface, trace assertions, fault
+  injection, bounded retries + circuit breaker per tool.
+
+Tests: `test_mcp_api.py` **101 passed** (result conformance, caching,
+metadata validation, Origin, 404, SSE hardening); `test_mcp_protocol_dual_era.py`
+**25 passed**; the four MCP-adjacent modules (plus `test_api_version.py` and
+`test_cors_allowlist.py`) **165 passed**; ruff clean.
+
+### Learning scheduler defects (2026-10-30)
+
+Three silent-wrong behaviours in `ProgressTracker`, each pinned by a test:
+
+1. **Adaptive difficulty never adapted.** `get_adaptive_difficulty` hardcoded
+   `error_rate = 0.0` / `avg_ease = 2.5`, so every learner was scored
+   "expert". It now reads the last 50 `user_reviews` rows: error rate is the
+   share of quality < 3, and ease is the mean of each word's *latest* state
+   (a card reviewed ten times does not outweigh nine others).
+2. **CEFR "known" meant corpus frequency.** `get_cefr_level` counted
+   `vocabulary.frequency > 100`, i.e. a word was mastered before it was
+   studied. Known is now this learner's mature cards (latest review
+   `repetitions >= 3 AND interval >= 21`, the SM-2 21-day line), and the
+   ratio is clamped to 1.0.
+3. **Quiz `level` was ignored.** `study_quiz_generate` / `POST /learning/quiz`
+   accepted a CEFR level that `generate_quiz` dropped. It now selects a
+   frequency floor per level (A1 ≥ 1000 … B2 ≥ 1; C1/C2 leave the pool
+   unfiltered because corpus frequency cannot separate them). A level is a
+   ceiling, the value is case-insensitive, and an unknown value leaves the
+   pool unfiltered rather than applying a different rule.
+
+`tests/test_progress_srs.py` (11 cases) now covers all three, plus an
+in-process tool-surface check (quiz → `study_record_review` →
+`study_learner_stats`) on a throwaway DB.
+
+### RAG FTS5 ranking (2026-10-30)
+
+The wiki pass scored every FTS5 row a constant `0.95` and the final stable
+sort kept rowid order, so BM25 relevance never reached the caller. It now
+runs `ORDER BY bm25(wiki_content_fts)` and maps `-bm25` against the pass's
+best hit into `[0.75, 0.95]` — above the token-OR band (0.6), below exact
+matches (1.0). Rank-relative scaling is deliberate: raw BM25 magnitude
+depends on corpus size and is ~1e-6 on a three-row corpus, which a fixed
+transform would flatten. `tests/test_rag_fts_ranking.py` pins the ordering,
+the non-tie, and the band.
+
+### Knowledge promotion/consensus coverage restored (2026-10-30)
+
+`tests/test_knowledge_promotion.py` and `tests/test_knowledge_consensus.py`
+were blanket-skipped with "missing API exports" and contained no test bodies,
+so CI both ignored them and never exercised `zolai/knowledge/`. Both now run
+against a throwaway `DatabaseManager` schema:
+
+- **Promotion (13 cases).** Per-kind encoding (pos / morph_relation /
+  collocation, repeated `word:` collapse, `root:` prefixing), the resolved
+  evidence gate, evidence-derived confidence (tier weights, ≤ 2 dp — the
+  hypothesis' own `confidence`/`probability` is ignored), CANDIDATE vs
+  SUPPORTED, expression-unique idempotency including the legacy `pos` claim
+  type, `dry_run` (no claims, hypothesis rows byte-identical), pagination at
+  `PAGE_SIZE=2`, stats, and `parse_id_list` junk tolerance.
+- **Consensus (12 cases).** Selection is driven by `claim_evidence` links
+  (a populated `knowledge_claims.evidence_ids` JSON column does not qualify),
+  explicit ids are thresholded, adaptive word/grammar routes and thresholds,
+  low-confidence `threshold_met=False` with `consensus_confidence=0.0`,
+  unknown method rejection, byte-identical snapshots before/after (read-only),
+  determinism, and candidate construction dropping out-of-range tiers.
+
+Both modules were removed from the CI `--ignore` list (the comment claiming a
+"collection error" was stale — `pytest` reported "no tests ran", exit 5).
+Local run: **25 passed**.
+
+## 2026-10-30 (Session — OpenRouter default, env/DB sync, leak fixes)
+
+### OpenRouter is the default provider — free models only (operator decision)
+
+The runtime authority is the `ai_providers` **row**, not the YAML; the row was
+already active, so the change was made in three places and pinned by tests:
+
+- **Catalog** (`zolai/llm/catalog.py`): the `openrouter` row carries only ids
+  with OpenRouter's own `:free` marker, best-first, because a row with no
+  `selected_model` falls back to `models[0]`. Paid ids (`gpt-4o-mini`,
+  `claude-haiku-4.5`, `deepseek-chat`) and the stale `qwen3.8-27b:free`
+  removed. Adapter `zolai/llm/providers/openrouter.py` (`DEFAULT_MODEL`,
+  `FREE_MODELS`, `list_models()`) mirrors the same three ids; the YAML
+  (`zolai/core/llm_providers.yaml`, no Python consumer) follows for
+  consistency.
+- **`refresh-models`** (`zolai/api/ai_providers_router.py`): the remote
+  listing is filtered to `:free` **for openrouter only** before the row is
+  written — without this, one refresh silently reintroduces every paid id.
+  Other providers keep the full remote list (pinned explicitly).
+- **Live row**: `upsert_provider("openrouter", models=<3 free ids>)` then
+  `activate_provider("openrouter")` → `is_active=1`, `selected_model=''`.
+
+Probe evidence: `google/gemma-4-31b/26b:free` returned upstream 429 and were
+dropped from the list; the three retained models answered `OK` at
+`max_tokens=1024` (32 is consumed entirely by `reasoning` on these models,
+which surfaces as `content=None, finish_reason=length` — a probing artifact,
+not a failure). App-path check: `provider_settings.test_connection("openrouter")`
+→ `ok=True, status=200`, ~1.8 s, model `nvidia/nemotron-3-ultra-550b-a55b:free`.
+
+`tests/test_ai_providers_api.py` gained `test_openrouter_row_is_free_only`,
+`test_openrouter_provider_lists_free_models_only`, and
+`TestRefreshModelsFreeOnly` (2 cases, `httpx.get` monkeypatched, so no
+network). Module run: **133 passed, 2 skipped**.
+
+### Env sync — secrets stay on the host
+
+New `scripts/sync-env-to-server.sh` (dry-run by default): replaces the server
+`.env` wholesale from the local file via **ssh stdin** (never argv, so no
+`ps` exposure), upserts only the listed keys into the unit's `.env.dev`
+preserving every other line, backs up both (`*.bak-<ts>`), leaves everything
+mode 600, and verifies by key *name*, never value. `scripts/deploy.sh` now
+probes the **active** provider instead of a hardcoded `pcore-brain`, reading
+admin credentials from the repo `.env` only when the environment has none.
+
+### Secret leaks fixed in the working tree
+
+- `scripts/deploy/setup_vps.sh` embedded a real 3x-ui panel password in the
+  installer heredoc; it is now `PANEL_PASSWORD` (required, `:?`) with no
+  default.
+- `zolai/api/server.py.bak` — a tracked 35 KB backup — hardcoded
+  `API_KEY_ADMIN`/`API_KEY_DEV`. Deleted; `.gitignore` now ignores `*.bak`
+  and `*.bak-*` (plus `models/runs/`).
+- `.env.example` gained an `OPENROUTER_API_KEY` **placeholder**.
+- Exact-value scans of every tracked file are clean afterwards; the only
+  tracked env files are the two templates.
+
+Rotation of the leaked values and history purge are deliberately **not**
+done: the operator chose code-only fixes and will rotate manually (rotate
+first, purge after — never the reverse).
+
+### DB push to pcore-server + live verification (2026-10-30)
+
+`scripts/sync-db-to-server.sh` ran end to end: local `.backup` snapshot
+2,620,235,776 bytes → `integrity_check ok` → rsync (pushed byte count exact)
+→ service stopped → server backup `data/backups/zolai-2026-10-29_1941.db.gz`
+(591,671,991 bytes) → remote `integrity_check ok` → atomic replace +
+stale `-wal`/`-shm` dropped → `/health` 200.
+
+**One real incident.** At 19:50:15 UTC — between the stop (step 3) and the
+replace (step 6) — an external SSH session ran `sudo systemctl start
+zolai-core-dev`. The script's own `start` in step 6 was then a no-op, so the
+service was live on the *old* inode while the file on disk had already been
+replaced. The process was stopped by hand, and the service restarted on the
+new DB (`/health` 200 in 1 s). The journal shows only reads in that window
+(`GET /stats`, `POST /search`, `/metrics`) — no write endpoint was serving,
+so nothing was lost, but the failure mode is silent. Step 6 now **re-stops
+and verifies the unit is inactive before the `mv`, refusing to swap an
+in-use DB**; `scripts/README.md` documents the extra check.
+
+Live state after the push (admin API, credentials from the server `.env`,
+nothing printed): active provider `openrouter`, models the three `:free` ids,
+`selected_model=''`, `POST .../test` → `ok=true, http=200, 1293 ms`. Row
+counts match local: `vocabulary` 104,906 · `knowledge_claims` 172 ·
+`ai_providers` 7.
+
+Caveat: the server checkout is still at `998729d`; the catalog and
+`refresh-models` changes above are uncommitted, so a `refresh-models` call
+**on the server** would reintroduce paid ids until that code is deployed.
+Runtime resolution is unaffected — it reads the synced row.
+
+### Deployed to pcore-server (2026-10-30, `4242efb`)
+
+Three commits, pushed from a throwaway worktree because `origin/main` had
+moved seven commits ahead into files the local tree still has dirty
+(`server.py`, `auth_middleware.py`, `rbac.py`, `database.py`,
+`knowledge/retrieve.py`, two test modules, `scripts/data/pull.py`) — an
+in-place merge would have clobbered those lanes' work. Local `main` was then
+aligned with `origin/main` via `reset --mixed`; the working tree was not
+touched (176 dirty entries before and after).
+
+`scripts/deploy.sh` fast-forwarded the host to `4242efb`, restarted the unit
+and passed the health gate. Two notes from that run: the assistant probe
+reports `retrieval_only` **by design** (anonymous callers are pinned to the
+rule path so they cannot spend provider budget), and the provider probe
+skipped because the *running* copy of `deploy.sh` was the pre-merge one —
+the merged script does read `ADMIN_USERNAME`/`ADMIN_PASSWORD` from the repo
+`.env` (verified: 11- and 9-character values resolved, not printed).
+
+Live checks after the deploy:
+
+- deployed catalog and adapter both return the three `:free` ids only;
+- active row restored to the curated order (`selected_model=''`,
+  `is_active=1`) after a `refresh-models` call proved the guard: the remote
+  listing came back with 16 models, **all `:free`**;
+- provider probe returned **HTTP 429 `free-models-per-day-high-balance`**
+  (X-RateLimit-Remaining: 0, reset 2026-10-31 00:00 UTC) — the key's free
+  daily quota is spent, not a code failure; the same probe answered 1.29 s
+  earlier in the day. Re-run after the reset to get a green probe.
+
+### Learning supervisor + discovery honesty (2026-10-30)
+
+`zolai learn status` now reports RUNNING runs whose recorded activity stopped,
+and `zolai learn reap [--apply]` aborts them (default 6 h, `--stale-after` in
+hours). Liveness is the newest step start/finish, so a long run that keeps
+recording steps is never reaped; the abort is a guarded `status = 'RUNNING'`
+update, so a run that finished mid-scan keeps its real outcome, and step
+counts are recounted. The cycle writes a RUNNING placeholder when a step
+starts (`finished_at` NULL), so in-flight work is visible and keeps the run
+fresh.
+
+Discovery no longer swallows a failing capability: it logs the traceback,
+names it in `failed_capabilities`, stores a sanitized message, turns the
+cycle step WARN, and makes `zolai discovery build` exit non-zero. Rounding out
+the agent work from this pass: provider retry (jittered, Retry-After aware,
+scored inside the breaker), typed loop stop reasons plus an `AgentEvent`
+stream, orchestrator phase metrics, the split-leakage gate in CI, seeded
+group-aware dataset splits, an honest training manifest, provenance coverage
+for training/master/processed, RAG vector identity + foreign-model purge, and
+HF revision pinning.
+
+### Hierarchical corpus learning applied (2026-10-30)
+
+The learning engine used to read the Bible through one flat, hardcoded path.
+It now studies four sources at four grains — line → paragraph → document →
+corpus — and keeps the result in the canonical DB.
+
+- `zolai/learning/hierarchy.py` — `Line`/`DocUnit`/`SourceSpec` model of the
+  corpus; explicit paragraphs where the source has them (`<p>`/`<li>` blocks,
+  markdown blocks), TextTiling otherwise (TF-IDF cosine dips, adaptive mean +
+  0.5σ threshold, min 2 lines, >12-sentence blocks re-segmented); stable unit
+  ids and a per-source replace (delete → batched upsert), so a second run
+  converges to the same rows instead of appending.
+- Openers are learned with **corpus lift**, not raw line-start frequency:
+  `lift = (para/n_paragraphs) / (corpus/slots)`, required count ≥5, share ≥0.1 %
+  and lift ≥2×; only documents with ≥2 paragraphs contribute. They land in
+  `grammar_patterns` as `disc_p_<source>_<marker>` (`book='PARAGRAPH_OPENER'`)
+  with one `foundation_evidence` row each; stale rows are removed per source.
+- Wired as cycle step `bible_levels` (`--no-levels` opts out) and as the
+  standalone `zolai learn levels [--apply] [--sources …] [--max-docs N]`.
+- Applied to `data/zolai.db` after a verified backup: **618,678 layer rows**
+  (zomidaily 496,965 · wiki 74,864 · bible 39,044 · lessons 7,805; line
+  413,085 · paragraph 193,456 · document 12,133 · corpus 4) and **401 openers**
+  (bible 146 · wiki 141 · zomidaily 114), each with evidence; built == stored
+  per source, 0 openers without an evidence id.
+
+Defects found while applying it, all fixed with a regression test:
+
+- split chapter imports (`1CH 1:1–53` + `1CH 1:54`) emitted duplicate unit ids
+  — `_iter_bible` now groups a whole `(book, chapter)` first (624,254 built vs
+  622,145 stored → exact match);
+- 2,332 zomidaily articles embed `More: <link>`, making `more` the top "opener"
+  — site chrome is dropped;
+- accented letters `à ê ô ì ù` were outside the tokenizer's character class, so
+  every accented word was silently dropped — `shared/text.py` now covers
+  Latin-1 Supplement;
+- `TDM-2010` tokenised as `tdm-` and collided with `tdm` under the opener slug
+  (142 built, 141 stored) — leading/trailing `-'` are now stripped as
+  boundaries, and the writer keeps the stronger marker and reports `collisions`
+  if two markers still share a slug;
+- `_WORD_CH` included `-` against its own docstring, so `ding-in` matched as
+  one token and `"… ding-in …"` classified `sov` instead of `future`;
+- an empty generated wiki stub cleared the 10-token floor only because `---`
+  counted as a word (wiki 209 documents now).
+
+A second `--apply` on the canonical DB reproduced every count exactly
+(`patterns_written=0`, `patterns_updated=401`, `collisions=0`), and a dry-run
+printed the same 618,678 / 401 totals. One consequence to carry forward:
+`verify-version v2026.10.29.3` now reports drift on `grammar_patterns` and
+`foundation_evidence` — the two tables this pass rewrote. `learn levels` is a
+standalone additive command and snapshots nothing; the next
+`zolai learn run --apply` re-snapshots, matching the remedy used for `.1`.
+
+Tooling/docs updated: `docs/database/tables.md` § 2.16 + the grammar row,
+`docs/database/README.md`, `docs/reports/SOURCE_OF_TRUTH_MATRIX.md`,
+`docs/OPEN-ISSUES.md`. Open, owner-level: 34 news rows tagged `language='zolai'`
+are English/mixed, wiki `reference` prose guides produce template openers, and
+`canonical_paragraphs` is still unfed despite the paragraph layer now existing.
+
+The silent-swallow sweep also caught two live bugs in
+`zolai/learning/dictionary_manager.py`: attestation probed `zolai_text` and
+`vocab.word`, neither of which exists, so Bible/vocab attestation had been
+silently returning "not attested" forever (now `bible_verses.zo_tdb77` and
+`vocabulary.headword`, with unreadable probes reported in `errors`); and
+`add_entry` filled only the `_clean` mirrors while leaving the canonical
+`english`/`translations` columns NULL and logging the reverse mirror's row id
+in the audit trail. Writes now fill both mirrors, `update_entry` applies and
+audits only the fields it actually updates (`myanmar` was previously logged
+but never written), and the missing connection close in the attestation path
+is gone.

@@ -2,11 +2,94 @@
 Bible Pattern Learner — extracts real Zolai sentence patterns from Bible.
 
 This is the GROUND TRUTH. The AI must NEVER guess — only use attested patterns.
+
+Marker detection is word-boundary based (the first version used ``'hiam' in
+text`` / ``'ding' in text`` / ``'ci hi' in text``, so ``ci hi`` only matched
+lowercase text and markers matched inside unrelated words).  The public
+:func:`classify_clause` / :func:`extract_structure` functions are the single
+implementation; the learner methods and the hierarchy/discovery layers all
+delegate to them.
 """
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
+
+from ..shared.text import tokenize_words
+
+#: Letters (plus apostrophe) that may continue a Zolai word.  A marker must not
+#: be preceded or followed by one of these to count as a word; the hyphen is a
+#: delimiter, so ``ding-in`` and ``ci-in`` match while ``nadingin`` does not.
+_WORD_CH = r"a-z\u00e0-\u024f'"
+_SAK_SUFFIX_RE = re.compile(
+    rf"(?<![{_WORD_CH}])[{_WORD_CH}]{{2,}}sak(?![{_WORD_CH}])"
+)
+
+
+def _has_marker(text_lower: str, marker: str) -> bool:
+    """True when ``marker`` occurs as a whole word / hyphen-delimited clitic.
+
+    ``ding-in`` counts (hyphen is a boundary in Zolai); ``nadingin`` does not,
+    because the marker is fused into a longer word.
+    """
+    return (
+        re.search(
+            rf"(?<![{_WORD_CH}]){re.escape(marker)}(?![{_WORD_CH}])",
+            text_lower,
+        )
+        is not None
+    )
+
+
+def _has_phrase(text_lower: str, *tokens: str) -> bool:
+    """True when ``tokens`` occur consecutively as whole words or clitics."""
+    body = r"[\s-]+".join(re.escape(tok) for tok in tokens)
+    return (
+        re.search(
+            rf"(?<![{_WORD_CH}]){body}(?![{_WORD_CH}])",
+            text_lower,
+        )
+        is not None
+    )
+
+
+def classify_clause(text: str) -> str:
+    """Classify one Zolai clause into the pattern types grammar_patterns uses.
+
+    Precedence: question → negation → quotative → past_completed → future →
+    ergative → sov.  Word boundaries are enforced, so ``keimah`` is not a
+    negation and ``Nading`` is not future.
+    """
+    t = (text or "").lower()
+    if _has_marker(t, "hiam") or _has_marker(t, "diam"):
+        return "question"
+    if _has_marker(t, "lo") or _has_marker(t, "kei") or _has_phrase(t, "lo", "ding"):
+        return "negation"
+    if _has_phrase(t, "ci", "hi") or _has_marker(t, "ci-in"):
+        return "quotative"
+    if _SAK_SUFFIX_RE.search(t):
+        return "past_completed"
+    if _has_marker(t, "ding"):
+        return "future"
+    if _has_marker(t, "in"):
+        return "ergative"
+    return "sov"
+
+
+def extract_structure(text: str) -> str:
+    """Abstract surface structure, derived from the same markers as the clause.
+
+    Question form is checked before the ergative form: ``Pasian in … hiam?``
+    is a question whose structure should say so, not a plain declarative.
+    """
+    t = (text or "").lower()
+    if _has_phrase(t, "ci", "hi"):
+        return "Subject in, 'Speech,' ci hi"
+    if _has_marker(t, "hiam") or _has_marker(t, "diam"):
+        return "Subject Verb hiam?"
+    if _has_marker(t, "in") and _has_marker(t, "hi"):
+        return "Subject in Object Verb hi"
+    return "Subject Object Verb"
 
 
 @dataclass
@@ -57,8 +140,7 @@ class BiblePatternLearner:
             structure = self._extract_structure(zo)
             components = self._extract_components(zo)
 
-            words = re.findall(r'\b[a-zA-Z\'-]+\b', zo.lower())
-            self.word_freq.update(words)
+            self.word_freq.update(tokenize_words(zo))
 
             pattern = SentencePattern(
                 pattern_type=pattern_type,
@@ -73,32 +155,12 @@ class BiblePatternLearner:
             self.phrase_patterns[ptype] = len(plist)
 
     def _classify_pattern(self, text: str) -> str:
-        """Classify sentence pattern type."""
-        t = text.lower()
-        if 'hiam' in t:
-            return 'question'
-        if re.search(r'\b(lo|kei)\b', t):
-            return 'negation'
-        if 'ci hi' in text or 'ci-in' in text:
-            return 'quotative'
-        if re.search(r'-sak\b', text):
-            return 'past_completed'
-        if 'ding' in t:
-            return 'future'
-        if re.search(r'\bin\b', text):
-            return 'ergative'
-        return 'sov'
+        """Classify sentence pattern type (delegates to :func:`classify_clause`)."""
+        return classify_clause(text)
 
     def _extract_structure(self, text: str) -> str:
-        """Extract abstract sentence structure."""
-        if 'ci hi' in text:
-            return "Subject in, 'Speech,' ci hi"
-        elif 'in' in text and 'hi' in text:
-            return "Subject in Object Verb hi"
-        elif 'hiam' in text:
-            return "Subject Verb hiam?"
-        else:
-            return "Subject Object Verb"
+        """Extract abstract sentence structure (delegates to :func:`extract_structure`)."""
+        return extract_structure(text)
 
     def _extract_components(self, text: str) -> dict:
         """Extract grammatical components from sentence."""

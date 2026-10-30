@@ -18,6 +18,7 @@ from ..dictionary.manager import DictionaryManager
 from .discovery import discovery_app
 from .incremental import app as incremental_app
 from .knowledge import app as knowledge_app
+from .learn import app as learn_app
 from .mcp import mcp_app
 from .observation import observation_app
 from .profile import app as profile_app
@@ -45,6 +46,8 @@ app.add_typer(mcp_app, name="mcp")
 # Phase 3 §36 — discovery engine (build)
 app.add_typer(discovery_app, name="discovery")
 app.add_typer(knowledge_app, name="knowledge")
+# Local learning cycle — dry-run by default, JSON report per run
+app.add_typer(learn_app, name="learn")
 app.add_typer(incremental_app, name="incremental")
 app.add_typer(rag_app, name="rag")
 app.add_typer(publish_app, name="publish")

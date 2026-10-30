@@ -4,12 +4,19 @@ Master Prompt §36 Phase 2, capability 1 (tokenization).  Several modules
 historically re-declared the same word regex (attestation loaders, the POS
 tagger); this module is the one place that owns it.
 
-Semantics are pinned to the attestation loaders — ``tests/test_data_connections``
-asserts the exact word sets they produce, so :func:`tokenize_words` is
-byte-identical to the previous inline ``re.findall(..., text.lower())`` calls:
+Semantics follow the attestation loaders' original inline
+``re.findall(..., text.lower())`` calls, with one correction: the character
+class covers the whole Latin-1 Supplement (U+00C0–U+00FF) as well as Latin
+Extended-A/B.  The old class started at U+0100, so accented Zolai letters
+(``à``, ``ê``, ``ô``, ``ì``, ``ù``) were not word characters and every
+accented word was silently dropped — 17.5k Bible verses and 10k articles
+carry them.
 
-- pattern ``\\b[a-zA-Z\\u0100-\\u024F'-]+\\b`` (ASCII + Latin-1 supplement/ext,
-  apostrophe and hyphen inside the token);
+- pattern ``\\b[a-zA-Z\\u00C0-\\u024F'-]+\\b`` (apostrophe and hyphen inside
+  the token);
+- leading/trailing ``-'`` are stripped afterwards, because the character
+  class makes them word characters for regex purposes: ``TDM-2010`` split as
+  ``tdm-`` (the trailing hyphen is a boundary, not part of the word);
 - lowercase the input before matching;
 - no filtering here — callers keep their own ``len(word) >= 2`` policy.
 
@@ -26,7 +33,7 @@ __all__ = ["WORD_RE", "tokenize_words"]
 
 #: The canonical word pattern (regex source string — compiled on use by ``re``).
 #: Kept as the exact source string the attestation loaders matched inline.
-WORD_RE = r"\b[a-zA-Z\u0100-\u024F'-]+\b"
+WORD_RE = r"\b[a-zA-Z\u00c0-\u024f'-]+\b"
 
 _WORD_RE = re.compile(WORD_RE)
 
@@ -42,4 +49,5 @@ def tokenize_words(text: str) -> list[str]:
     """
     if not text:
         return []
-    return _WORD_RE.findall(text.lower())
+    tokens = (token.strip("-'") for token in _WORD_RE.findall(text.lower()))
+    return [token for token in tokens if token]
