@@ -41,7 +41,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
 
 from ..config import config
 
@@ -648,7 +648,8 @@ def add_eval_item(
         ).fetchone()[0]
         _upsert_set(conn, eval_set, int(total))
         conn.commit()
-        return int(cur.lastrowid)
+        # lastrowid is captured per cursor at execute() time; only the stub says `int | None`.
+        return cast(int, cur.lastrowid)
     except Exception:
         conn.rollback()
         raise
