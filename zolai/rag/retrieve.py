@@ -54,6 +54,25 @@ VECTOR_MIN_SCORE = 0.35
 _VECTOR_CACHE: dict[str, Any] | None = None
 _VECTOR_CACHE_KEY: tuple[Any, ...] | None = None
 
+#: One embedder per model name per process — see ``UnifiedRetriever._get_embedder``
+#: for why it cannot live on the instance. Cleared by tests that fake the model.
+_EMBEDDER_CACHE: dict[str, Any] = {}
+
+
+def invalidate_vector_cache() -> None:
+    """Drop the hydrated matrix so the next search re-reads ``knowledge_vectors``.
+
+    The key that guards that cache is ``(db_url, row_count, max_id)``; both
+    aggregates are index-only. It used to read ``MAX(imported_at)``, an unindexed
+    column, so answering "is the cache still good?" scanned 274k rows of embedding
+    text (~4 s on the deployment host) in front of every search — more than the
+    load it was avoiding. An in-place rebuild that leaves count and max id intact
+    is invisible to the key, which is what this call is for.
+    """
+    global _VECTOR_CACHE, _VECTOR_CACHE_KEY
+    _VECTOR_CACHE = None
+    _VECTOR_CACHE_KEY = None
+
 
 def _vector_search_enabled() -> bool:
     return os.environ.get("ZOLAI_VECTOR_SEARCH", "1").lower() not in {"0", "false", "no"}
@@ -163,7 +182,17 @@ class UnifiedRetriever:
 
         Network is touched only when nothing is cached yet, so a fresh machine
         still downloads the model instead of silently losing vector search.
+
+        The instance is process-level: ``get_retriever()`` builds a **new**
+        :class:`UnifiedRetriever` for every request, so keeping the model on
+        ``self`` reloaded torch and the weights (0.3–1.5 s measured) on each one.
+        Failures are not cached — a degraded request must be able to recover.
         """
+        model_name = "all-MiniLM-L6-v2"
+        cached = _EMBEDDER_CACHE.get(model_name)
+        if cached is not None:
+            self._embedder = cached
+            return cached
         if self._embedder is None:
             try:
                 from sentence_transformers import SentenceTransformer
@@ -171,13 +200,11 @@ class UnifiedRetriever:
                 log.warning("sentence-transformers not available; vector search disabled")
                 return None
             try:
-                self._embedder = SentenceTransformer(
-                    "all-MiniLM-L6-v2", local_files_only=True
-                )
+                self._embedder = SentenceTransformer(model_name, local_files_only=True)
             except OSError:
                 # Not cached: allow the one-time download.
                 try:
-                    self._embedder = SentenceTransformer("all-MiniLM-L6-v2")
+                    self._embedder = SentenceTransformer(model_name)
                 except Exception as exc:  # ImportError / OSError / guard raising
                     log.warning(
                         "sentence-transformers unavailable; vector search disabled: %s", exc
@@ -194,6 +221,8 @@ class UnifiedRetriever:
                 log.warning(
                     "cached sentence-transformer is unusable; vector search disabled: %s", exc
                 )
+        if self._embedder is not None:
+            _EMBEDDER_CACHE[model_name] = self._embedder
         return self._embedder
 
     # --- Word-centric retrieval (§20) ---
@@ -585,9 +614,10 @@ class UnifiedRetriever:
     def _load_vector_index(self) -> dict[str, Any] | None:
         """Load ``knowledge_vectors`` into a normalized float32 matrix, cached.
 
-        The cache key is ``(db_url, row_count, last_import)``, so a rebuild —
-        or a different database in the same process — is picked up on the next
-        call without reloading on every search.
+        The cache key is ``(db_url, row_count, max_id)``, so an append, a delete,
+        or a different database in the same process is picked up on the next call
+        without reloading on every search. A rebuild that reuses the same ids is
+        covered by :func:`invalidate_vector_cache`.
         """
         global _VECTOR_CACHE, _VECTOR_CACHE_KEY
 
@@ -595,7 +625,7 @@ class UnifiedRetriever:
 
         with self.engine.connect() as conn:
             key_row = conn.execute(
-                text("SELECT COUNT(*), MAX(imported_at) FROM knowledge_vectors")
+                text("SELECT COUNT(*), MAX(id) FROM knowledge_vectors")
             ).first()
             # The DB URL is part of the key: tests use several databases and a
             # count-only key would hand one process another database's matrix.

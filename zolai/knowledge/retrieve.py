@@ -43,8 +43,13 @@ class Index:
 
 
 #: Process-level cache: hydrating the full table costs ~1 min and ~380 MB.
-#: The key is ``(db_url, row_count, last_import)`` so a rebuild or a different
-#: database invalidates it.
+#: The key is ``(db_url, row_count, max_id)`` — both aggregates are index-only.
+#: It deliberately does **not** read ``imported_at``: that column is unindexed,
+#: so dating the index meant a full scan of 274k rows of embedding text (~4 s on
+#: the deployment host) on *every* retrieval — more than the hydration it was
+#: guarding, and the reason ``POST /knowledge/search`` served in 9–44 s. A
+#: rebuild that leaves the count and the max id intact is caught by
+#: :func:`invalidate_index_cache`, which the ingest path calls.
 _INDEX_CACHE: tuple[tuple[Any, ...], "Index"] | None = None
 
 
@@ -53,10 +58,23 @@ def _index_cache_key() -> tuple[Any, ...]:
 
     engine = get_engine()
     with engine.connect() as conn:
-        row = conn.execute(
-            sql_text("SELECT COUNT(*), MAX(imported_at) FROM knowledge_vectors")
-        ).first()
+        row = conn.execute(sql_text("SELECT COUNT(*), MAX(id) FROM knowledge_vectors")).first()
     return (str(engine.url), int(row[0]), row[1]) if row else ("", 0, None)
+
+
+def invalidate_index_cache() -> None:
+    """Drop the hydrated index so the next :func:`load_index` re-reads the table.
+
+    Call after any write that can leave ``COUNT(*)``/``MAX(id)`` unchanged —
+    an in-place rebuild, or a delete.
+    """
+    global _INDEX_CACHE
+    _INDEX_CACHE = None
+
+
+#: One embedder per model name per process: construction is 0.3–1.5 s and the
+#: weights are read-only, so there is nothing to gain from rebuilding it.
+_EMBEDDER_CACHE: dict[str, Any] = {}
 
 
 def _vector_table_exists() -> bool:
@@ -235,11 +253,16 @@ def retrieve(
     # on the deployment host, so read it from disk and skip the Hub revision
     # check — that check is what logged "You are sending unauthenticated
     # requests to the HF Hub" on every embed and burned the anonymous rate
-    # limit.  ``zolai/rag/retrieve.py`` loads the same model this way.
-    try:
-        model = SentenceTransformer(model_name, local_files_only=True)
-    except OSError:
-        model = SentenceTransformer(model_name)  # not cached: one-time download
+    # limit.  ``zolai/rag/retrieve.py`` loads the same model this way, and it
+    # also keeps one instance per process: loading torch + weights cost
+    # 0.3–1.5 s on top of every query here.
+    model = _EMBEDDER_CACHE.get(model_name)
+    if model is None:
+        try:
+            model = SentenceTransformer(model_name, local_files_only=True)
+        except OSError:
+            model = SentenceTransformer(model_name)  # not cached: one-time download
+        _EMBEDDER_CACHE[model_name] = model
 
     q = _embed_query(model, query)
     # cosine = dot product since vectors are normalized

@@ -170,6 +170,14 @@ def index_wiki(
 
     repo = KnowledgeVectorRepository(get_engine())
     repo.upsert_batch(all_rows, batch_id="wiki-ingest")
+    # Re-ingest keeps ids for rows that were already indexed, so the cache key
+    # can survive the rebuild unchanged while the vectors behind it differ.
+    # Both hydrated caches read the same table and must be dropped together.
+    from ..rag.retrieve import invalidate_vector_cache
+    from .retrieve import invalidate_index_cache
+
+    invalidate_index_cache()
+    invalidate_vector_cache()
     print(f"wg: total index rows = {len(all_rows)} (DB: knowledge_vectors)")
 
     # Export JSONL bundle for HuggingFace distribution (build artifact).

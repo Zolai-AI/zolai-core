@@ -1724,3 +1724,17 @@ now reports `db_path` and `vectors_by_source` alongside the count.
 
 Tests: 107 passed across incremental/chunking/contract/route/DB-source/
 canonical suites; ruff clean.
+
+### Retrieval cache stopped paying for its own key (2026-10-31, session)
+`POST /knowledge/search` was serving in 9–44 s on the deployment host. Both
+hydrated caches re-checked `COUNT(*), MAX(imported_at)` before *every* search,
+and `imported_at` is unindexed — a full scan of the 274k embedding rows
+(~4 s warm, ~15 s cold) just to answer "is the cache still good?", costing more
+than the hydration it guarded. The key is now `(db_url, COUNT(*), MAX(id))`
+(index-only). An in-place rebuild that keeps both aggregates intact is caught by
+`invalidate_index_cache()` / `invalidate_vector_cache()`, both called after
+`index_wiki` upserts. The MiniLM embedder is also process-cached now
+(`_EMBEDDER_CACHE`, keyed by model name): construction cost 0.3–1.5 s per query
+because `get_retriever()` builds a new `UnifiedRetriever` per request.
+Pinned by `tests/test_knowledge_index_cache.py`. Full suite after the change:
+**4,190 passed, 9 skipped, 1 xfailed** (27m16s); ruff clean.
