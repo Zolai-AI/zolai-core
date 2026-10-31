@@ -122,9 +122,13 @@ _PRE_B1A_NAMES: dict[str, list[str]] = {
 }
 
 _PRE_B1A_MCP_SHA256: dict[str, str] = {
-    "public": "8e113502f6d78aa475bf7f885164ebfa3d1dd3a513fca63a06f8518ab8571803",
-    "member": "363bf03d53146f818c1c4f5b0cc32bbbc9cd8cec46af5c1f3e3f976241be7f90",
-    "admin": "7f833b993bba0045aafbe5f747f615d266a2f5d2f0075dd57dd8db64925cec10",
+    # Re-frozen 2026-10-31: the schema for ``query``/``word``/``text``/``ref``
+    # now marks its single argument required (the handlers always rejected an
+    # empty call; the advertised schema used to say ``required: []``).  The
+    # tool *set* is unchanged, so the prefix test still pins name/order.
+    "public": "d3f39f5a3281de23540ffed9408cc3e8309f6e5d39e97d6d38040c31776b29e3",
+    "member": "0758c40af81ecf9b4e5e2e7bf602cc8f1050b1d303453d08d8bba8b4eb29ab89",
+    "admin": "a3dd3ab93baf1966755701b60c16cb88d4bab273ddd37614b63b1b23fbfddd4c",
 }
 
 #: The three tiers this batch is allowed to touch, and how.

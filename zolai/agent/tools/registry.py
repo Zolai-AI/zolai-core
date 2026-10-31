@@ -98,10 +98,11 @@ _PUB_QUERY = _obj(
             },
         },
     },
+    required=["query"],
 )
-_WORD = _obj({"word": {"type": "string", "minLength": 1}})
-_TEXT = _obj({"text": {"type": "string", "minLength": 1}})
-_REF = _obj({"ref": {"type": "string", "minLength": 1}})
+_WORD = _obj({"word": {"type": "string", "minLength": 1}}, required=["word"])
+_TEXT = _obj({"text": {"type": "string", "minLength": 1}}, required=["text"])
+_REF = _obj({"ref": {"type": "string", "minLength": 1}}, required=["ref"])
 #: Myanmar search takes a free-text query (Myanmar script) + a bounded limit.
 _MY_QUERY = _obj(
     {
