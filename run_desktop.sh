@@ -28,11 +28,16 @@ else
   cd "$SCRIPT_DIR"
   nohup python -m uvicorn zolai.api.server:app --host 0.0.0.0 --port 8000 > /tmp/zolai-api.log 2>&1 &
   echo "$!" > /tmp/zolai-api.pid
-  sleep 2
-  if curl -s http://localhost:8000/health >/dev/null 2>&1; then
+  # Startup loads the Bible and models; poll readiness, never sleep a fixed 2s.
+  ready=""
+  for _ in $(seq 1 30); do
+    if curl -s -m 2 http://localhost:8000/health >/dev/null 2>&1; then ready=1; break; fi
+    sleep 1
+  done
+  if [ -n "$ready" ]; then
     echo -e "  ${G}✅ API started (PID: $(cat /tmp/zolai-api.pid))${NC}"
   else
-    echo -e "  ${R}❌ API failed to start. Check: /tmp/zolai-api.log${NC}"
+    echo -e "  ${R}❌ API failed to start after 30s. Check: /tmp/zolai-api.log${NC}"
     exit 1
   fi
 fi
