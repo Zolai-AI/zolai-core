@@ -1738,3 +1738,9 @@ than the hydration it guarded. The key is now `(db_url, COUNT(*), MAX(id))`
 because `get_retriever()` builds a new `UnifiedRetriever` per request.
 Pinned by `tests/test_knowledge_index_cache.py`. Full suite after the change:
 **4,190 passed, 9 skipped, 1 xfailed** (27m16s); ruff clean.
+
+**Anonymous chat label:** `_retrieval_only(..., reason=...)` now separates
+`auth_required` (anonymous caller on a deployment that *has* a provider — the
+answer says "sign in to generate") from `no_provider` (nothing configured).
+`llm_allowed()` is evaluated once so the flag and the prose agree.
+`tests/test_assistant_api.py`: 26 passed.

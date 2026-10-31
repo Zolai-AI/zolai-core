@@ -189,8 +189,21 @@ def _content_tokens(text: str) -> list[str]:
     return out
 
 
-def _retrieval_only(message: str, allow: frozenset[str]) -> dict[str, Any]:
-    """Deterministic retrieval answer — zero sockets, honest labelling."""
+def _retrieval_only(
+    message: str,
+    allow: frozenset[str],
+    *,
+    reason: str = "no_provider",
+) -> dict[str, Any]:
+    """Deterministic retrieval answer — zero sockets, honest labelling.
+
+    ``reason`` names *why* generation did not run, because the two causes read
+    differently to the caller: ``"no_provider"`` is a deployment with no live
+    model, while ``"auth_required"`` is an anonymous request on a deployment
+    that has one. Collapsing both into "no active LLM provider" told an
+    anonymous visitor their server had no model when signing in would have
+    used the configured provider.
+    """
     started = time.monotonic()
     trace: list[dict[str, Any]] = []
 
@@ -226,14 +239,27 @@ def _retrieval_only(message: str, allow: frozenset[str]) -> dict[str, Any]:
 
     citations = citations_from_results(trace)
     if citations:
-        lines = [
-            f"Retrieval-only answer (no active LLM provider — honest fallback, "
-            f"{len(citations)} source(s)):"
-        ]
+        if reason == "auth_required":
+            header = (
+                "Retrieval-only answer (anonymous request — sign in to generate "
+                f"with the configured provider; {len(citations)} source(s)):"
+            )
+        else:
+            header = (
+                "Retrieval-only answer (no active LLM provider — honest fallback, "
+                f"{len(citations)} source(s)):"
+            )
+        lines = [header]
         for i, c in enumerate(citations[:5], 1):
             ref = f" {c['ref']}" if c.get("ref") else ""
             lines.append(f"[{i}] {c['source']}{ref}: {c['text'][:200]}")
         answer = "\n".join(lines)
+    elif reason == "auth_required":
+        answer = (
+            "Retrieval-only mode: I could not find supporting evidence in the "
+            "knowledge base for that question. Anonymous requests do not use "
+            "the configured provider — sign in to generate an answer."
+        )
     else:
         answer = (
             "Retrieval-only mode: I could not find supporting evidence in the "
@@ -343,8 +369,21 @@ def run_assistant(
     # Select role-specific system prompt
     system_prompt = ADMIN_ASSISTANT_PROMPT if admin else PUBLIC_ASSISTANT_PROMPT
 
-    if not allow_llm or not llm_allowed():
-        out = _retrieval_only(message, allow)
+    # Which reason to state matters: an anonymous caller on a deployment
+    # that HAS a provider must not be told there is none — signing in is
+    # the way through. ``llm_allowed`` is evaluated once so the flag and
+    # the prose cannot disagree.
+    provider_available = llm_allowed()
+    if not allow_llm or not provider_available:
+        out = _retrieval_only(
+            message,
+            allow,
+            reason=(
+                "auth_required"
+                if not allow_llm and provider_available
+                else "no_provider"
+            ),
+        )
         if not allow_llm:
             out["generation_requires_auth"] = True
         return _finish(
