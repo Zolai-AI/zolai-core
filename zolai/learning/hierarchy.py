@@ -36,7 +36,6 @@ import re
 import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from html import unescape
 from typing import Any, Iterator, Sequence
 
@@ -45,6 +44,7 @@ from sqlalchemy.engine import Engine
 
 from zolai.learning.bible_pattern_learner import classify_clause, extract_structure
 from zolai.learning.discovery.evidence import EVIDENCE_TIER_MAP, upsert_evidence_bulk
+from zolai.shared.clock import stamp
 from zolai.shared.text import tokenize_words
 
 # ── tunable constants (documented, not magic) ───────────────────────────────
@@ -1093,7 +1093,7 @@ def _write_layers(
     engine: Engine, rows: Sequence[LayerRow], sources: Sequence[str]
 ) -> dict[str, int]:
     """Replace the layer rows of the given sources in one transaction."""
-    now = datetime.now(timezone.utc).isoformat()
+    now = stamp()
     written = 0
     with engine.begin() as conn:
         conn.execute(
@@ -1424,4 +1424,3 @@ def learn_paragraph_texts(
     texts: dict[str, tuple[str, str, tuple[str, ...]]] = {}
     _build_source_layers(documents, idf, ("paragraph",), {}, texts=texts)
     return texts
-

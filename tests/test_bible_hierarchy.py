@@ -439,6 +439,90 @@ def test_rerun_is_idempotent(news_engine: Engine) -> None:
     assert second["per_source"]["zomidaily"]["patterns_updated"] >= 1
 
 
+def test_rerun_removes_stale_openers_but_preserves_baseline_patterns(news_engine: Engine) -> None:
+    """A changed source replaces only its learned opener namespace."""
+    learn_layers(news_engine, sources=["zomidaily"])
+    with news_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO grammar_patterns "
+                "(pattern_id, pattern, description, function, examples, frequency, book, status) "
+                "VALUES ('baseline-sov', 'subject object verb', 'baseline', "
+                "'syntax', '[]', 1, 'GRAMMAR', 'VERIFIED')"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE articles SET content = "
+                "replace(content, 'Tua ciangin', 'Topa in')"
+            )
+        )
+
+    result = learn_layers(news_engine, sources=["zomidaily"])
+
+    with news_engine.connect() as conn:
+        learned = {
+            row[0]
+            for row in conn.execute(
+                text(
+                    "SELECT pattern FROM grammar_patterns "
+                    "WHERE book = 'PARAGRAPH_OPENER' "
+                    "AND pattern_id LIKE 'disc_p_zomidaily_%'"
+                )
+            )
+        }
+        baseline = conn.execute(
+            text(
+                "SELECT pattern, book, status FROM grammar_patterns "
+                "WHERE pattern_id = 'baseline-sov'"
+            )
+        ).one()
+
+    assert result["per_source"]["zomidaily"]["patterns_written"] >= 1
+    assert "tua ciangin" not in learned
+    assert baseline == ("subject object verb", "GRAMMAR", "VERIFIED")
+
+
+def test_layer_rerun_is_deterministic_including_features(news_engine: Engine) -> None:
+    """Rerunning unchanged input changes no learned content."""
+    learn_layers(news_engine, sources=["zomidaily"])
+    with news_engine.connect() as conn:
+        first_layers = conn.execute(
+            text(
+                "SELECT source, level, unit_id, doc_id, group_id, ref, features, "
+                "confidence, source_hash FROM corpus_learning_layers "
+                "ORDER BY source, level, unit_id"
+            )
+        ).fetchall()
+        first_patterns = conn.execute(
+            text(
+                "SELECT pattern_id, pattern, frequency, components, evidence_ids "
+                "FROM grammar_patterns WHERE book = 'PARAGRAPH_OPENER' "
+                "ORDER BY pattern_id"
+            )
+        ).fetchall()
+
+    learn_layers(news_engine, sources=["zomidaily"])
+    with news_engine.connect() as conn:
+        second_layers = conn.execute(
+            text(
+                "SELECT source, level, unit_id, doc_id, group_id, ref, features, "
+                "confidence, source_hash FROM corpus_learning_layers "
+                "ORDER BY source, level, unit_id"
+            )
+        ).fetchall()
+        second_patterns = conn.execute(
+            text(
+                "SELECT pattern_id, pattern, frequency, components, evidence_ids "
+                "FROM grammar_patterns WHERE book = 'PARAGRAPH_OPENER' "
+                "ORDER BY pattern_id"
+            )
+        ).fetchall()
+
+    assert second_layers == first_layers
+    assert second_patterns == first_patterns
+
+
 def test_wiki_run_does_not_delete_other_source_openers(news_engine: Engine) -> None:
     """Stale cleanup is scoped to its own ``disc_p_<source>_*`` namespace."""
     learn_layers(news_engine, sources=["zomidaily"])

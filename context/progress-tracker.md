@@ -1,5 +1,15 @@
 # Progress Tracker
 
+# 2026-10-31 (Session — Hierarchical learning quality)
+
+- Hierarchy writes now use `zolai.shared.clock.stamp()` for canonical UTC
+  timestamps.
+- Added regressions for markdown/list furniture, English-leading paragraphs,
+  repeated single-document templates, deterministic reruns, stale opener
+  removal, and preservation of baseline grammar patterns.
+- Verified learning-cycle ordering and dry-run containment; focused hierarchy
+  and cycle tests pass, and Ruff is clean.
+
 ## 2026-09-13 (Session — Phase A: Foundation Analysis Module)
 
 ### Foundation Module Created

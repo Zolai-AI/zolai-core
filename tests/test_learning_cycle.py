@@ -115,6 +115,9 @@ def test_dry_run_writes_only_the_report(tmp_path: Path, engine) -> None:
     assert result["version_tag"] is None
 
     by_name = {step["name"]: step for step in result["steps"]}
+    assert [step["name"] for step in result["steps"]] == [
+        name for name, _ in cycle.STEPS
+    ]
     assert by_name["study"]["status"] == "OK"
     assert by_name["backup"]["status"] == "SKIPPED"
     assert by_name["knowledge_bible"]["status"] == "SKIPPED"
