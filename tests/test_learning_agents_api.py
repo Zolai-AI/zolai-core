@@ -140,6 +140,31 @@ class TestOrchestratorRoute:
         assert r.status_code == 200, r.text
         assert "is_valid" in r.json()["result"]
 
+    def test_extract_collocations_runs_its_own_method(self, client: TestClient) -> None:
+        """Regression: agents were handed only ``task.payload``.
+
+        Without the ``type`` key every agent fell back to its default method, so
+        ``extract_collocations`` answered with the ``build_vocabulary`` shape —
+        silently wrong rather than an error. One request per test: the cached
+        orchestrator's queues are bound to the first request's event loop.
+        """
+        r = client.post(f"{PREFIX}/run", json={"task": "extract_collocations", "limit": 5})
+        assert r.status_code == 200, r.text
+        result = r.json()["result"]
+        assert "top_collocations" in result
+        assert "entries" not in result
+
+    def test_correct_grammar_runs_its_own_method(self, client: TestClient) -> None:
+        """Same regression: ``correct_grammar`` used to answer as validation."""
+        r = client.post(
+            f"{PREFIX}/run",
+            json={"task": "correct_grammar", "source_text": "keitu paasian lo"},
+        )
+        assert r.status_code == 200, r.text
+        result = r.json()["result"]
+        assert "changes" in result
+        assert "violations_before" not in result
+
 
 class TestPublicReadSurface:
     """Learning reads and the orchestrator are public; tuning is not."""

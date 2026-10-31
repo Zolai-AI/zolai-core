@@ -134,8 +134,13 @@ class LearningOrchestrator:
 
             task.assigned_agent = agent.agent_id
 
-            # Execute task
-            result = await agent.process_task(task.payload)
+            # Execute task. The agent dispatches on ``task["type"]``; the payload
+            # alone does not carry it, so every agent used to fall back to its
+            # default method — ``extract_collocations`` silently ran
+            # ``build_vocabulary`` and ``correct_grammar`` ran validation. The
+            # type wins over a same-named payload key because it is what chose
+            # this agent in the first place.
+            result = await agent.process_task({**task.payload, "type": task.type})
             task.result = result
             task.status = "completed"
             task.completed_at = now()
