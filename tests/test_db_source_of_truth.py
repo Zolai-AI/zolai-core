@@ -109,6 +109,68 @@ def test_only_config_names_the_canonical_file() -> None:
     assert not hits, "only zolai/config.py may name the canonical database file:\n" + "\n".join(f"  {h}" for h in hits)
 
 
+def test_no_module_defaults_to_a_relative_sqlite_url() -> None:
+    """A relative SQLite URL resolves against the caller's CWD.
+
+    Two ``python -m`` entry points (``zolai.data.migrations`` and
+    ``zolai.data.export``) defaulted to ``sqlite:///zolai.db``, so running them
+    from any directory silently created and migrated a stray empty file instead
+    of touching the canonical store. The filename check above missed them
+    because the constant was the whole URL, not the bare filename.
+    """
+    hits = []
+    for path in _package_sources():
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        # An f-string's literal parts are Constant nodes too; only a complete
+        # string literal can be a URL on its own.
+        fstring_parts = {
+            id(part)
+            for node in ast.walk(tree)
+            if isinstance(node, ast.JoinedStr)
+            for part in ast.walk(node)
+            if isinstance(part, ast.Constant)
+        }
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in fstring_parts
+                and node.value.startswith("sqlite:///")
+                # A bare scheme prefix (``"sqlite:///"``) is used to parse or
+                # format a URL; only a literal with a relative path is a default.
+                and len(node.value) > len("sqlite:///")
+                and not node.value.startswith("sqlite:////")
+                and node.value != "sqlite:///:memory:"
+            ):
+                hits.append(f"  {path.relative_to(PACKAGE_ROOT.parent)}:{node.lineno} {node.value!r}")
+    assert not hits, (
+        "these modules default to a CWD-relative SQLite URL instead of "
+        "`config.paths.db`, so the file they read or write depends on where "
+        "they are launched from:\n" + "\n".join(hits)
+    )
+
+
+@pytest.mark.parametrize(
+    "module_name", ["zolai.data.migrations", "zolai.data.export"]
+)
+def test_module_cli_help_names_the_configured_database(
+    module_name: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--help`` shows the canonical path, and the parser default is that path."""
+    import importlib
+    import sys
+
+    module = importlib.import_module(module_name)
+    monkeypatch.setattr(sys, "argv", [module_name, "--help"])
+    # argparse wraps to the terminal width; keep the path on one line.
+    monkeypatch.setenv("COLUMNS", "200")
+
+    with pytest.raises(SystemExit) as exc:
+        module.main()
+    assert exc.value.code == 0
+    assert f"sqlite:///{config.paths.db}" in capsys.readouterr().out
+
+
 @pytest.fixture
 def seeded_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A tiny database at ``config.paths.db`` with the rows the loaders expect.

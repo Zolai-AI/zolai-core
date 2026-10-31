@@ -3,8 +3,9 @@
 Exports all tables back to JSONL files, verifying round-trip integrity.
 
 Usage:
+    from zolai.config import config
     from zolai.data.export import export_db_to_jsonl
-    export_db_to_jsonl("sqlite:///zolai.db", "./output")
+    export_db_to_jsonl(f"sqlite:///{config.paths.db}", "./output")
 """
 
 from __future__ import annotations
@@ -100,13 +101,17 @@ def main() -> None:
     """CLI entry point for export."""
     import argparse
 
+    from ..config import config
+
     parser = argparse.ArgumentParser(
         description="Export Zolai database to JSONL"
     )
     parser.add_argument(
         "--db",
-        default="sqlite:///zolai.db",
-        help="Database URL",
+        # A relative default resolves against the caller's CWD and exports a
+        # stray empty file instead of the canonical store.
+        default=f"sqlite:///{config.paths.db}",
+        help="Database URL (default: %(default)s)",
     )
     parser.add_argument(
         "--output-dir",

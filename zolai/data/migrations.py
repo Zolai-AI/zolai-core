@@ -2785,11 +2785,15 @@ def main() -> None:
     """CLI entry point."""
     import argparse
 
+    from ..config import config
+
     parser = argparse.ArgumentParser(description="Apply database constraints and indexes")
     parser.add_argument(
         "--db",
-        default="sqlite:///zolai.db",
-        help="Database URL",
+        # A relative default resolves against the caller's CWD and silently
+        # migrates a stray empty file instead of the canonical store.
+        default=f"sqlite:///{config.paths.db}",
+        help="Database URL (default: %(default)s)",
     )
     args = parser.parse_args()
 
