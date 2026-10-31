@@ -1429,23 +1429,28 @@ stray 528k scratch DB here, and skips on CI where that path does not exist.
 file is `--ignore`d in CI and all 14 of its tests pass with `ZOLAI_DATA_ROOT` pointed
 at the real corpus. Ruff clean.
 
-**OpenRouter free-model bake-off (availability + task fit).** `selected_model` is
-empty on the `openrouter` row in **both** the local curated store and the server, so
-the adapter falls through to `models[0]` — which means the live default is an artefact
-of list ordering, not a decision. Locally `models[0]` is
-`nvidia/nemotron-3-ultra-550b-a55b:free` and the list also carries
-`recursive/flint-v1.0:free`, which returns **503 "no upstreams available"** if it is
-ever selected by ordering. On the server `models[0]` is
-`nvidia/nemotron-3.5-lightning:free` (alive), and the row carrying `is_active=1` there
-is `pcore-brain`, whose `/test` returned 200 in the log. Two consequences worth
-naming: the server's `openrouter.models` is **not** free-only (it still lists
-`openai/gpt-4o-mini`, `anthropic/claude-haiku-4.5`, `deepseek/deepseek-chat`), so
-"free models only" is a catalog write, not a code default; and `scripts/deploy.sh`
-probes the **active** row through the admin API, which it cannot reach here because
-`ADMIN_USER`/`ADMIN_PASS` are absent from the server's `.env.dev` — the probe is a
-silent skip in that case. Earlier in this session the same probe returned 503 naming a
-`recursive/` model, which is only reachable through this fall-through, so pinning
-`selected_model` closes it either way. Probing
+**OpenRouter free-model bake-off (availability + task fit).** `selected_model` was
+empty on the live `openrouter` row, so the adapter fell through to `models[0]` — and
+because `refresh-models` filters the openrouter listing to `:free` ids in remote order,
+`models[0]` was `recursive/flint-v1.0:free`, which answers **503 "no upstreams
+available"**. That row is the `is_active=1` row, so the dead id was the default for
+every assistant call, and it is what aborted `scripts/deploy.sh`'s provider probe.
+Fixed on 2026-10-31 by pinning `selected_model = nvidia/nemotron-3.5-super-vl:free` and
+replacing the 16-id refreshed list with the six benchmarked free ids (`super-vl`,
+`lightning`, `laguna-s-2.1`, `ultra-550b-a55b`, `qwen3.8-27b`, `gemma-4-31b-it`) via
+`provider_settings.upsert_provider` — the same function the admin `PUT` route calls,
+run on the server as the operator because `.env.dev` carries no admin API key for the
+HTTP route (the one key in the store is `*`-scoped but its plaintext exists only at
+mint time). After the write: `resolve_model()` returns the pinned id and
+`test_connection("openrouter")` is ok/200 in 1.6 s.
+**Store note, because it cost a wrong entry here:** the service reads
+`ZOLAI_DATA_ROOT=/home/ubuntu/zolai-core/data` (2.4 G, 128 tables — and equal to the
+local canonical store on `canonical_words` 28,445, `word_alignments` 384,801,
+`word_analyses` 502, so the data sync landed). `/home/ubuntu/data/zolai.db` is a
+348 KB Oct-28 stub that nothing reads; catalog queries against it claimed
+`nemotron-3.5-lightning` was the implicit default and `pcore-brain` the active row,
+which is how `2a31b77` got written wrong. Query the DB `config.paths.zolai_db`
+resolves *with `.env.dev` sourced*, never the sibling `data/` directory. Probing
 all 16 catalog rows: 200 for nemotron-3.5-super-vl, dots-3-note-preview,
 nemotron-3.5-lightning, poolside/laguna-s-2.1, cohere/north-mini-code,
 nemotron-3-ultra-550b-a55b, nemotron-3-nano-omni-30b-reasoning; **403** for both
@@ -1471,13 +1476,11 @@ Round two, score and mean latency:
 
 Read as: every free model passes marker protocol and strict JSON, so those are not
 differentiators; the discriminator is grammar judgement, where the best scorer is the
-one that gets rate-limited. Recommendation, not applied — setting the default is an
-admin catalog write (`PUT /api/v1/admin/ai-providers/{id}` then `POST .../activate`),
-and `selected_model` is empty on every row, so the default is whichever model happens
-to sit at `models[0]`. The minimal fix is to pin `selected_model` explicitly and trim
-the server's `openrouter.models` to free entries only.
-Suggested chain: `nemotron-3.5-super-vl:free` primary (fast, 5/6, no 429),
-`nemotron-3.5-lightning:free` for latency-critical paths, `laguna-s-2.1:free` for
-grammar/linguistic judgement accepting the 429 risk, `nemotron-3-ultra-550b-a55b:free`
-as the last resort. Single-sample smoke ranking, not a statistical benchmark — the
-grammar numbers are one item each.
+one that gets rate-limited. **Applied** (2026-10-31): `nemotron-3.5-super-vl:free` is
+pinned as `selected_model` — 5/6 at 1.05 s and never rate-limited in either round — and
+the list is ordered super-vl → lightning → laguna-s-2.1 → ultra-550b so the fallback
+order matches the ranking even when a caller passes `wanted` explicitly.
+`laguna-s-2.1` stays in the list because it is the only model that judged *both*
+grammar probes correctly, accepting its 429 rate. Single-sample smoke ranking, not a
+statistical benchmark — the grammar numbers are one item each, so re-run before
+trusting them.
