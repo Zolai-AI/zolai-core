@@ -56,7 +56,11 @@ class FoundationRawCorpusRepository(BaseRepository):
     def get_unprocessed(self, limit: int = 0) -> list[dict[str, Any]]:
         """Get raw corpus entries that haven't been processed to staging yet."""
         with self._engine.connect() as conn:
-            query = self.table.select().order_by(self.table.c.id)
+            query = (
+                self.table.select()
+                .where(self.table.c.source_type != "user_submission")
+                .order_by(self.table.c.id)
+            )
             if limit > 0:
                 query = query.limit(limit)
             rows = conn.execute(query).fetchall()

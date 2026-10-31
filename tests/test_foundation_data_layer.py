@@ -526,6 +526,33 @@ class TestFoundationETLPipeline:
         finally:
             jsonl_path.unlink(missing_ok=True)
 
+    def test_build_staging_limit_excludes_user_submissions_before_batching(
+        self, etl, foundation_repos
+    ):
+        """User submissions must not consume the ETL batch limit."""
+        raw_repo = foundation_repos["foundation_raw_corpus"]
+        for index, source_type in enumerate(
+            ("user_submission", "bible_usx", "user_submission", "bible_usx"),
+            1,
+        ):
+            raw_repo.create(
+                {
+                    "text": f"raw-{index}",
+                    "source_type": source_type,
+                    "source_path": "test://foundation",
+                    "content_hash": f"hash-{index}",
+                    "payload": json.dumps({"text": f"Pasian pai hi {index}."}),
+                    "batch_id": 0,
+                }
+            )
+
+        stats = etl.build_staging_from_raw(limit=2)
+
+        assert stats.errors == 0
+        assert stats.records_staged >= 2
+        staged = foundation_repos["foundation_staging_sentences"].search_text("Pasian pai")
+        assert len(staged) == 2
+
     def test_promote_to_canonical_words(self, etl, tmp_db):
         """Test Stage 3: Promote words to canonical layer."""
         # First ingest and build staging
