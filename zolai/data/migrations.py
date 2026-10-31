@@ -232,6 +232,12 @@ FOUNDATION_CONSTRAINT_MIGRATIONS = [
         "ck_fev_confidence_range",
         "Confidence must be 0.0-1.0",
     ),
+    (
+        "foundation_evidence",
+        "UNIQUE(fact_type, fact_key, source, method)",
+        "ix_fev_fact_source_method_unique",
+        "Unique evidence identity for atomic upserts",
+    ),
     # foundation_verifications
     (
         "foundation_verifications",
@@ -749,7 +755,15 @@ def apply_foundation_constraints(mgr: DatabaseManager) -> dict[str, Any]:
                                 else:
                                     resolved.append(c)
                             cols = ", ".join(resolved)
-                        alter_sql = f"CREATE UNIQUE INDEX IF NOT EXISTS {constraint_name} ON {table_name}({cols})"
+                        where = (
+                            " WHERE method IS NOT NULL"
+                            if constraint_name == "ix_fev_fact_source_method_unique"
+                            else ""
+                        )
+                        alter_sql = (
+                            f"CREATE UNIQUE INDEX IF NOT EXISTS {constraint_name} "
+                            f"ON {table_name}({cols}){where}"
+                        )
                     elif constraint_sql.startswith("CHECK"):
                         # SQLite doesn't support ALTER TABLE ADD CHECK easily
                         # Would need to recreate table - skip for now

@@ -713,6 +713,16 @@ class FoundationEvidence(Base):
         Index("ix_fev_source", "source"),
         Index("ix_fev_provenance", "provenance_hash"),
         Index("ix_fev_document", "document_id"),
+        Index(
+            "ix_fev_fact_source_method_unique",
+            "fact_type",
+            "fact_key",
+            "source",
+            "method",
+            unique=True,
+            sqlite_where=sa_sql_text("method IS NOT NULL"),
+            postgresql_where=sa_sql_text("method IS NOT NULL"),
+        ),
     )
 
     def __repr__(self) -> str:

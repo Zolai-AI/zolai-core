@@ -1,7 +1,7 @@
 """Evidence writer for discovery (Phase 3 §36).
 
 Upserts into ``foundation_evidence`` by (fact_type, fact_key, source, method)
-composite key — idempotent, no new unique index required (plan deviation noted).
+composite key — idempotent and safe when concurrent writers race.
 Method + extractor are always set so downstream can trace provenance.
 
 Tiers per plan: Bible 1.0 (tier=1) → dict 0.9 (tier=2) → grammar 0.8 (tier=3)
@@ -67,41 +67,43 @@ def upsert_evidence(
         confidence = round(EVIDENCE_TIER_MAP.get(tier, (None, 0.0, ""))[1], 2)
 
     with engine.begin() as conn:
-        # Try to find existing
-        existing = conn.execute(
-            text(
-                "SELECT id FROM foundation_evidence "
-                "WHERE fact_type = :ft AND fact_key = :fk AND source = :src AND method = :mth"
-            ),
-            {"ft": fact_type, "fk": fact_key, "src": source, "mth": method},
-        ).first()
-
-        if existing:
-            evidence_id = existing[0]
-            # Update confidence, payload, extractor (other fields stable)
-            conn.execute(
+        if method is None:
+            # Legacy rows may have a NULL method. SQLite/PostgreSQL treat NULL
+            # values as distinct in a unique key, so retain compatibility for
+            # that old shape while all new writes use the atomic path below.
+            existing = conn.execute(
                 text(
-                    "UPDATE foundation_evidence SET "
-                    "confidence = :conf, payload = :payload, extractor = :ext, "
-                    "provenance_hash = :phash WHERE id = :id"
+                    "SELECT id FROM foundation_evidence "
+                    "WHERE fact_type = :ft AND fact_key = :fk AND source = :src AND method IS NULL"
                 ),
-                {
-                    "conf": confidence,
-                    "payload": json.dumps(payload, ensure_ascii=False),
-                    "ext": extractor,
-                    "phash": provenance_hash,
-                    "id": evidence_id,
-                },
-            )
-            return evidence_id
+                {"ft": fact_type, "fk": fact_key, "src": source},
+            ).first()
+            if existing:
+                conn.execute(
+                    text(
+                        "UPDATE foundation_evidence SET confidence = :conf, payload = :payload, "
+                        "extractor = :ext, provenance_hash = :phash WHERE id = :id"
+                    ),
+                    {
+                        "conf": confidence,
+                        "payload": json.dumps(payload, ensure_ascii=False),
+                        "ext": extractor,
+                        "phash": provenance_hash,
+                        "id": existing[0],
+                    },
+                )
+                return existing[0]
 
-        # Insert new
         result = conn.execute(
             text(
                 "INSERT INTO foundation_evidence "
                 "(fact_type, fact_key, tier, source, confidence, provenance_hash, "
                 "payload, method, extractor, created_at) "
-                "VALUES (:ft, :fk, :tier, :src, :conf, :phash, :payload, :mth, :ext, :now) RETURNING id"
+                "VALUES (:ft, :fk, :tier, :src, :conf, :phash, :payload, :mth, :ext, :now) "
+                "ON CONFLICT (fact_type, fact_key, source, method) WHERE method IS NOT NULL DO UPDATE SET "
+                "confidence = excluded.confidence, payload = excluded.payload, "
+                "extractor = excluded.extractor, provenance_hash = excluded.provenance_hash "
+                "RETURNING id"
             ),
             {
                 "ft": fact_type,
@@ -152,52 +154,50 @@ def upsert_evidence_bulk(
 
             provenance_hash = _compute_provenance_hash(payload)
 
-            existing = conn.execute(
-                text(
-                    "SELECT id FROM foundation_evidence "
-                    "WHERE fact_type = :ft AND fact_key = :fk AND source = :src AND method = :mth"
-                ),
-                {"ft": fact_type, "fk": fact_key, "src": source, "mth": method},
-            ).first()
+            params = {
+                "ft": fact_type,
+                "fk": fact_key,
+                "tier": tier,
+                "src": source,
+                "conf": confidence,
+                "phash": provenance_hash,
+                "payload": json.dumps(payload, ensure_ascii=False),
+                "mth": method,
+                "ext": extractor,
+                "now": now,
+            }
+            if method is None:
+                existing = conn.execute(
+                    text(
+                        "SELECT id FROM foundation_evidence "
+                        "WHERE fact_type = :ft AND fact_key = :fk AND source = :src AND method IS NULL"
+                    ),
+                    {"ft": fact_type, "fk": fact_key, "src": source},
+                ).first()
+                if existing:
+                    conn.execute(
+                        text(
+                            "UPDATE foundation_evidence SET confidence = :conf, payload = :payload, "
+                            "extractor = :ext, provenance_hash = :phash WHERE id = :id"
+                        ),
+                        {**params, "id": existing[0]},
+                    )
+                    ids.append(existing[0])
+                    continue
 
-            if existing:
-                evidence_id = existing[0]
-                conn.execute(
-                    text(
-                        "UPDATE foundation_evidence SET "
-                        "confidence = :conf, payload = :payload, extractor = :ext, "
-                        "provenance_hash = :phash WHERE id = :id"
-                    ),
-                    {
-                        "conf": confidence,
-                        "payload": json.dumps(payload, ensure_ascii=False),
-                        "ext": extractor,
-                        "phash": provenance_hash,
-                        "id": evidence_id,
-                    },
-                )
-                ids.append(evidence_id)
-            else:
-                result = conn.execute(
-                    text(
-                        "INSERT INTO foundation_evidence "
-                        "(fact_type, fact_key, tier, source, confidence, provenance_hash, "
-                        "payload, method, extractor, created_at) "
-                        "VALUES (:ft, :fk, :tier, :src, :conf, :phash, :payload, :mth, :ext, :now) RETURNING id"
-                    ),
-                    {
-                        "ft": fact_type,
-                        "fk": fact_key,
-                        "tier": tier,
-                        "src": source,
-                        "conf": confidence,
-                        "phash": provenance_hash,
-                        "payload": json.dumps(payload, ensure_ascii=False),
-                        "mth": method,
-                        "ext": extractor,
-                        "now": now,
-                    },
-                )
-                ids.append(result.scalar_one())
+            result = conn.execute(
+                text(
+                    "INSERT INTO foundation_evidence "
+                    "(fact_type, fact_key, tier, source, confidence, provenance_hash, "
+                    "payload, method, extractor, created_at) "
+                    "VALUES (:ft, :fk, :tier, :src, :conf, :phash, :payload, :mth, :ext, :now) "
+                    "ON CONFLICT (fact_type, fact_key, source, method) WHERE method IS NOT NULL DO UPDATE SET "
+                    "confidence = excluded.confidence, payload = excluded.payload, "
+                    "extractor = excluded.extractor, provenance_hash = excluded.provenance_hash "
+                    "RETURNING id"
+                ),
+                params,
+            )
+            ids.append(result.scalar_one())
 
     return ids

@@ -321,7 +321,7 @@ class TestFoundationConstraintIndexCounts:
     def test_constraint_migration_count(self):
         """Test that FOUNDATION_CONSTRAINT_MIGRATIONS has expected count."""
         # Foundation constraint migrations (keep in sync with migrations.py)
-        assert len(FOUNDATION_CONSTRAINT_MIGRATIONS) == 34
+        assert len(FOUNDATION_CONSTRAINT_MIGRATIONS) == 35
 
     def test_index_migration_count(self):
         """Test that FOUNDATION_PERFORMANCE_INDEXES has expected count."""
