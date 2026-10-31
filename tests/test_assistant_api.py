@@ -194,6 +194,38 @@ class TestPublicChatGenerationGate:
         assert body["retrieval_only"] is True
         assert body["generation_requires_auth"] is True
 
+    def test_anonymous_answer_names_auth_not_a_missing_provider(
+        self, client, data_db, auth_db, monkeypatch
+    ) -> None:
+        # A configured deployment reached anonymously must not be described as
+        # having no provider: the whole gate is that signing in would use it.
+        from zolai.api import assistant_router as ar
+
+        monkeypatch.setenv("ZOLAI_API_AUTH", "warn")
+        monkeypatch.setattr(ar, "llm_allowed", lambda: True)
+        monkeypatch.setenv("ZOLAI_ENGINE_MODE", "hybrid")
+
+        resp = client.post("/api/v1/assistant/chat", json={"message": "pasian"})
+        body = resp.json()
+        assert body["retrieval_only"] is True
+        assert body["generation_requires_auth"] is True
+        assert "sign in" in body["answer"].lower()
+        assert "no active llm provider" not in body["answer"].lower()
+
+    def test_no_provider_answer_keeps_the_provider_cause(
+        self, client, data_db, auth_db, monkeypatch
+    ) -> None:
+        from zolai.api import assistant_router as ar
+
+        monkeypatch.setenv("ZOLAI_API_AUTH", "warn")
+        monkeypatch.setattr(ar, "llm_allowed", lambda: False)
+
+        resp = client.post("/api/v1/assistant/chat", json={"message": "pasian"})
+        body = resp.json()
+        assert "no active llm provider" in body["answer"].lower()
+        # Signing in would not help here, so the copy must not send them to do it.
+        assert "sign in" not in body["answer"].lower()
+
     def test_resolved_credential_reaches_the_provider_path(
         self, client, data_db, auth_db, monkeypatch, member_key
     ) -> None:
