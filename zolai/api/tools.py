@@ -58,5 +58,4 @@ def verify_grammar(payload: GrammarQuery):
     else:
         return GrammarResponse(is_valid=False, feedback="; ".join(feedback), suggestions=suggestions)
 
-
 app.include_router(prediction_router)

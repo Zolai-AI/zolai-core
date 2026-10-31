@@ -524,7 +524,7 @@ async def oauth_authorize_css() -> Response:
 
 
 @router.get("/oauth/authorize")
-async def oauth_authorize_get(
+def oauth_authorize_get(
     request: Request,
     response_type: str | None = None,
     client_id: str | None = None,
