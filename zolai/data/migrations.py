@@ -14,7 +14,6 @@ from .database import DatabaseManager
 from .models import Base
 from .pos_normalize import normalize_legacy_pos
 
-
 USER_TEXT_SUBMISSIONS_DDL = """
 CREATE TABLE IF NOT EXISTS foundation_user_submissions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
