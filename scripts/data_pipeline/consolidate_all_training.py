@@ -47,7 +47,7 @@ def consolidate_all():
         count = 0
         
         with open(filepath, 'r') as f:
-            for line in f:
+            for line_no, line in enumerate(f, start=1):
                 try:
                     obj = json.loads(line)
                     text = convert_to_text_format(obj)
@@ -66,6 +66,7 @@ def consolidate_all():
                     record = {
                         'text': text,
                         'source_file': source,
+                        'source_line': line_no,
                     }
                     
                     # Preserve useful metadata

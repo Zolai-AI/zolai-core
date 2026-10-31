@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
+import json
+import sys
+from pathlib import Path
+
 from zolai.trainer.dataset import _group_key, _split_by_group
+from zolai.trainer.manifest import content_version
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts" / "training"))
+
+from create_training_splits import main as create_splits  # noqa: E402
 
 
 def _pairs(n: int) -> list[dict]:
@@ -65,3 +75,78 @@ class TestSplitByGroup:
         assert train and val and test
         huge_splits = sum("reference:HUGE" in _keys(part) for part in (train, val, test))
         assert huge_splits == 1
+
+
+class TestContentVersion:
+    """The manifest version is a hash of content, not of regeneration time."""
+
+    def test_same_content_same_version_regardless_of_order(self) -> None:
+        files = {
+            "train": {"exists": True, "sha256": "aa", "bytes": 3},
+            "test": {"exists": True, "sha256": "bb", "bytes": 5},
+        }
+        reversed_files = dict(reversed(list(files.items())))
+        assert content_version(files) == content_version(reversed_files)
+
+    def test_changed_bytes_change_the_version(self) -> None:
+        before = {"train": {"exists": True, "sha256": "aa", "bytes": 3}}
+        after = {"train": {"exists": True, "sha256": "ab", "bytes": 3}}
+        assert content_version(before) != content_version(after)
+
+    def test_missing_file_is_part_of_the_identity(self) -> None:
+        present = {"train": {"exists": True, "sha256": "aa", "bytes": 3},
+                   "test": {"exists": True, "sha256": "bb", "bytes": 5}}
+        absent = {"train": {"exists": True, "sha256": "aa", "bytes": 3},
+                  "test": {"exists": False}}
+        assert content_version(present) != content_version(absent)
+
+
+class TestCreateSplitsCli:
+    """The legacy split script now uses the group splitter and its output is
+    directly accepted by the leakage gate."""
+
+    def _write_input(self, path: Path, n: int) -> list[str]:
+        refs = []
+        with open(path, "w", encoding="utf-8") as f:
+            for i in range(n):
+                ref = f"GEN 1:{i + 1}"
+                refs.append(ref)
+                for direction, text in (("en-zo", f"zo {i}"), ("zo-en", f"en {i}")):
+                    f.write(json.dumps({"reference": ref, "text": text,
+                                        "direction": direction}) + "\n")
+        return refs
+
+    def test_paired_rows_stay_in_one_split(self, tmp_path: Path) -> None:
+        src = tmp_path / "input.jsonl"
+        self._write_input(src, 100)
+        out = tmp_path / "out"
+        assert create_splits(["--input", str(src), "--out-dir", str(out), "--seed", "42"]) == 0
+
+        by_ref: dict[str, set[str]] = {}
+        for name in ("train", "val", "test"):
+            with open(out / f"llm_{name}.jsonl", encoding="utf-8") as f:
+                for line in f:
+                    row = json.loads(line)
+                    assert row["split"] == name
+                    by_ref.setdefault(row["reference"], set()).add(name)
+        assert by_ref and all(len(splits) == 1 for splits in by_ref.values())
+
+    def test_output_passes_the_leakage_gate(self, tmp_path: Path) -> None:
+        from zolai.trainer.leakage import check_leakage
+
+        src = tmp_path / "input.jsonl"
+        self._write_input(src, 60)
+        out = tmp_path / "out"
+        assert create_splits(["--input", str(src), "--out-dir", str(out)]) == 0
+        report = check_leakage({name: out / f"llm_{name}.jsonl"
+                                for name in ("train", "val", "test")})
+        assert report["ok"] is True
+
+    def test_missing_input_exits_2(self, tmp_path: Path) -> None:
+        assert create_splits(["--input", str(tmp_path / "nope.jsonl"),
+                              "--out-dir", str(tmp_path / "out")]) == 2
+
+    def test_malformed_input_exits_2(self, tmp_path: Path) -> None:
+        bad = tmp_path / "bad.jsonl"
+        bad.write_text("{not json}\n", encoding="utf-8")
+        assert create_splits(["--input", str(bad), "--out-dir", str(tmp_path / "out")]) == 2

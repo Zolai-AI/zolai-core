@@ -10,11 +10,17 @@ fabricated ``PASSED``.
 """
 import hashlib
 import json
+import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-DATA = Path(__file__).resolve().parents[2] / "data"
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from zolai.trainer.manifest import content_version  # noqa: E402
+
+DATA = ROOT / "data"
 TRAIN_FILE = DATA / "training/master_train_complete.jsonl"
 LOG = DATA / "training/prepare_training.log"
 
@@ -91,8 +97,9 @@ try:
             elif "zolai" in rec:
                 stats["format_types"]["parallel"] += 1
 
-            # Source
-            source = rec.get("source", "unknown")
+            # Source (consolidation writes ``source_file`` + ``source_line`` so a
+            # row can be traced back; legacy rows carry ``source``).
+            source = rec.get("source") or rec.get("source_file") or "unknown"
             stats["sources"][source] += 1
 
             # Sample
@@ -159,6 +166,10 @@ manifest = {
         "Recommended learning rate: 2e-5 to 5e-5",
     ]
 }
+
+# Content-addressed version: stable across regenerations of unchanged data,
+# different as soon as a split's bytes change or a split disappears.
+manifest["dataset_version"] = content_version(manifest["files"])
 
 # Quality is derived, never asserted: a split that is absent or empty makes the
 # dataset not-ready and fails the run.

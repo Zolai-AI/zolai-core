@@ -1344,3 +1344,28 @@ rows kept, zero English openers). Docs updated: `docs/database/tables.md`
 § 2.16 + the grammar/evidence rows, `docs/database/README.md`,
 `docs/reports/SOURCE_OF_TRUTH_MATRIX.md`, `docs/OPEN-ISSUES.md` (the template
 opener item is closed; the English-tagged-row item remains an owner decision).
+
+## 2026-10-31 (Session — dataset splits are group-aware; manifest has a content version)
+
+The leakage gate could fail on the pipeline's own output. `create_training_splits.py`
+shuffled rows, so the two directions of one verse (`en-zo` / `zo-en`) could land
+in train and test; the Python builder already split whole groups, but the script
+that writes `llm_{train,val,test}.jsonl` did not.
+
+- `scripts/training/create_training_splits.py` now calls `_split_by_group` with
+  `--seed` (default 42) and 80/10/10 ratios. It anchors paths at the repo root,
+  accepts `--input` / `--out-dir`, exits 2 on a missing or unparsable input, and
+  writes `source_file`-independent rows unchanged apart from the `split` field.
+  Output passes `check_split_leakage.py`, including paired-direction rows.
+- `zolai/trainer/manifest.py` — `content_version(files)` hashes the per-split
+  sha256/bytes (missing splits included) so a manifest has a stable
+  **dataset_version** that changes only when content changes.
+  `prepare_for_training.py` records it; its `top_sources` now falls back to
+  `source_file`, which is what consolidation writes.
+- `consolidate_all_training.py` records `source_line` next to `source_file`, so
+  a consolidated row can be traced to the exact input line.
+
+Tests: `tests/test_training_splits.py` grew to 15 — the split CLI keeps both
+directions in one split, its output passes the leakage gate, and missing or
+malformed input exits 2; `content_version` is order-independent and changes on
+bytes, on missing files. `test_split_leakage.py` unchanged (11). Ruff clean.

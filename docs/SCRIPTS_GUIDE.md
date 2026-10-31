@@ -92,7 +92,8 @@ These scripts handle model training and data preparation.
 | Script | Purpose | Usage |
 |--------|---------|-------|
 | `prepare_train.py` | Prepare training data | `python scripts/training/prepare_train.py` |
-| `create_training_splits.py` | Create train/val/test splits | `python scripts/training/create_training_splits.py` |
+| `create_training_splits.py` | Group-aware train/val/test splits (seeded; paired rows never straddle) | `python scripts/training/create_training_splits.py` |
+| `check_split_leakage.py` | Fail if a row appears in two splits or an eval fixture is in train | `python scripts/training/check_split_leakage.py` |
 | `split_parallel_dataset.py` | Split parallel dataset | `python scripts/training/split_parallel_dataset.py` |
 | `convert_training.py` | Convert training format | `python scripts/training/convert_training.py` |
 | `build_tedim_train_dataset.py` | Build Tedim training dataset | `python scripts/training/build_tedim_train_dataset.py` |
