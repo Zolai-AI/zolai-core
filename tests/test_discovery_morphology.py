@@ -7,14 +7,16 @@ every suite run (the ``no_canonical_db_writes`` fence now fails it).
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Engine
 
 from zolai.data.database import DatabaseManager
+from zolai.knowledge.promotion import promote_hypotheses_to_claims
 from zolai.learning.discovery.morphology import MorphologyDiscovery
 
 
@@ -98,9 +100,23 @@ def test_morphology_hypotheses_written_have_evidence(db_engine: Engine) -> None:
         assert row.subject.startswith("word:")
         assert row.predicate.startswith("morph:")
         assert row.evidence_ids is not None
+        evidence_ids = json.loads(row.evidence_ids)
+        assert evidence_ids
+        with db_engine.connect() as conn:
+            resolved = conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM foundation_evidence "
+                    "WHERE id IN :ids"
+                ).bindparams(bindparam("ids", expanding=True)),
+                {"ids": evidence_ids},
+            ).scalar_one()
+        assert resolved == len(evidence_ids)
         assert row.status in ("OBSERVED", "CANDIDATE")
         assert row.confidence is not None
         assert 0.0 <= float(row.confidence) <= 1.0
+
+    summary = promote_hypotheses_to_claims(db_engine, kinds=["morph_relation"])
+    assert summary.claims_created > 0
 
 
 def test_morphology_confidence_is_two_dp(db_engine: Engine) -> None:

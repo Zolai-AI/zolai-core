@@ -431,12 +431,16 @@ def build_pos_hypotheses(
 
         status = require_discovery_status(_decide_pos_status(sources_used)).value
 
+        evidence_ids: list[int] = []
+        if not dry_run:
+            evidence_ids = upsert_evidence_bulk(engine, evidence_rows)
+
         hypo = POSHypothesis(
             word=word,
             pos=best_upos,
             confidence=confidence,
             status=status,
-            evidence_ids=[],  # Will be filled by evidence upsert but we don't have IDs back easily
+            evidence_ids=evidence_ids,
             extras=extras,
         )
 
@@ -444,7 +448,6 @@ def build_pos_hypotheses(
             # Still distinguish a new claim from a refresh — read-only.
             created = repo.existing_id(hypo.model_dump()) is None
         else:
-            upsert_evidence_bulk(engine, evidence_rows)
             _, created = repo.upsert(hypo.model_dump())
 
         hypotheses_written += 1
@@ -473,4 +476,3 @@ class POSDiscovery:
     def run(self, conn=None):
         from .pos import build_pos_hypotheses
         return build_pos_hypotheses(self.engine, limit=self.limit)
-

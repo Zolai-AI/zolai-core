@@ -206,10 +206,11 @@ def build_morphology_hypotheses(
         if not relation_entries:
             continue
 
+        evidence_ids: list[int] = []
         if not dry_run:
-            upsert_evidence_bulk(engine, evidence_rows)
+            evidence_ids = upsert_evidence_bulk(engine, evidence_rows)
 
-        for relation_type, root, function, tier in relation_entries:
+        for index, (relation_type, root, function, tier) in enumerate(relation_entries):
             # Determine status
             status = "OBSERVED" if tier == 2 else "CANDIDATE"  # DICTIONARY tier = OBSERVED, heuristic = CANDIDATE
 
@@ -227,7 +228,11 @@ def build_morphology_hypotheses(
                 function=function,
                 confidence=confidence,
                 status=status,
-                evidence_ids=[],
+                evidence_ids=(
+                    [evidence_ids[index]]
+                    if index < len(evidence_ids)
+                    else []
+                ),
                 extras={"analysis_tier": tier, "is_valid": analysis.is_valid},
             )
 
@@ -259,4 +264,3 @@ class MorphologyDiscovery:
     def run(self, conn=None):
         from .morphology import build_morphology_hypotheses
         return build_morphology_hypotheses(self.engine, limit=self.limit)
-

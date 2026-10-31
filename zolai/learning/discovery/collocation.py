@@ -178,6 +178,10 @@ def build_collocation_hypotheses(
 
         confidence = EVIDENCE_TIER_MAP[4][1]  # 0.7
 
+        evidence_ids: list[int] = []
+        if not dry_run:
+            evidence_ids = upsert_evidence_bulk(engine, evidence_rows)
+
         hypo = CollocationHypothesis(
             word1=word1,
             word2=word2,
@@ -186,14 +190,13 @@ def build_collocation_hypotheses(
             window=window,
             confidence=confidence,
             status=status,
-            evidence_ids=[],
+            evidence_ids=evidence_ids,
             extras={"source": "corpus", "promotion_policy": "R8"},
         )
 
         if dry_run:
             created = repo.existing_id(hypo.model_dump()) is None
         else:
-            upsert_evidence_bulk(engine, evidence_rows)
             _, created = repo.upsert(hypo.model_dump())
 
         collocations_written += 1
@@ -218,4 +221,3 @@ class CollocationDiscovery:
     def run(self, conn=None):
         from .collocation import build_collocation_hypotheses
         return build_collocation_hypotheses(self.engine, limit=self.limit)
-
