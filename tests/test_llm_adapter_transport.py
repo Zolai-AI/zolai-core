@@ -172,6 +172,9 @@ class TestCallObservability:
             adapter_mod.chat(row, "test-model", [{"role": "user", "content": sentinel_prompt}])
         # The key *was* sent on the wire — that is its job …
         assert rec.calls[0]["headers"]["Authorization"] == f"Bearer {sentinel_key}"
+        assert sentinel_key not in "\n".join(
+            r.getMessage() for r in caplog.records if r.name == "zolai.llm.adapter"
+        )
         # … and neither it, the prompt nor the completion reached the log.
         text = "\n".join(r.getMessage() for r in caplog.records if r.name == "zolai.llm.adapter")
         assert sentinel_key not in text

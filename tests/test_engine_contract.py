@@ -653,6 +653,19 @@ class TestEngineMode:
         assert result["fallback_used"] is True
         assert attempts == [], f"rule mode attempted network: {attempts}"
 
+    @pytest.mark.parametrize(
+        "env_var", ["ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "GROQ_API_KEY"]
+    )
+    def test_supported_provider_key_enables_ai_mode(
+        self, monkeypatch: pytest.MonkeyPatch, env_var: str
+    ) -> None:
+        monkeypatch.setenv(ENGINE_MODE_ENV, "ai")
+        monkeypatch.setenv(env_var, "provider-key")
+
+        assert ai_key_present() is True
+        assert resolve_engine_path() == "ai"
+        assert llm_allowed() is True
+
     # -- ai mode without a key: graceful degradation, never 500 -------------
 
     def test_ai_mode_without_key_degrades_to_rule(self, monkeypatch: pytest.MonkeyPatch) -> None:

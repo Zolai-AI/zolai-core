@@ -262,6 +262,14 @@ def resolve_api_key(row: dict[str, Any]) -> str:
     return read_catalog_env_fallback(entry)
 
 
+def _auth_headers(api_key: str) -> dict[str, str]:
+    """Build wire headers without exposing the resolved key to observability."""
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
+
+
 def pick_provider(manager: Any = None) -> dict[str, Any]:
     """The enabled provider row to use for this request (read every call).
 
@@ -397,9 +405,7 @@ def chat(
             "request or paste one in Admin → Settings or point it at an env: reference.",
         )
 
-    headers = {"Content-Type": "application/json"}
-    if key:
-        headers["Authorization"] = f"Bearer {key}"
+    headers = _auth_headers(key)
 
     body = build_chat_body(row, model, messages, tools=tools, max_tokens=max_tokens)
     timeout = float(timeout_s or row.get("timeout_s") or 60)
