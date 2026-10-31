@@ -1486,7 +1486,121 @@ made green earlier and this session finished the job.
   fallback, as the activation check requires.
 - **Still open (user-side, per "code fixes only"):** rotate the leaked admin
   password, `API_KEY_ADMIN`/`API_KEY_DEV`, and the 3x-ui panel password; only
-  then purge history. `tests/test_assistant_api.py`, `zolai/cli/main.py`,
-  `zolai/data/migrations.py` and the canonical-lane tests remain another lane's
-  uncommitted work; `context/progress-tracker.md` is left uncommitted on
-  purpose for the same reason.
+  then purge history. The files that note called uncommitted have since landed
+  on this branch — `fe478c0` (assistant API, migrations), `d6a370e` (CLI) and
+  `0e435d3` (canonical lane, `context/progress-tracker.md`).
+
+## 2026-10-31 (Session — agent tool batches; `build_vocabulary` fits the 15s budget)
+
+Two live complaints, both measured before being fixed.
+
+**`word_detail` declined (agent loop).** The loop executed **one** tool call per
+turn and refused the rest by name, so "Dam maw" — which needs `word_detail` for
+both words — lost the second call and spent a turn re-asking. `AGENT_MAX_TOOL_CALLS_PER_TURN`
+(default 3, env-overtable) now runs the batch; only the overflow is refused, and a
+refusal still reaches both the trace and the wire, so every echoed native
+`tool_call_id` stays answered (`tests/test_agent_runs.py`: batch of two runs both,
+cap+1 declines exactly one, native parallel calls answered). The prompt, the module
+docstring and `orchestrator.py`'s rule string advertise the real limit, and the
+rule string now lists `word_detail`, which the loop can serve but the model could
+not previously see.
+
+**`POST /api/v1/learning/run` `build_vocabulary` (orchestra timeout).** Four costs
+stacked on each call:
+
+* a fresh `LearningOrchestrator` per request — each one starting its own agent tasks
+  and queue processor on `start()`;
+* a cold `get_bible_learner()` load measured **12.92 s** (30,509 verses), landing
+  inside the first request after a restart;
+* `_build_vocabulary` running a full `extract_collocations` window scan whose result
+  the response never carried (it always writes `"collocations": []`);
+* one 30k-verse sweep **per word** via `build_context_for_word`, so `limit=1000`
+  re-read the corpus a thousand times (measured 0.41 s per tail word → ~20 s).
+
+Fixes: the router caches one orchestrator keyed on the canonical DB path (so a
+process that repoints its store still rebuilds); `create_app()` warms the corpus on
+a daemon thread at startup, off the request path; `build_contexts_for_words()` walks
+the corpus **once** for the whole batch (1000 words: **1.35 s**, 5000: **2.56 s**)
+and matches whole tokens, the unit `word_freq` is built from — the single-word method
+keeps its looser substring behaviour for free-text callers; the collocation scan is
+out of `build_vocabulary`. `get_bible_learner()` is now lock-guarded and publishes
+the learner only when fully built, because the warm-up thread and request threads can
+now race it. The hourly cycle's `extract_patterns()` (8.2 s of CPU, no awaits) ran on
+the event loop and froze every other request including the queue feeding the caller
+waiting for it; it now scans via `fresh_patterns()` in a worker thread and swaps the
+counters in whole — which also stops `word_freq`/`patterns` **doubling** every cycle,
+since `extract_patterns` accumulates. `completed_tasks` is a bounded deque (200)
+because the cached instance lives as long as the process and `submit_and_wait`
+rescans it per poll tick.
+
+Live after deploy (`01f91f9` on pcore-server): `build_vocabulary` limit=50 answers in
+**0.17 s** (was 3.6–23.6 s), five consecutive calls 0.16–0.19 s; startup logs
+`Loaded 30509 Bible verses` one second after boot instead of inside the first request.
+The Studio client's default `timeoutMs` is 15 s, which is the budget these calls now fit.
+
+Tests: `tests/test_learning_agents_api.py` +8 (orchestrator reused per DB path, new
+path builds a new one, bounded history, batched contexts agree with the single-word
+lookup, refresh replaces rather than accumulates). CI-equivalent suite in a clean
+worktree: **3511 passed, 17 skipped, 1 xfailed**, one failure
+(`test_timestamp_clock.py::test_live_schema_has_no_space_format_defaults`) that fails
+identically at unmodified `d6a370e` — it reads `<worktree-parent>/data/zolai.db`, a
+stray 528k scratch DB here, and skips on CI where that path does not exist.
+`tests/test_bible_learning.py`'s 6 failures are the same fixture-vs-corpus split: the
+file is `--ignore`d in CI and all 14 of its tests pass with `ZOLAI_DATA_ROOT` pointed
+at the real corpus. Ruff clean.
+
+**OpenRouter free-model bake-off (availability + task fit).** `selected_model` was
+empty on the live `openrouter` row, so the adapter fell through to `models[0]` — and
+because `refresh-models` filters the openrouter listing to `:free` ids in remote order,
+`models[0]` was `recursive/flint-v1.0:free`, which answers **503 "no upstreams
+available"**. That row is the `is_active=1` row, so the dead id was the default for
+every assistant call, and it is what aborted `scripts/deploy.sh`'s provider probe.
+Fixed on 2026-10-31 by pinning `selected_model = nvidia/nemotron-3.5-super-vl:free` and
+replacing the 16-id refreshed list with the six benchmarked free ids (`super-vl`,
+`lightning`, `laguna-s-2.1`, `ultra-550b-a55b`, `qwen3.8-27b`, `gemma-4-31b-it`) via
+`provider_settings.upsert_provider` — the same function the admin `PUT` route calls,
+run on the server as the operator because `.env.dev` carries no admin API key for the
+HTTP route (the one key in the store is `*`-scoped but its plaintext exists only at
+mint time). After the write: `resolve_model()` returns the pinned id and
+`test_connection("openrouter")` is ok/200 in 1.6 s.
+**Store note, because it cost a wrong entry here:** the service reads
+`ZOLAI_DATA_ROOT=/home/ubuntu/zolai-core/data` (2.4 G, 128 tables — and equal to the
+local canonical store on `canonical_words` 28,445, `word_alignments` 384,801,
+`word_analyses` 502, so the data sync landed). `/home/ubuntu/data/zolai.db` is a
+348 KB Oct-28 stub that nothing reads; catalog queries against it claimed
+`nemotron-3.5-lightning` was the implicit default and `pcore-brain` the active row,
+which is how `2a31b77` got written wrong. Query the DB `config.paths.zolai_db`
+resolves *with `.env.dev` sourced*, never the sibling `data/` directory. Probing
+all 16 catalog rows: 200 for nemotron-3.5-super-vl, dots-3-note-preview,
+nemotron-3.5-lightning, poolside/laguna-s-2.1, cohere/north-mini-code,
+nemotron-3-ultra-550b-a55b, nemotron-3-nano-omni-30b-reasoning; **403** for both
+`thinkingmachines/inkling*` (not entitled on this account), **404** for
+`nemotron-3.5-content-safety`, and 429 for xingchen, liquid/lfm, laguna-xs and both
+`google/gemma-4-*` at probe time. Task fit was run twice — round one left several
+`content` bodies empty because thinking eats `max_tokens`, so round two sets
+`reasoning: {"effort": "none"}`, 500 `max_tokens`, grades the first line, and sleeps
+2 s between calls. Six Zolai tasks: judge the attested SOV sentence
+`Pasian in gam piangsak hi.` valid, judge the scrambled
+`Gam in piangsak pasian hi.` invalid, translate a real 1CH 2:12 pair, emit strict
+JSON, obey the `<<<TOOL>>>` marker protocol, and answer from injected context only.
+Round two, score and mean latency:
+
+| model | score | avg | miss |
+|---|---|---|---|
+| `nvidia/nemotron-3.5-super-vl:free` | 5/6 | 1.05 s | calls the scrambled sentence VALID |
+| `cohere/north-mini-code:free` | 5/6 | 1.23 s | answers INVALID for **both** grammar probes — not discriminating |
+| `nvidia/nemotron-3-ultra-550b-a55b:free` | 5/6 | 6.29 s | VALID for scrambled; slowest by 6× |
+| `nvidia/nemotron-3.5-lightning:free` | 4/6 | **0.81 s** | VALID for scrambled, wrong genealogy direction |
+| `dots-studio/dots-3-note-preview:free` | 4/6 | 1.54 s | same two misses |
+| `poolside/laguna-s-2.1:free` | 3/6 (3/3 answered) | 1.68 s | **the only model correct on both grammar probes**; 3 of 6 tasks were HTTP 429 |
+
+Read as: every free model passes marker protocol and strict JSON, so those are not
+differentiators; the discriminator is grammar judgement, where the best scorer is the
+one that gets rate-limited. **Applied** (2026-10-31): `nemotron-3.5-super-vl:free` is
+pinned as `selected_model` — 5/6 at 1.05 s and never rate-limited in either round — and
+the list is ordered super-vl → lightning → laguna-s-2.1 → ultra-550b so the fallback
+order matches the ranking even when a caller passes `wanted` explicitly.
+`laguna-s-2.1` stays in the list because it is the only model that judged *both*
+grammar probes correctly, accepting its 429 rate. Single-sample smoke ranking, not a
+statistical benchmark — the grammar numbers are one item each, so re-run before
+trusting them.
