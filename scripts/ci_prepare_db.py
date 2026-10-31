@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
 
 def main() -> None:
@@ -14,12 +14,19 @@ def main() -> None:
     os.environ["ZOLAI_DATA_ROOT"] = str(root)
 
     from zolai.config import config
-    from zolai.data.models import Base
-    import zolai.data.models  # noqa: F401 — register tables
+    from zolai.data.database import DatabaseManager
+    from zolai.data.migrations import create_kg_tables, run_all_migrations
 
     db = config.paths.zolai_db
-    eng = create_engine(f"sqlite:///{db}")
-    Base.metadata.create_all(eng)
+    mgr = DatabaseManager(f"sqlite:///{db}")
+    # Same bootstrap the app lifespan performs: ORM tables, then the additive
+    # migrations.  A create_all-only store is missing the raw-DDL knowledge
+    # graph and the phase2d lexicon lifecycle columns, which RAG word evidence
+    # and publishing read unconditionally.
+    mgr.init_db()
+    create_kg_tables(mgr.engine)
+    run_all_migrations(mgr)
+    eng = mgr.engine
 
     with eng.begin() as conn:
         # Dictionary ZO→EN
@@ -65,6 +72,7 @@ def main() -> None:
     ensure_schema(db)
     print(f"eval sets: {seed_sets(('smoke', 'eval_v1'), db_path=db)}")
 
+    mgr.dispose()
     print(f"CI DB ready at {db}")
 
 

@@ -2675,6 +2675,59 @@ def create_corpus_learning_tables(target: Any) -> dict[str, Any]:
     return {"created": created, "skipped": skipped, "errors": errors}
 
 
+#: Lifecycle columns the canonical phase2d ``dictionary`` / ``dictionary_en_zo``
+#: tables carry but the ORM models never declared.  A store bootstrapped from
+#: ``init_db`` alone therefore lacks columns that publishing (ZVS compliance)
+#: and the soft-delete path read.  SQLite ``ADD COLUMN`` only accepts constant
+#: defaults, so ``updated_at`` gets ``''`` rather than ``datetime('now')``.
+DICTIONARY_LIFECYCLE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("zvs_compliance_status", "TEXT DEFAULT 'pending'"),
+    ("is_deleted", "INTEGER DEFAULT 0"),
+    ("deleted_at", "TEXT"),
+    ("updated_at", "TEXT DEFAULT ''"),
+)
+
+
+def add_dictionary_lifecycle_columns(mgr: DatabaseManager) -> dict[str, Any]:
+    """Ensure both lexicon tables carry the soft-delete + ZVS columns.
+
+    Idempotent and additive: an already-migrated store is inspected and left
+    untouched, and a missing table is skipped so a partial store still boots.
+
+    Returns:
+        Dict with 'added', 'skipped', 'errors' lists.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    added: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+
+    with mgr.engine.connect() as conn:
+        for table in ("dictionary", "dictionary_en_zo"):
+            if table not in existing_tables:
+                skipped.append(f"{table} (absent)")
+                continue
+            existing_cols = {c["name"] for c in inspector.get_columns(table)}
+            for col_name, col_def in DICTIONARY_LIFECYCLE_COLUMNS:
+                if col_name in existing_cols:
+                    skipped.append(f"{table}.{col_name} (already exists)")
+                    continue
+                try:
+                    conn.execute(
+                        text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}")
+                    )
+                    conn.commit()
+                    added.append(f"{table}.{col_name}")
+                except Exception as exc:
+                    errors.append(f"{table}.{col_name}: {exc}")
+
+    return {"added": added, "skipped": skipped, "errors": errors}
+
+
 def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
     """Run all constraint and index migrations including Foundation tables.
 
@@ -2706,6 +2759,7 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "lexicon_pos_columns": add_lexicon_pos_columns(mgr),
         "lexicon_pos_backfill": backfill_pos_canonical(mgr),
         "lexicon_pos_indexes": create_lexicon_pos_indexes(mgr),
+        "dictionary_lifecycle_columns": add_dictionary_lifecycle_columns(mgr),
         "monitoring_tables": create_monitoring_tables(mgr),
         "api_keys_table": create_api_keys_table(mgr),
         "user_session_tables": create_user_session_tables(mgr),

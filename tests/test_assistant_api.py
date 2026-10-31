@@ -393,7 +393,28 @@ class TestUngroundedAnswerIsGrounded:
     """
 
     def test_no_tool_call_triggers_a_grounding_pass(self, monkeypatch):
+        from zolai.agent.tools.types import ToolResult
         from zolai.api import assistant_router as ar
+
+        # The grounding pass gathers evidence with the same calls the
+        # retrieval-only path makes.  Stub the executor so the test proves the
+        # pass runs for a memory-only reply without requiring the production
+        # corpus to carry these words (CI seeds only a tiny dictionary).
+        def fake_execute_tool(call, allow):
+            word = str(call.input.get("word") or call.input.get("query") or "nang")
+            return ToolResult(
+                tool_name=call.name,
+                ok=True,
+                data={
+                    "found": True,
+                    "word": word,
+                    "definition": "weak",
+                    "source": "dictionary",
+                    "ref": f"dictionary:{word}",
+                },
+            )
+
+        monkeypatch.setattr(ar, "execute_tool", fake_execute_tool)
 
         seen: list[int] = []
 

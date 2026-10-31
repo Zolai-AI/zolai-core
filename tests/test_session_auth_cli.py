@@ -117,8 +117,12 @@ def test_create_help_never_offers_a_password_argument(runner: CliRunner) -> None
     result = runner.invoke(cli_app, ["user", "create", "--help"])
 
     assert result.exit_code == 0
-    assert "--password-stdin" in result.stdout
-    assert "--password " not in result.stdout.replace("--password-stdin", "")
+    # Rich styles each option name, and when color is forced (as on CI) an
+    # escape code lands between ``--password`` and ``-stdin``. Compare the
+    # rendered text, not the raw ANSI stream.
+    out = _ANSI.sub("", result.stdout)
+    assert "--password-stdin" in out
+    assert "--password " not in out.replace("--password-stdin", "")
 
 
 def test_create_refuses_a_duplicate_username(runner: CliRunner, user_db) -> None:
