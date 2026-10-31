@@ -149,3 +149,65 @@ def test_purge_is_a_no_op_when_everything_matches():
         )
     with engine.connect() as conn:
         assert _purge_foreign_vectors(conn) == 0
+
+
+def _scoped_vector_db():
+    engine = create_engine("sqlite://")
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE knowledge_vectors "
+                "(id TEXT PRIMARY KEY, metadata TEXT, source_type TEXT)"
+            )
+        )
+        conn.execute(
+            text("INSERT INTO knowledge_vectors VALUES (:id, :meta, :stype)"),
+            [
+                {
+                    "id": "grammar-old",
+                    "meta": '{"embedding_model": "all-MiniLM-L6-v2-legacy"}',
+                    "stype": "grammar_patterns",
+                },
+                {
+                    "id": "dict-old",
+                    "meta": '{"embedding_model": "all-MiniLM-L6-v2-legacy"}',
+                    "stype": "dictionary",
+                },
+                {
+                    "id": "bible-old",
+                    "meta": "{}",
+                    "stype": "bible",
+                },
+                {
+                    "id": "grammar-now",
+                    "meta": '{"embedding_model": "%s"}' % EMBEDDING_MODEL,
+                    "stype": "grammar_patterns",
+                },
+            ],
+        )
+    return engine
+
+
+def test_scoped_purge_leaves_the_other_sources_embedded():
+    """A --source build must not wipe vectors it will not re-embed."""
+    engine = _scoped_vector_db()
+    with engine.connect() as conn:
+        assert _purge_foreign_vectors(conn, {"grammar_patterns"}) == 1
+        remaining = [
+            r[0]
+            for r in conn.execute(
+                text("SELECT id FROM knowledge_vectors ORDER BY id")
+            ).fetchall()
+        ]
+    assert remaining == ["bible-old", "dict-old", "grammar-now"]
+
+
+def test_scoped_purge_maps_a_table_name_to_its_source_type():
+    engine = _scoped_vector_db()
+    with engine.connect() as conn:
+        assert _purge_foreign_vectors(conn, {"bible_verses"}) == 1
+        remaining = {
+            r[0]
+            for r in conn.execute(text("SELECT id FROM knowledge_vectors")).fetchall()
+        }
+    assert remaining == {"grammar-old", "dict-old", "grammar-now"}

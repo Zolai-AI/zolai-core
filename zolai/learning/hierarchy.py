@@ -843,6 +843,7 @@ def _build_source_layers(
     idf: dict[str, float],
     levels: Sequence[str],
     sample: dict[str, Any],
+    texts: dict[str, tuple[str, str, tuple[str, ...]]] | None = None,
 ) -> tuple[list[LayerRow], SourceResult, list[dict[str, Any]]]:
     rows: list[LayerRow] = []
     result = SourceResult()
@@ -896,6 +897,17 @@ def _build_source_layers(
         for p_no, paragraph in enumerate(paragraphs, start=1):
             p_tokens = [tok for line in paragraph for tok in _tokens(line.text)]
             p_id = f"{document.doc_id}|{document.group_id or 'doc'}p{p_no}"
+            paragraph_text = _SPACE_RE.sub(" ", " ".join(line.text for line in paragraph))
+            if texts is not None:
+                # Canonical promotion needs the words a layer row was learned
+                # from; ``features`` only keeps counts and top terms. Record the
+                # joined text for every paragraph, including one-paragraph
+                # documents that teach no openers.
+                texts[p_id] = (
+                    paragraph[0].ref,
+                    paragraph_text,
+                    tuple(line.ref for line in paragraph),
+                )
             if "paragraph" in levels:
                 rows.append(
                     LayerRow(
@@ -914,7 +926,6 @@ def _build_source_layers(
                 # A one-paragraph document cannot show that a phrase opens
                 # paragraphs rather than just sentences.
                 continue
-            paragraph_text = _SPACE_RE.sub(" ", " ".join(line.text for line in paragraph))
             if not _looks_zolai(paragraph_text) or not _looks_zolai(
                 paragraph[0].text, min_hits=1
             ):
@@ -1385,3 +1396,32 @@ def learn_layers(
         "per_source": per_source,
         "sample": sample,
     }
+
+
+def learn_paragraph_texts(
+    engine: Engine,
+    source: str,
+    limit: int | None = None,
+    max_docs: int | None = None,
+) -> dict[str, tuple[str, str, tuple[str, ...]]]:
+    """Return ``unit_id → (first_ref, text, line_refs)`` for every paragraph.
+
+    ``corpus_learning_layers`` stores features, not words, so a consumer that
+    needs the text of a stored paragraph must re-derive it with the exact
+    segmentation that produced the row. This runs the same document loading,
+    IDF and splitting as :func:`learn_layers` and collects the texts without
+    writing anything.
+    """
+    if source not in SOURCE_SPECS:
+        raise ValueError(f"unknown source: {source}")
+    documents = list(
+        iter_documents(engine, source, limit=limit, max_docs=max_docs)
+    )
+    if not documents:
+        return {}
+    df, n_lines = _document_frequency(documents)
+    idf = _idf(df, n_lines)
+    texts: dict[str, tuple[str, str, tuple[str, ...]]] = {}
+    _build_source_layers(documents, idf, ("paragraph",), {}, texts=texts)
+    return texts
+

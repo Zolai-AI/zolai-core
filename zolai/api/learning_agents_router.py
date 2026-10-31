@@ -15,7 +15,7 @@ endpoints delegate to a threadpool rather than blocking the event loop.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -44,11 +44,31 @@ def _registry(engine=None):
     return reg
 
 
+#: ``(canonical DB path, orchestrator)`` — see :func:`_orchestrator`.
+_orchestrator_cache: Optional[tuple[str, Any]] = None
+
+
 def _orchestrator(engine=None):
-    from ..data.repositories import get_engine
+    """Learning orchestrator bound to the live database.
+
+    Cached per canonical DB path. Built fresh per request before, it started its
+    own agent tasks and queue processor on every call and re-read the ~30k-verse
+    Bible corpus the agents hold — that cold load alone measured 12.9 s, most of a
+    task's timeout budget spent before any work happened.  Keying on the path keeps
+    the cache honest when a process points at a different store.
+    """
+    global _orchestrator_cache
     from ..learning.agents.learning_orchestrator import LearningOrchestrator
 
-    return LearningOrchestrator(engine or get_engine())
+    if engine is not None:
+        return LearningOrchestrator(engine)
+
+    from ..config import config
+
+    key = str(config.paths.zolai_db)
+    if _orchestrator_cache is None or _orchestrator_cache[0] != key:
+        _orchestrator_cache = (key, LearningOrchestrator())
+    return _orchestrator_cache[1]
 
 
 def _run(fn, *args, **kwargs):

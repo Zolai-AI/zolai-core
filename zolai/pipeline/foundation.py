@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +27,8 @@ from zolai.foundation import (
     FoundationAnalyzer,
     run_consensus,
 )
+from zolai.learning.bible_pattern_learner import classify_clause, extract_structure
+from zolai.shared.text import tokenize_words
 
 if TYPE_CHECKING:
     pass
@@ -688,6 +692,588 @@ class FoundationETL:
                 "promote_words_from_attestations: processed=%d promoted=%d "
                 "queued=%d skipped=%d",
                 len(rows), promoted, queued, skipped,
+            )
+            self._complete_batch(stats, "completed")
+            return stats
+
+        except Exception:
+            stats.duration_seconds = (datetime.now() - start).total_seconds()
+            stats.errors += 1
+            self._complete_batch(stats, "failed")
+            raise
+
+    # ── Stage 3c: PROMOTE BIBLE SENTENCES AND PARAGRAPHS ───────────────────
+
+    #: Zolai Bible witnesses, strongest first. A verse read by two independent
+    #: translations is attested twice; the second witness is the evidence that
+    #: makes it canonical instead of merely collected.
+    ZOLAI_BIBLE_VERSIONS: tuple[str, ...] = (
+        "zo_tdb77",
+        "zo_tedim2010",
+        "zo_tedim1932",
+        "zo_hcl06",
+        "zo_fcl",
+    )
+
+    @staticmethod
+    def _table_exists(conn, table: str) -> bool:
+        return (
+            conn.execute(
+                text("SELECT 1 FROM sqlite_master WHERE type='table' AND name=:t"),
+                {"t": table},
+            ).first()
+            is not None
+        )
+
+    def _known_forms(self, conn) -> set[str]:
+        """Every lowercase form a dictionary or the canonical layer knows."""
+        forms: set[str] = set()
+        for table, column in (
+            ("vocabulary", "headword"),
+            ("dictionary", "zolai"),
+            ("canonical_words", "form"),
+        ):
+            if not self._table_exists(conn, table):
+                continue
+            for row in conn.execute(text(f"SELECT {column} FROM {table}")):
+                value = str(row[0] or "").strip().lower()
+                if value:
+                    forms.add(value)
+        return forms
+
+    @staticmethod
+    def _coverage(tokens: list[str], known: set[str]) -> float:
+        if not tokens:
+            return 0.0
+        return sum(1 for token in tokens if token in known) / len(tokens)
+
+    @staticmethod
+    def _queue_for_review(conn, fact_type: str, fact_key: str, now: str) -> bool:
+        """Record a decision the evidence gate would not promote, once.
+
+        Returns True only when a row was inserted, so a re-run reports the
+        number of *new* decisions instead of recounting pending ones.
+        """
+        result = conn.execute(
+            text(
+                """INSERT INTO foundation_review_queue
+                   (fact_type, fact_key, priority, assignee, status, created_at)
+                   SELECT :fact_type, :fact_key, 2, '', 'pending', :created_at
+                   WHERE NOT EXISTS (
+                       SELECT 1 FROM foundation_review_queue
+                       WHERE fact_type = :fact_type AND fact_key = :fact_key
+                   )"""
+            ),
+            {"fact_type": fact_type, "fact_key": fact_key, "created_at": now},
+        )
+        return bool(result.rowcount)
+
+    def promote_bible_sentences(
+        self,
+        threshold: float = 0.9,
+        limit: int = 0,
+        min_coverage: float = 0.9,
+    ) -> PipelineStats:
+        """Promote Bible verses witnessed by two or more Zolai translations.
+
+        The canonical value is the verse, so it is keyed by its content hash
+        and stored once. Evidence is two-tier by construction: ``BIBLE_PARALLEL``
+        for the second Zolai witness and ``DICTIONARY`` for the share of the
+        verse's words that already carry a glossary entry.
+        ``threshold_gate_consensus`` requires both tiers, so a verse with a
+        single translation is never promoted — it queues for review instead.
+        """
+        start = datetime.now()
+        stats = PipelineStats()
+        mgr = self._get_manager()
+        repos = self._get_repos()
+        stats.batch_id = repos["foundation_batches"].create_batch(
+            "promote",
+            {
+                "kind": "bible_sentences",
+                "threshold": threshold,
+                "min_coverage": min_coverage,
+            },
+        )
+        limit_clause = f" LIMIT {int(limit)}" if limit else ""
+
+        try:
+            with mgr.engine.begin() as conn:
+                if not self._table_exists(conn, "bible_verses"):
+                    self._complete_batch(stats, "completed")
+                    return stats
+                columns = {
+                    row[1]
+                    for row in conn.execute(text("PRAGMA table_info(bible_verses)"))
+                }
+                versions = [v for v in self.ZOLAI_BIBLE_VERSIONS if v in columns]
+                if len(versions) < 2:
+                    self._complete_batch(stats, "completed")
+                    return stats
+
+                known = self._known_forms(conn)
+                existing = {
+                    row[0]
+                    for row in conn.execute(
+                        text("SELECT source_hash FROM canonical_sentences")
+                    )
+                }
+                has_english = "en_kJV" in columns
+                select_sql = ", ".join(versions)
+                english_sql = ", en_kJV" if has_english else ""
+                rows = conn.execute(
+                    text(
+                        f"SELECT ref, {select_sql}{english_sql} FROM bible_verses "
+                        f"WHERE ref IS NOT NULL ORDER BY ref{limit_clause}"
+                    )
+                ).fetchall()
+                now = datetime.now().isoformat()
+
+                for row in rows:
+                    r = row._mapping
+                    stats.records_processed += 1
+                    texts = {
+                        version: str(r[version] or "").strip() for version in versions
+                    }
+                    texts = {v: t for v, t in texts.items() if t}
+                    if len(texts) < 2:
+                        continue
+                    primary_version = next(v for v in versions if v in texts)
+                    primary_text = texts[primary_version]
+                    source_hash = hashlib.sha256(
+                        primary_text.encode()
+                    ).hexdigest()[:16]
+                    if source_hash in existing:
+                        continue
+
+                    fact_key = f"sentence:{source_hash}"
+                    tokens = tokenize_words(primary_text)
+                    coverage = round(self._coverage(tokens, known), 4)
+                    if coverage < min_coverage:
+                        if self._queue_for_review(
+                            conn, "sentence", f"sentence:{r['ref']}", now
+                        ):
+                            stats.records_queued_for_review += 1
+                        continue
+                    witnesses = {
+                        version: hashlib.sha256(text_value.encode()).hexdigest()[:16]
+                        for version, text_value in texts.items()
+                        if version != primary_version
+                    }
+                    evidence = (
+                        Evidence(
+                            fact_type="sentence",
+                            fact_key=fact_key,
+                            tier=EvidenceTier.BIBLE_PARALLEL,
+                            source=f"bible:{primary_version}",
+                            confidence=1.0,
+                            provenance_hash=hashlib.sha256(
+                                json.dumps(
+                                    {
+                                        "ref": r["ref"],
+                                        "text": primary_text,
+                                        "witnesses": witnesses,
+                                    },
+                                    sort_keys=True,
+                                ).encode()
+                            ).hexdigest()[:16],
+                            payload={
+                                "ref": r["ref"],
+                                "version": primary_version,
+                                "witness_versions": sorted(witnesses),
+                                "witness_hashes": witnesses,
+                            },
+                        ),
+                        Evidence(
+                            fact_type="sentence",
+                            fact_key=fact_key,
+                            tier=EvidenceTier.DICTIONARY,
+                            source="vocabulary+dictionary",
+                            confidence=coverage,
+                            provenance_hash=hashlib.sha256(
+                                f"{source_hash}:{coverage}".encode()
+                            ).hexdigest()[:16],
+                            payload={
+                                "tokens": len(tokens),
+                                "known": round(coverage * len(tokens)),
+                                "coverage": coverage,
+                            },
+                        ),
+                    )
+                    candidate = Candidate(
+                        fact_type="sentence",
+                        fact_key=fact_key,
+                        value={
+                            "text": primary_text,
+                            "ref": r["ref"],
+                            "translation": (
+                                str(r["en_kJV"] or "").strip() if has_english else ""
+                            ),
+                            "coverage": coverage,
+                        },
+                        evidence=evidence,
+                        source="bible_parallel",
+                    )
+                    consensus = run_consensus([candidate])
+                    if consensus.confidence < threshold:
+                        if self._queue_for_review(
+                            conn, "sentence", f"sentence:{r['ref']}", now
+                        ):
+                            stats.records_queued_for_review += 1
+                        continue
+
+                    evidence_ids: list[int] = []
+                    for e in evidence:
+                        result = conn.execute(
+                            text(
+                                """INSERT INTO foundation_evidence
+                                   (fact_type, fact_key, tier, source, confidence,
+                                    provenance_hash, payload, created_at, method,
+                                    document_id, sentence_id)
+                                   VALUES ('sentence', :fact_key, :tier, :source,
+                                           :confidence, :provenance_hash, :payload,
+                                           :created_at, 'bible_parallel',
+                                           :document_id, :sentence_id)"""
+                            ),
+                            {
+                                "fact_key": fact_key,
+                                "tier": e.tier.value,
+                                "source": e.source,
+                                "confidence": e.confidence,
+                                "provenance_hash": e.provenance_hash,
+                                "payload": json.dumps(
+                                    e.payload, ensure_ascii=False
+                                ),
+                                "created_at": now,
+                                "document_id": r["ref"],
+                                "sentence_id": source_hash,
+                            },
+                        )
+                        evidence_ids.append(result.lastrowid)
+
+                    conn.execute(
+                        text(
+                            """INSERT INTO canonical_sentences
+                               (text, tokens, pos_tags, translation, grammar,
+                                version, source_hash, verified_at, verified_by,
+                                evidence_ids, created_at)
+                               VALUES (:text, :tokens, '[]', :translation,
+                                       :grammar, 1, :source_hash, :verified_at,
+                                       :verified_by, :evidence_ids, :created_at)"""
+                        ),
+                        {
+                            "text": primary_text,
+                            "tokens": json.dumps(tokens, ensure_ascii=False),
+                            "translation": candidate.value["translation"],
+                            "grammar": json.dumps(
+                                {
+                                    "ref": r["ref"],
+                                    "clause": classify_clause(primary_text),
+                                    "structure": extract_structure(primary_text),
+                                },
+                                ensure_ascii=False,
+                            ),
+                            "source_hash": source_hash,
+                            "verified_at": now,
+                            "verified_by": f"consensus:{consensus.method}",
+                            "evidence_ids": json.dumps(evidence_ids),
+                            "created_at": now,
+                        },
+                    )
+                    conn.execute(
+                        text(
+                            """INSERT OR REPLACE INTO foundation_consensus
+                               (fact_type, fact_key, candidates, decision,
+                                confidence, method, threshold, agreeing_count,
+                                notes, created_at)
+                               VALUES ('sentence', :fact_key, :candidates,
+                                       :decision, :confidence, :method,
+                                       :threshold, :agreeing_count, :notes,
+                                       :created_at)"""
+                        ),
+                        {
+                            "fact_key": fact_key,
+                            "candidates": json.dumps(
+                                [candidate.value], ensure_ascii=False
+                            ),
+                            "decision": json.dumps(
+                                consensus.decision, ensure_ascii=False
+                            ),
+                            "confidence": consensus.confidence,
+                            "method": consensus.method,
+                            "threshold": threshold,
+                            "agreeing_count": consensus.agreeing_candidates,
+                            "notes": json.dumps(list(consensus.notes)),
+                            "created_at": now,
+                        },
+                    )
+                    existing.add(source_hash)
+                    stats.records_promoted += 1
+
+            stats.duration_seconds = (datetime.now() - start).total_seconds()
+            log.info(
+                "promote_bible_sentences: processed=%d promoted=%d queued=%d",
+                stats.records_processed,
+                stats.records_promoted,
+                stats.records_queued_for_review,
+            )
+            self._complete_batch(stats, "completed")
+            return stats
+
+        except Exception:
+            stats.duration_seconds = (datetime.now() - start).total_seconds()
+            stats.errors += 1
+            self._complete_batch(stats, "failed")
+            raise
+
+    def promote_bible_paragraphs(
+        self,
+        threshold: float = 0.9,
+        limit: int = 0,
+        min_coverage: float = 0.9,
+    ) -> PipelineStats:
+        """Promote learned Bible paragraphs whose every verse has a witness.
+
+        Paragraph text is re-derived with :func:`learn_paragraph_texts`, the
+        same loader/IDF/segmentation that wrote the layer row, so a promoted
+        paragraph is exactly the unit the learner studied. Evidence is again
+        two-tier: ``BIBLE_PARALLEL`` for the share of member verses read by a
+        second translation and ``DICTIONARY`` for glossary coverage. A
+        paragraph that only one translation attests stays out of the canonical
+        layer.
+        """
+        from zolai.learning.hierarchy import learn_paragraph_texts
+
+        start = datetime.now()
+        stats = PipelineStats()
+        mgr = self._get_manager()
+        repos = self._get_repos()
+        stats.batch_id = repos["foundation_batches"].create_batch(
+            "promote",
+            {
+                "kind": "bible_paragraphs",
+                "threshold": threshold,
+                "min_coverage": min_coverage,
+            },
+        )
+
+        texts = learn_paragraph_texts(mgr.engine, "bible")
+
+        try:
+            with mgr.engine.begin() as conn:
+                if not self._table_exists(conn, "bible_verses") or not texts:
+                    self._complete_batch(stats, "completed")
+                    return stats
+                columns = {
+                    row[1]
+                    for row in conn.execute(text("PRAGMA table_info(bible_verses)"))
+                }
+                versions = [v for v in self.ZOLAI_BIBLE_VERSIONS if v in columns]
+                if len(versions) < 2:
+                    self._complete_batch(stats, "completed")
+                    return stats
+
+                witness_count: dict[str, int] = {}
+                select_sql = ", ".join(versions)
+                for row in conn.execute(
+                    text(f"SELECT ref, {select_sql} FROM bible_verses")
+                ):
+                    witness_count[str(row[0])] = sum(
+                        1 for value in row[1:] if str(value or "").strip()
+                    )
+
+                known = self._known_forms(conn)
+                existing = {
+                    row[0]
+                    for row in conn.execute(
+                        text("SELECT source_hash FROM canonical_paragraphs")
+                    )
+                }
+                now = datetime.now().isoformat()
+                considered = 0
+
+                for unit_id, (first_ref, text_value, line_refs) in texts.items():
+                    if limit and considered >= limit:
+                        break
+                    considered += 1
+                    stats.records_processed += 1
+                    witnessed = sum(
+                        1 for ref in line_refs if witness_count.get(ref, 0) >= 2
+                    )
+                    parallel_share = round(witnessed / max(1, len(line_refs)), 4)
+                    tokens = tokenize_words(text_value)
+                    coverage = round(self._coverage(tokens, known), 4)
+                    fact_key_guess = hashlib.sha256(text_value.encode()).hexdigest()[
+                        :16
+                    ]
+                    if fact_key_guess in existing:
+                        continue
+                    if coverage < min_coverage:
+                        if self._queue_for_review(
+                            conn, "paragraph", f"paragraph:{unit_id}", now
+                        ):
+                            stats.records_queued_for_review += 1
+                        continue
+                    fact_key = f"paragraph:{fact_key_guess}"
+                    sentences = [
+                        part.strip()
+                        for part in re.split(r"(?<=[.!?])\s+", text_value)
+                        if part.strip()
+                    ] or [text_value]
+                    clause_types = Counter(
+                        classify_clause(sentence) for sentence in sentences
+                    )
+                    evidence = (
+                        Evidence(
+                            fact_type="paragraph",
+                            fact_key=fact_key,
+                            tier=EvidenceTier.BIBLE_PARALLEL,
+                            source="bible:parallel_versions",
+                            confidence=parallel_share,
+                            provenance_hash=hashlib.sha256(
+                                f"{unit_id}:{parallel_share}:{len(line_refs)}".encode()
+                            ).hexdigest()[:16],
+                            payload={
+                                "unit_id": unit_id,
+                                "refs": list(line_refs[:50]),
+                                "lines": len(line_refs),
+                                "witnessed": witnessed,
+                            },
+                        ),
+                        Evidence(
+                            fact_type="paragraph",
+                            fact_key=fact_key,
+                            tier=EvidenceTier.DICTIONARY,
+                            source="vocabulary+dictionary",
+                            confidence=coverage,
+                            provenance_hash=hashlib.sha256(
+                                f"{fact_key_guess}:{coverage}".encode()
+                            ).hexdigest()[:16],
+                            payload={
+                                "tokens": len(tokens),
+                                "known": round(coverage * len(tokens)),
+                                "coverage": coverage,
+                            },
+                        ),
+                    )
+                    candidate = Candidate(
+                        fact_type="paragraph",
+                        fact_key=fact_key,
+                        # every value must be hashable: majority_vote keys on
+                        # the sorted value tuple
+                        value={"text": text_value, "first_ref": first_ref},
+                        evidence=evidence,
+                        source="bible_parallel",
+                    )
+                    consensus = run_consensus([candidate])
+                    if consensus.confidence < threshold:
+                        if self._queue_for_review(
+                            conn, "paragraph", f"paragraph:{unit_id}", now
+                        ):
+                            stats.records_queued_for_review += 1
+                        continue
+
+                    evidence_ids: list[int] = []
+                    for e in evidence:
+                        result = conn.execute(
+                            text(
+                                """INSERT INTO foundation_evidence
+                                   (fact_type, fact_key, tier, source, confidence,
+                                    provenance_hash, payload, created_at, method,
+                                    document_id, sentence_id)
+                                   VALUES ('paragraph', :fact_key, :tier, :source,
+                                           :confidence, :provenance_hash, :payload,
+                                           :created_at, 'bible_parallel',
+                                           :document_id, :sentence_id)"""
+                            ),
+                            {
+                                "fact_key": fact_key,
+                                "tier": e.tier.value,
+                                "source": e.source,
+                                "confidence": e.confidence,
+                                "provenance_hash": e.provenance_hash,
+                                "payload": json.dumps(
+                                    e.payload, ensure_ascii=False
+                                ),
+                                "created_at": now,
+                                "document_id": unit_id.split("|", 1)[0],
+                                "sentence_id": unit_id,
+                            },
+                        )
+                        evidence_ids.append(result.lastrowid)
+
+                    conn.execute(
+                        text(
+                            """INSERT INTO canonical_paragraphs
+                               (text, sentences, style_profile, version,
+                                source_hash, verified_at, verified_by,
+                                evidence_ids, created_at)
+                               VALUES (:text, :sentences, :style_profile, 1,
+                                       :source_hash, :verified_at, :verified_by,
+                                       :evidence_ids, :created_at)"""
+                        ),
+                        {
+                            "text": text_value,
+                            "sentences": json.dumps(sentences, ensure_ascii=False),
+                            "style_profile": json.dumps(
+                                {
+                                    "lines": len(line_refs),
+                                    "sentences": len(sentences),
+                                    "tokens": len(tokens),
+                                    "unique_tokens": len(set(tokens)),
+                                    "avg_line_tokens": round(
+                                        len(tokens) / max(1, len(line_refs)), 2
+                                    ),
+                                    "clause_types": dict(clause_types.most_common()),
+                                    "initial_token": tokens[0] if tokens else "",
+                                    "final_token": tokens[-1] if tokens else "",
+                                    "first_ref": first_ref,
+                                },
+                                ensure_ascii=False,
+                            ),
+                            "source_hash": fact_key_guess,
+                            "verified_at": now,
+                            "verified_by": f"consensus:{consensus.method}",
+                            "evidence_ids": json.dumps(evidence_ids),
+                            "created_at": now,
+                        },
+                    )
+                    conn.execute(
+                        text(
+                            """INSERT OR REPLACE INTO foundation_consensus
+                               (fact_type, fact_key, candidates, decision,
+                                confidence, method, threshold, agreeing_count,
+                                notes, created_at)
+                               VALUES ('paragraph', :fact_key, :candidates,
+                                       :decision, :confidence, :method,
+                                       :threshold, :agreeing_count, :notes,
+                                       :created_at)"""
+                        ),
+                        {
+                            "fact_key": fact_key,
+                            "candidates": json.dumps(
+                                [candidate.value], ensure_ascii=False
+                            ),
+                            "decision": json.dumps(
+                                consensus.decision, ensure_ascii=False
+                            ),
+                            "confidence": consensus.confidence,
+                            "method": consensus.method,
+                            "threshold": threshold,
+                            "agreeing_count": consensus.agreeing_candidates,
+                            "notes": json.dumps(list(consensus.notes)),
+                            "created_at": now,
+                        },
+                    )
+                    existing.add(fact_key_guess)
+                    stats.records_promoted += 1
+
+            stats.duration_seconds = (datetime.now() - start).total_seconds()
+            log.info(
+                "promote_bible_paragraphs: processed=%d promoted=%d queued=%d",
+                stats.records_processed,
+                stats.records_promoted,
+                stats.records_queued_for_review,
             )
             self._complete_batch(stats, "completed")
             return stats

@@ -264,26 +264,50 @@ def _vector_id(
     return hashlib.sha256(key.encode()).hexdigest()[:32]
 
 
-def _purge_foreign_vectors(conn) -> int:
+def _purge_foreign_vectors(conn, sources: set[str] | None = None) -> int:
     """Delete vectors embedded by a different model; they cannot be compared.
 
-    The index is derived data, so dropping rows is safe: the current model
-    re-embeds them this run. Rows without an ``embedding_model`` predate the
-    field and are equally unusable next to current vectors.
+    The index is derived data, so dropping rows is safe — but only for the
+    sources this run will rebuild. A ``--source grammar_patterns`` build that
+    purges the whole table leaves every other source unembedded, because it
+    does not touch their rows afterwards. ``sources`` is the same filter the
+    build loop applies (table name or source_type); ``None`` means a full
+    build, which re-embeds everything it purges.
+
+    Rows without an ``embedding_model`` predate the field and are equally
+    unusable next to current vectors, so they are purged with the rest.
     """
-    stale = text(
-        "SELECT COUNT(*) FROM knowledge_vectors "
-        "WHERE json_extract(metadata, '$.embedding_model') IS NOT :m"
-    )
+    where = "json_extract(metadata, '$.embedding_model') IS NOT :m"
+    params: dict[str, object] = {"m": EMBEDDING_MODEL}
+    if sources is not None:
+        columns = {
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(knowledge_vectors)"))
+        }
+        if "source_type" not in columns:
+            return 0
+        types = sorted(
+            {
+                spec.source_type
+                for spec in SOURCES
+                if spec.table in sources or spec.source_type in sources
+            }
+        )
+        if not types:
+            return 0
+        placeholders = ", ".join(f":s{i}" for i in range(len(types)))
+        where += f" AND source_type IN ({placeholders})"
+        params.update({f"s{i}": value for i, value in enumerate(types)})
     try:
-        count = int(conn.execute(stale, {"m": EMBEDDING_MODEL}).scalar() or 0)
+        count = int(
+            conn.execute(
+                text(f"SELECT COUNT(*) FROM knowledge_vectors WHERE {where}"), params
+            ).scalar()
+            or 0
+        )
         if count:
             conn.execute(
-                text(
-                    "DELETE FROM knowledge_vectors "
-                    "WHERE json_extract(metadata, '$.embedding_model') IS NOT :m"
-                ),
-                {"m": EMBEDDING_MODEL},
+                text(f"DELETE FROM knowledge_vectors WHERE {where}"), params
             )
             conn.commit()
     except OperationalError as exc:
@@ -337,7 +361,7 @@ def build_knowledge_vectors(
     # lock (and lose every completed batch on failure).
     with engine.connect() as conn:
         if not dry_run:
-            purged = _purge_foreign_vectors(conn)
+            purged = _purge_foreign_vectors(conn, source_filter)
             if purged:
                 summary["purged_foreign_model"] = purged
                 log.warning(

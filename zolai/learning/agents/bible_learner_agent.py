@@ -116,10 +116,11 @@ class BibleLearnerAgent(BaseAgent):
         # Filter by frequency
         vocab = [(w, c) for w, c in vocab if c >= min_frequency]
 
-        # Build vocabulary entries with Bible context
+        # Build vocabulary entries with Bible context — one corpus pass for the batch.
+        contexts = learner.build_contexts_for_words((w for w, _ in vocab), limit=2)
         vocab_entries = []
         for word, freq in vocab:
-            context = self.bible_learner.build_context_for_word(word, limit=2)
+            context = contexts.get(word, "")
             if "No Bible sentences" not in context:
                 self.learned_vocabulary[word] = {
                     "word": word,
@@ -309,7 +310,16 @@ class BibleLearnerAgent(BaseAgent):
         """
         logger.info("BibleLearner: Running continuous learning cycle")
 
-        self.bible_learner.extract_patterns()
+        # ~8 s of CPU over 30k verses with no await, so on the event loop it froze
+        # every other request — including the task queue feeding whoever was waiting
+        # for this cycle. The scan runs in a worker thread into containers the
+        # readers are not touching, then swaps in one step.
+        patterns, word_freq, phrase_counts = await asyncio.to_thread(
+            self.bible_learner.fresh_patterns
+        )
+        self.bible_learner.patterns = patterns
+        self.bible_learner.word_freq = word_freq
+        self.bible_learner.phrase_patterns = phrase_counts
 
         stats = self.bible_learner.get_pattern_stats()
         self.pattern_frequency = stats.get("pattern_counts", {})

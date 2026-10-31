@@ -1369,3 +1369,124 @@ Tests: `tests/test_training_splits.py` grew to 15 — the split CLI keeps both
 directions in one split, its output passes the leakage gate, and missing or
 malformed input exits 2; `content_version` is order-independent and changes on
 bytes, on missing files. `test_split_leakage.py` unchanged (11). Ruff clean.
+
+## 2026-10-31 (Session — canonical sentence/paragraph lane; scoped vector purge)
+
+The hierarchy pass had 185,122 paragraph layers and nothing consuming them:
+`canonical_sentences` and `canonical_paragraphs` were both 0. The missing piece
+was not code volume but an **evidence rule** — a learned paragraph is not, by
+itself, proof of good Zolai. The rule now is parallel attestation.
+
+- `zolai/pipeline/foundation.py` gained `promote_bible_sentences` and
+  `promote_bible_paragraphs`, wired into `foundation-promote --fact-type
+  sentence|paragraph` (the `foundation` command itself is the analysis tool;
+  `foundation-promote` is the promotion command). A verse must be read by
+  **≥2 Zolai translations** (`BIBLE_PARALLEL`, tier 1, confidence 1.0) and
+  its tokens must reach **≥90 % glossary coverage** (`DICTIONARY`, tier 2,
+  confidence = coverage). `threshold_gate_consensus` requires two distinct
+  tiers, so a single-witness verse — and any zomidaily/wiki/lessons prose —
+  can never be promoted; it queues for review instead of guessing.
+- Paragraphs come from `learn_paragraph_texts` (the same TextTiling units the
+  hierarchy pass learned, 8,468 for the Bible); the BIBLE_PARALLEL confidence
+  is the share of lines witnessed by ≥2 versions. Canonical rows store text,
+  tokens/translation/clause+structure (sentences) or `style_profile`
+  (paragraphs), `source_hash`, `verified_by`, and the evidence ids;
+  deduplication is by `sha256(text)[:16]`, so re-runs are no-ops.
+- **Applied to `data/zolai.db`:** sentences `processed=31102 promoted=30776
+  queued=75` in 124 s; paragraphs `processed=8468 promoted=8451 queued=10` in
+  74 s; 0 errors. New totals: `canonical_sentences` **30,776**,
+  `canonical_paragraphs` **8,451**, `foundation_evidence` **165,263**
+  (+78,454), `foundation_consensus` **67,672** (+39,227). Every fact has
+  exactly 2 evidence rows; 0 duplicate `source_hash`; the 85 queued facts are
+  `pending` in `foundation_review_queue` with no duplicates after a rerun;
+  `_queue_for_review` now reports only *new* decisions, so a rerun counts 0.
+  Second run: `promoted=0` for both lanes.
+- **Integrity spot-checks (read-only, live DB):** all 30,776 sentences carry a
+  translation and a distinct `grammar.ref` (30,776 distinct refs; lengths
+  15–709 chars); all 8,451 paragraphs carry a non-empty `style_profile`
+  (45–3,672 chars); every row in both tables has exactly 2 `evidence_ids`;
+  `verified_by` is `consensus:threshold_gate` / `consensus:majority_vote` on
+  every row; no site chrome (`more:`, `<`) in canonical sentence text. Clause
+  distribution: ergative 7,641 · negation 6,755 · question 5,186 · future
+  3,677 · sov 3,212 · quotative 2,294.
+- **Incident fixed in the same session:** running `zolai rag build --source
+  grammar_patterns` printed `Purged 269,425 vectors embedded by another model;
+  re-embedding`, then rebuilt only 6,697 rows — `_purge_foreign_vectors`
+  deleted every vector whose `metadata.embedding_model` differed, regardless of
+  `--source`. The purge is now scoped to the `source_type`s the run rebuilds
+  (`_purge_foreign_vectors(conn, source_filter)`), with a `PRAGMA` guard for
+  old stores. The full rebuild (8 tables / 9 specs) resumes by existing ids and
+  ran against the live DB; the measured total (274,215 expected — the old index
+  was also short 4,441 Bible vectors) is recorded in `docs/database/tables.md`
+  § 2.14.
+- Docs updated: `docs/database/tables.md` (§2.15 rows + recount block + §6),
+  `docs/database/README.md`, `docs/reports/SOURCE_OF_TRUTH_MATRIX.md`,
+  `docs/architecture/current-state.md`, `docs/OPEN-ISSUES.md` (canonical lane
+  closed; purge incident recorded; snapshot drift measured as exactly
+  `grammar_patterns`, `hypotheses` (one row, `word:pang`) and
+  `foundation_evidence` — `zolai learn verify v2026.10.29.3`).
+
+Tests: `tests/test_canonical_promotion.py` (new, 7) — a two-translation verse
+is promoted with tiers (1,2), `threshold_gate` consensus and evidence ids; a
+single-translation verse is not promoted; unknown vocabulary queues; a rerun
+does not recount pending decisions; sentence and paragraph runs are
+idempotent. `tests/test_rag_chunking.py` grew to 13 with
+`test_scoped_purge_leaves_the_other_sources_embedded` and
+`test_scoped_purge_maps_a_table_name_to_its_source_type`. 69 related tests
+(hierarchy + foundation data layer + RAG chunking) pass; ruff clean.
+
+## 2026-10-31 (Session — CI `Test` step: 68+52 red down to 3, live OpenRouter probe green)
+
+The `CI` workflow's `Test` step had been red since 2026-10-27; `eval-smoke` was
+made green earlier and this session finished the job.
+
+- **Root cause of the 52 `ERROR`s** was not the tests — it was the corpus write
+  fence in `tests/conftest.py` firing in teardown. `ci_prepare_db.py` seeds a
+  throwaway schema DB and the app's own migrations write to it during the
+  suite; the fence exists to protect a 2.4 GB corpus that a runner has never
+  had. `08ac488` sets `ZOLAI_ALLOW_CANONICAL_WRITES=1` in the Test step only.
+  Result on CI: **68 failed + 52 errors → 3 failed, 3492 passed, 19 skipped**,
+  and the 53 "order-dependent" failures I had blamed on `sys.modules` stub
+  leakage in `tests/test_foundation_contract.py` disappeared with it — that
+  hypothesis was wrong (verified: `test_foundation_contract +
+  test_online_search + test_learning_engine` in one process, ordered as CI runs
+  them, passes 109/109 on a clean checkout; the fixture's snapshot-then-restore
+  is correct, and `tests/test_grammar_declarative_rules.py` already binds the
+  real module at collection time as its own guard).
+- **The remaining 3, each root-caused:** `test_engine_contract::
+  test_network_engine_probe_runs_unguarded` — `no such table: kg_nodes`,
+  because main's `ci_prepare_db.py` ran `Base.metadata.create_all` only, so the
+  raw-DDL knowledge graph never existed (RAG word evidence reads `kg_nodes`
+  unconditionally at `zolai/rag/evidence.py:390`);
+  `test_session_auth_cli::test_create_help_never_offers_a_password_argument` —
+  Rich styles each option name, and a CI TTY puts an escape code between
+  `--password` and `-stdin`, so the raw-stream assert could only pass off-CI;
+  `test_assistant_api::test_no_tool_call_triggers_a_grounding_pass` — required
+  production corpus words that CI's tiny seeded dictionary does not carry.
+  All three landed as `fe478c0` (bootstrap the seeded DB the same way the app
+  lifespan does: `init_db` + `create_kg_tables` + `run_all_migrations`; strip
+  ANSI before comparing; stub the grounding executor), which I had staged in a
+  clean worktree and found byte-identical to theirs — no push needed.
+- **`CI` is green on `1b87f23`: `3499 passed, 19 skipped, 1 xfailed` in 258s,
+  zero failures, zero errors** — the first passing run of the `Test` step since
+  2026-10-27, with every downstream step green too. Both `CI` and
+  `ZolaiBench Smoke Tests` now pass on `main`.
+- **Post-Test gates verified on a fresh checkout** (they had never executed,
+  because a failing `Test` step skipped them): split leakage gate exits 0
+  (skips explicitly, no split files), `data_provenance.py --generate` +
+  `--verify` exits 0, `zolai.eval.cli --set smoke --gate` exits 0. The rest of
+  the job is `continue-on-error`.
+- **Live OpenRouter probe green** after the 2026-10-31 00:00 UTC free-quota
+  reset, run against the deployed tree on pcore-server (`:8001`,
+  `.venv-dev`, `EnvironmentFile=.env.dev`): key resolves (masked `sk-or-…64a1`),
+  `DEFAULT_MODEL = nvidia/nemotron-3-ultra-550b-a55b:free`, every entry in
+  `FREE_MODELS` carries the `:free` suffix, and a completion returned exactly
+  `ZOLAI-PROBE-OK`. `ai_providers` has exactly one active row — `openrouter` —
+  with `api_key_ref` NULL, i.e. it activates through the catalog `env_keys`
+  fallback, as the activation check requires.
+- **Still open (user-side, per "code fixes only"):** rotate the leaked admin
+  password, `API_KEY_ADMIN`/`API_KEY_DEV`, and the 3x-ui panel password; only
+  then purge history. `tests/test_assistant_api.py`, `zolai/cli/main.py`,
+  `zolai/data/migrations.py` and the canonical-lane tests remain another lane's
+  uncommitted work; `context/progress-tracker.md` is left uncommitted on
+  purpose for the same reason.

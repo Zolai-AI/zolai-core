@@ -11,6 +11,7 @@ implementation; the learner methods and the hierarchy/discovery layers all
 delegate to them.
 """
 import re
+import threading
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
@@ -129,7 +130,27 @@ class BiblePatternLearner:
         print(f"Loaded {len(self.verses)} Bible verses from DB")
 
     def extract_patterns(self):
-        """Extract all pattern types from Bible."""
+        """Extract all pattern types from Bible, accumulating into this instance."""
+        self._scan_patterns(self.patterns, self.word_freq, self.phrase_patterns)
+
+    def fresh_patterns(self) -> tuple:
+        """The same scan into *new* containers, for a refresh that replaces.
+
+        Two reasons the background learning cycle must not call
+        :meth:`extract_patterns`: it accumulates, so every hourly cycle would
+        double the pattern list and the word counts, and it mutates the live
+        counters, which a request thread reading ``word_freq`` could meet
+        mid-update.  Callers run this in a worker thread, then swap the three
+        containers in with one assignment.
+        """
+        patterns: dict = defaultdict(list)
+        word_freq = Counter()
+        phrase_patterns = Counter()
+        self._scan_patterns(patterns, word_freq, phrase_patterns)
+        return patterns, word_freq, phrase_patterns
+
+    def _scan_patterns(self, patterns: dict, word_freq: Counter,
+                       phrase_patterns: Counter) -> None:
         for verse in self.verses:
             zo = verse.get('zo_tdb77') or ''
             en = verse.get('en_kJV') or ''
@@ -140,7 +161,7 @@ class BiblePatternLearner:
             structure = self._extract_structure(zo)
             components = self._extract_components(zo)
 
-            self.word_freq.update(tokenize_words(zo))
+            word_freq.update(tokenize_words(zo))
 
             pattern = SentencePattern(
                 pattern_type=pattern_type,
@@ -149,10 +170,10 @@ class BiblePatternLearner:
                 example_en=en,
                 components=components,
             )
-            self.patterns[pattern_type].append(pattern)
+            patterns[pattern_type].append(pattern)
 
-        for ptype, plist in self.patterns.items():
-            self.phrase_patterns[ptype] = len(plist)
+        for ptype, plist in patterns.items():
+            phrase_patterns[ptype] = len(plist)
 
     def _classify_pattern(self, text: str) -> str:
         """Classify sentence pattern type (delegates to :func:`classify_clause`)."""
@@ -231,6 +252,53 @@ class BiblePatternLearner:
                 if len(matching) >= limit:
                     break
 
+        return self._render_context(word, matching)
+
+    def build_contexts_for_words(self, words, limit: int = 3,
+                                 max_tokens: int = 200) -> dict:
+        """Context for many words at once, in a single corpus pass.
+
+        :meth:`build_context_for_word` scans all ~30k verses per word. That is fine
+        for one lookup and ruinous for a vocabulary batch — 1000 words re-swept the
+        whole corpus and blew a task's timeout before it produced anything. Here the
+        corpus is walked once and each verse's tokens are matched against every word
+        still waiting.
+
+        Matching is whole-token, the same unit ``word_freq`` is built from, so every
+        vocabulary word handed to this method is findable; the single-word method
+        above keeps its looser substring behaviour for callers that pass free text.
+        """
+        wanted: dict = {}
+        for w in words:
+            if w:
+                wanted.setdefault(w.lower(), w)
+
+        char_budget = max_tokens * 4
+        collected: dict = {w: [] for w in wanted}
+        used_chars: dict = {w: 0 for w in wanted}
+        still_waiting = set(wanted)
+
+        for verse in self.verses:
+            if not still_waiting:
+                break
+            zo = verse.get('zo_tdb77') or ''
+            en = verse.get('en_kJV') or ''
+            entry = {'ref': verse.get('ref', ''), 'zolai': zo, 'english': en}
+            entry_chars = len(zo) + len(en) + 50
+            for word in still_waiting & set(tokenize_words(zo)):
+                still_waiting.discard(word)
+                if used_chars[word] + entry_chars > char_budget:
+                    continue
+                collected[word].append(entry)
+                used_chars[word] += entry_chars
+                if len(collected[word]) < limit:
+                    still_waiting.add(word)
+
+        return {wanted[w]: self._render_context(wanted[w], hits)
+                for w, hits in collected.items()}
+
+    @staticmethod
+    def _render_context(word: str, matching: list) -> str:
         if not matching:
             return f"No Bible sentences found containing '{word}'"
 
@@ -270,12 +338,22 @@ class BiblePatternLearner:
 
 # Singleton instance
 _learner: Optional[BiblePatternLearner] = None
+_learner_lock = threading.Lock()
 
 
 def get_bible_learner() -> BiblePatternLearner:
-    """Get or create Bible pattern learner instance."""
+    """Get or create Bible pattern learner instance.
+
+    Locked, because the API now loads it from a warm-up thread while request
+    threads may ask for it too; an unlocked double build ran two 12 s corpus loads
+    and published whichever finished last, so a caller could hold a learner whose
+    patterns were still being appended by the other.
+    """
     global _learner
     if _learner is None:
-        _learner = BiblePatternLearner()
-        _learner.extract_patterns()
+        with _learner_lock:
+            if _learner is None:
+                learner = BiblePatternLearner()
+                learner.extract_patterns()
+                _learner = learner
     return _learner

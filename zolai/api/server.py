@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -388,6 +389,28 @@ def _stop_monitoring() -> None:
         logger.debug("Metrics sampler stop failed", exc_info=True)
 
 
+def _warm_learning_engines() -> None:
+    """Load the Bible corpus in the background so the first learning task is fast.
+
+    ``get_bible_learner`` reads ~30k verses and measured 12.9 s cold on the
+    deployed box — on its own enough to eat a task's whole timeout budget when
+    it lands inside the first request after a restart.  The learner is a module
+    singleton, so paying that once at boot, off the request thread, takes it out
+    of every later call.
+    """
+
+    def _load() -> None:
+        try:
+            from ..learning.bible_pattern_learner import get_bible_learner
+
+            learner = get_bible_learner()
+            logger.info("Learning corpus warm: %d verses", len(learner.verses))
+        except Exception:
+            logger.exception("Learning corpus warm-up failed")
+
+    threading.Thread(target=_load, name="learning-warmup", daemon=True).start()
+
+
 # --- App Factory ---
 
 
@@ -472,6 +495,7 @@ def create_app() -> FastAPI:
 
         # Monitoring: FK guard, build info and the background metrics sampler.
         _start_monitoring()
+        _warm_learning_engines()
 
         _warn_if_auth_not_enforced()
 

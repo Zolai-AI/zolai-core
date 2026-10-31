@@ -813,14 +813,18 @@ def foundation_promote(
     limit: int = typer.Option(0, "--limit", "-l", help="Max candidates (0 = all)"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
-    """⬆️ Promote staging (or attested vocabulary) to canonical with evidence gating."""
+    """⬆️ Promote words, or parallel-attested Bible sentences/paragraphs, to canonical."""
     _setup_logging(verbose)
     from zolai.pipeline.foundation import FoundationETL
 
     etl = FoundationETL(db_path=f"sqlite:///{config.paths.db}")
     with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
         task = progress.add_task("Promoting with threshold={threshold}...", total=None)
-        if attested:
+        if fact_type == "sentence":
+            result = etl.promote_bible_sentences(threshold=threshold, limit=limit)
+        elif fact_type == "paragraph":
+            result = etl.promote_bible_paragraphs(threshold=threshold, limit=limit)
+        elif attested:
             result = etl.promote_words_from_attestations(
                 threshold=attested_threshold, limit=limit
             )
