@@ -15,6 +15,47 @@ from .models import Base
 from .pos_normalize import normalize_legacy_pos
 
 
+USER_TEXT_SUBMISSIONS_DDL = """
+CREATE TABLE IF NOT EXISTS foundation_user_submissions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    raw_id INTEGER NOT NULL REFERENCES foundation_raw_corpus(id),
+    content_hash TEXT NOT NULL UNIQUE,
+    content_type TEXT NOT NULL CHECK(content_type IN ('sentence', 'article', 'text')),
+    user_id INTEGER,
+    submitted_by TEXT,
+    auth_source TEXT,
+    analysis_json TEXT NOT NULL DEFAULT '{}',
+    provenance_json TEXT NOT NULL DEFAULT '{}',
+    zvs_compliant INTEGER NOT NULL DEFAULT 0,
+    sov_valid INTEGER NOT NULL DEFAULT 0,
+    validation_status TEXT NOT NULL CHECK(
+        validation_status IN ('passed', 'failed', 'mixed', 'non_zvs')
+    ),
+    quarantine_reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)
+"""
+
+
+def create_user_text_submission_tables(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create the quarantined user-text candidate table.
+
+    User text is deliberately linked to the immutable raw layer and has no
+    promotion flag or canonical foreign key.  Promotion remains an explicit,
+    evidence-gated operation outside this intake path.
+    """
+    with mgr.engine.begin() as conn:
+        conn.execute(text(USER_TEXT_SUBMISSIONS_DDL))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_fuser_submissions_status "
+                "ON foundation_user_submissions(validation_status, created_at)"
+            )
+        )
+    return {"created": ["foundation_user_submissions"], "errors": []}
+
+
 def create_foundation_tables(mgr: DatabaseManager) -> dict[str, Any]:
     """Create all Foundation layer tables (Phase B).
 

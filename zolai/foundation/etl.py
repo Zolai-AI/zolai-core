@@ -200,6 +200,8 @@ class FoundationETL:
 
             for row in rows:
                 raw_id, source_type, payload_str = row
+                if source_type == "user_submission":
+                    continue
                 try:
                     payload = json.loads(payload_str) if payload_str else {}
                 except json.JSONDecodeError:

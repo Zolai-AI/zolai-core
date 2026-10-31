@@ -52,6 +52,7 @@ from ..api.record_review_router import router as record_review_router
 from ..api.records_router import router as records_router
 from ..api.role_requests_router import router as role_requests_router
 from ..api.security import SecurityHeadersMiddleware, cors_kwargs, get_cors_origins
+from ..api.user_text_router import router as user_text_router
 from ..api.word_engine_router import router as word_engine_router
 from ..cleaner.pipeline import CleanPipeline
 from ..config import config
@@ -569,6 +570,7 @@ def create_app() -> FastAPI:
     app.include_router(bible_alias_router)
     # Foundation Review Queue API
     app.include_router(foundation_router, prefix="/api/v1")
+    app.include_router(user_text_router)
     # API-key admin (issue/list/rotate/revoke) — scope-gated, plaintext once
     app.include_router(admin_api_keys_router)
     # Admin user accounts (list/create/role/password/revoke-sessions) — strict

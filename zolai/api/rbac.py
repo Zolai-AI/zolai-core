@@ -285,6 +285,7 @@ MEMBER_PREFIXES: tuple[str, ...] = (
     "/api/v1/linguistics",
     "/api/v1/predictions",
     "/api/v1/foundation",
+    "/api/v1/learning",
     "/api/v1/auth",
     # ``/desktop`` is a declared authed surface outside ``/api/v1``: 44 routes in
     # zolai/api/desktop_router.py + 7 in zolai/api/jsonl_router.py (51

@@ -231,6 +231,11 @@ class FoundationETL:
 
             for i, raw in enumerate(raw_records):
                 try:
+                    if raw.get("source_type") == "user_submission":
+                        # User submissions are analyzed and quarantined by the
+                        # authenticated intake service; generic ETL must not
+                        # re-stage or promote them.
+                        continue
                     payload = json.loads(raw["payload"])
                     text = payload.get("text", "")
                     if not text:
