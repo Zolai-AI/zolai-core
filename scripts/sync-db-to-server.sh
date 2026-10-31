@@ -9,7 +9,7 @@
 #
 # Safety (the server DB is held open by the running API process):
 #   (a) local  : consistent snapshot via `sqlite3 .backup` (WAL-safe)
-#   (b) rsync  : push snapshot to a server temp path
+#   (b) rsync  : push snapshot to a server temp path (resumable via --partial)
 #   (c) server : stop the API service (systemctl) — never swap a
 #                hot file the process holds open
 #   (d) server : back up existing DB first (data/backups/zolai-<ts>.db.gz)
@@ -114,7 +114,10 @@ echo "  integrity: ok"
 
 # --- (b) push up --------------------------------------------------------------
 echo "[2/7] rsync → ${SERVER_HOST}:${REMOTE_TMP}"
-rsync -a -e "ssh ${SSH_OPTS[*]}" "${LOCAL_SNAP}" "${SERVER_HOST}:${REMOTE_TMP}"
+# --partial keeps the bytes already sent as the destination file, so a dropped
+# connection resumes by delta instead of restarting a 2.8 GB transfer from zero
+# (seen 2026-10-31: the link stalled at 121 MB and the run aborted).
+rsync -a --partial -e "ssh ${SSH_OPTS[*]}" "${LOCAL_SNAP}" "${SERVER_HOST}:${REMOTE_TMP}"
 echo "  pushed: $(ssh "${SSH_OPTS[@]}" "${SERVER_HOST}" "stat -c %s '${REMOTE_TMP}'") bytes"
 
 # --- (c) stop the API service (server DB is hot) ------------------------------
