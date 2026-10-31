@@ -1754,3 +1754,40 @@ Pinned by `tests/test_knowledge_index_cache.py`. Full suite after the change:
 answer says "sign in to generate") from `no_provider` (nothing configured).
 `llm_allowed()` is evaluated once so the flag and the prose agree.
 `tests/test_assistant_api.py`: 26 passed.
+
+### Consolidated to main, DB and code on pcore-server (2026-10-31, session)
+**Merge.** Every branch is contained: `git cherry main` shows the five fix
+branches patch-equivalent, and the three `wip/stale-snapshot-2026-10-31`
+commits' content is in main (dictionary repair, hierarchy openers, DB
+source-of-truth tests, `agents/zolai-learning-runner/agent.json`,
+`docs/admin/permissions.md`). The parallel session merged those branches onto
+main as `e599bc7`…`1cda811`; main was pushed to `origin` through `a9a13dd`.
+
+**Code deploy.** `scripts/sync-and-deploy.sh pcore-server` fast-forwarded
+`/home/ubuntu/zolai-core` and restarted `zolai-core-dev`; `/health` 200 each
+time. Live revision: **`a9a13dd`**.
+
+**DB push.** `scripts/sync-db-to-server.sh` — local `.backup` snapshot
+2,955,575,296 bytes (`integrity ok`) → server backup
+`data/backups/zolai-2026-10-31_1458.db.gz` (883,822,305 bytes) → remote
+`integrity_check ok` → atomic replace (stale `-wal`/`-shm` dropped) → `/health`
+200 in 5 s. Server now matches local exactly: `knowledge_vectors` **274,264**
+(grammar_patterns 6,746), `knowledge_versions` **43**, `learning_runs` **5**.
+
+**The transfer stalled twice** (121 MB, then 1.4 GB) — `Timeout, server …
+not responding` on the SSH link. `--partial` alone kept the interrupted bytes
+under rsync's temp name, so the retry started from zero. The script now uses
+`--inplace` (bytes stay at the destination path), `--timeout=60`, and up to
+eight retries (`ZOLAI_SYNC_ATTEMPTS`); the third run resumed from the 1.4 GB
+already on the server and completed.
+
+**Retrieval latency after restart:** the first `/knowledge/search` is **192 s**
+— the `rag` matrix hydrates on first use, independently from the `knowledge`
+index that `/knowledge/status` had already loaded (~2 min). Warm requests:
+**2.07 s → 0.15 s**. The per-request `MAX(imported_at)` scan is gone; the cold
+cost is the one-time matrix hydration, not the cache check.
+
+**Tests:** 532 passed across the merged fixes (cache, assistant, SMTP,
+offload, POS, oauth); 151 passed for the five newest commits; `ruff check
+zolai tests` clean.
+
