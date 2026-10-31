@@ -4,15 +4,18 @@ Provides domain-specific repositories with common CRUD operations,
 transactions, version tracking, and audit logging.
 """
 
+from pathlib import Path
+
+from ...config import config
 from .alignment import AlignmentRepository
 from .base import BaseRepository
 from .bible import BibleAnalysisRepository, BibleRepository
 from .dictionary import DictionaryEnZoRepository, DictionaryRepository
 from .exercise import ExerciseRepository
 from .extended import (
-    KGRepository,
     CorrectionRepository,
     GrammarInstructionRepository,
+    KGRepository,
     KnowledgeVectorRepository,
     NgramRepository,
     ParticleRepository,
@@ -51,6 +54,20 @@ from .phrase import PhraseRepository
 from .provenance import AuditRepository, ProvenanceRepository
 from .translation import TranslationRepository, WordAlignmentRepository
 from .vocabulary import VocabularyRepository, WordUsageRepository
+
+
+def _bootstrap_isolated_engine(engine) -> None:
+    """Create repository tables for non-canonical, isolated databases only."""
+    database = engine.url.database
+    if database and Path(database).resolve() == Path(config.paths.zolai_db).resolve():
+        return
+
+    from ..models import Base
+    from ..schema_v2 import ensure_schema_v2
+
+    Base.metadata.create_all(engine)
+    ensure_schema_v2(engine)
+
 
 __all__ = [
     "AlignmentRepository",
@@ -109,12 +126,15 @@ __all__ = [
 def get_engine(db_path=None):
     """Shared SQLAlchemy engine for the repository layer.
 
-    Applies the v2 schema (missing tables + unified metadata columns) to the
-    canonical DB unless ``db_path`` is given.
+    Initializes the ORM and v2 tables for fresh isolated databases. The
+    canonical database is expected to have been bootstrapped by its migration
+    path and is never rewritten by this factory.
     """
     from ..schema_v2 import get_engine as _get_engine
 
-    return _get_engine(db_path)
+    engine = _get_engine(db_path)
+    _bootstrap_isolated_engine(engine)
+    return engine
 
 
 def get_repositories(db_path=None, engine=None) -> dict[str, BaseRepository]:
@@ -124,8 +144,10 @@ def get_repositories(db_path=None, engine=None) -> dict[str, BaseRepository]:
     repository against a single engine.
     """
     from ..schema_v2 import get_engine as _get_engine
+
     if engine is None:
         engine = _get_engine(db_path)
+    _bootstrap_isolated_engine(engine)
     repos = {
         "dictionary": DictionaryRepository(engine),
         "dictionary_en_zo": DictionaryEnZoRepository(engine),

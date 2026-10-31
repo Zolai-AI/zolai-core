@@ -18,8 +18,8 @@ from __future__ import annotations
 
 import logging
 
+from sqlalchemy import event, text
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 logger = logging.getLogger(__name__)
@@ -184,22 +184,26 @@ def get_engine(db_path=None):
     """Common engine factory for the repository layer.
 
     Uses the canonical DB path from ``config.paths.zolai_db`` unless overridden,
-    with the same busy_timeout/WAL settings used across the stack.
+    with the same busy_timeout/WAL/foreign-key settings used across the stack.
 
     Building an engine does not migrate anything — a caller that needs the v2
     tables calls :func:`ensure_schema_v2` (or :func:`migrate`) itself.
     """
     from sqlalchemy import create_engine
 
+    from .database import sqlite_on_connect
+
     if db_path is None:
         from ..config import config
 
         db_path = config.paths.zolai_db
 
-    engine = create_engine(f"sqlite:///{db_path}", echo=False)
-    with engine.connect() as conn:
-        conn.execute(text("PRAGMA busy_timeout=30000"))
-        conn.execute(text("PRAGMA synchronous=NORMAL"))
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        echo=False,
+        connect_args={"check_same_thread": False, "timeout": 30},
+    )
+    event.listen(engine, "connect", sqlite_on_connect)
     return engine
 
 
