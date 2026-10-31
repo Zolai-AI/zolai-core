@@ -38,6 +38,7 @@ from zolai.data.database import DatabaseManager
 from zolai.data.migrations import create_api_keys_table
 from zolai.knowledge import retrieve as knowledge_module
 from zolai.learning.dictionary_manager import DictionaryManager
+from zolai.trainer.dataset import DatasetBuilder
 
 #: ``(method, path, json body, owner object, attribute name)`` — one per legacy
 #: route that does synchronous I/O. ``POST /analyze`` needs an explicit ``{}``:
@@ -52,6 +53,7 @@ PROBES: list[tuple[str, str, dict | None, object, str]] = [
     ("GET", "/dictionary/search/my?q=pasian", None, DatabaseManager, "lookup_myanmar"),
     ("GET", "/bible/search?q=khi&limit=2", None, DatabaseManager, "search_bible"),
     ("POST", "/knowledge/search", {"query": "pasian"}, knowledge_module, "retrieve"),
+    ("POST", "/train/splits", {}, DatasetBuilder, "build_splits"),
     # ``/desktop/*`` counts every table in the 2.4GB corpus and shells out to
     # scripts with a 120s timeout — the most expensive version of this bug.
     ("GET", "/desktop/tables", None, desktop_module, "get_db"),

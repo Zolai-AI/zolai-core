@@ -847,7 +847,12 @@ def create_app() -> FastAPI:
     async def build_splits(req: TrainRequest):
         try:
             builder = DatasetBuilder()
-            result = builder.build_splits(val_ratio=req.val_ratio, test_ratio=req.test_ratio, seed=req.seed)
+            result = await run_in_threadpool(
+                builder.build_splits,
+                val_ratio=req.val_ratio,
+                test_ratio=req.test_ratio,
+                seed=req.seed,
+            )
             await manager.broadcast({"event": "splits_built", "result": result})
             return TrainResponse(status="ok", splits=result)
         except Exception as exc:
