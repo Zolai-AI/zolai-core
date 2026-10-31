@@ -1670,3 +1670,57 @@ are written but left uncommitted because a concurrent session's in-progress
 changes share those files; the two tracked model artifacts
 (`models/pos_tagger_crf.pkl`, `models/crf_syllable.pkl`) are modified by the
 cycle's PUBLISHED step and need an explicit commit decision of their own.
+
+## 2026-10-31 (Session — one database: vectors repaired, dev stack pinned)
+
+"Single DB" was already the resolver's contract (2026-10-27); three things
+still broke it in practice, all fixed here.
+
+**Stray checkout store removed.** `zolai-core/data/zolai.db` (16 KB, only an
+empty `import_log`) sat beside the 2.9 GB workspace store. Deleted. The default
+resolver is now asserted structurally: with `ZOLAI_DB_PATH` / `ZOLAI_DATA_ROOT`
+cleared, `Paths().db` must be `<workspace>/data/zolai.db` and must not be
+`<checkout>/data/zolai.db` (`tests/test_db_source_of_truth.py`).
+
+**Dev stack pins the store.** `scripts/dev/local-stack.sh` exports
+`ZOLAI_DATA_ROOT=$WORKSPACE/data` and `ZOLAI_DB_PATH=$ZOLAI_DATA_ROOT/zolai.db`
+(env file still wins) and prints the path it resolved, so the API, Studio, chat
+tools and RAG all open one file regardless of cwd. `menu.sh`'s DB health check
+now reads `config.paths.db` instead of reconstructing the path, and prints the
+vector table broken down by source.
+
+**Incremental re-embed was writing invalid vectors.** Two defects in
+`zolai/rag/incremental.py`, both exposed by the 200 dictionary rows the cycle
+re-embedded at 11:04:
+
+* the metadata omitted `embedding_model` / `embedding_dim`, so
+  `_purge_foreign_vectors` would treat them as foreign and the model identity
+  was unknown;
+* `_piece_ids` derived ids without the model prefix and with a 50-character
+  text prefix — different from `build._vector_id`, whose ids are exactly what
+  the full build skips on. A later full build would therefore have inserted a
+  second copy of every incrementally re-embedded row.
+
+Both now use `build._vector_id` and the same identity metadata. Pinned by
+`test_reembed_ids_match_the_full_build` and
+`test_reembed_writes_the_embedding_model_identity`. The 200 live rows were
+repaired in place from their stored text (no re-embedding): ids recomputed with
+the build formula, `embedding_model` + `embedding_dim` backfilled. Verified:
+274,264 rows, 274,264 tagged `all-MiniLM-L6-v2`, 0 untagged, no duplicate
+`source_id` in `dictionary`.
+
+**Vector usage, measured (2026-10-31):** 274,264 vectors = 1.126 GB by
+`dbstat` — 38 % of the 2.96 GB DB. By source: dictionary 84,490 ·
+dictionary_en_zo 64,025 · bible_verses 60,560 · wiki_content 28,738 ·
+word_observation_stats 18,811 · phrases 10,722 · grammar_patterns 6,746 ·
+knowledge_claims 172. Stored as base64 float32 (2,050 chars/row, 384 dims).
+Two readers load the full matrix into RAM lazily and independently:
+`rag.retrieve.UnifiedRetriever` (the `rag_search` agent/MCP tool and
+`POST /api/v1/rag`) and `knowledge.retrieve.load_index` (`/knowledge/search`);
+both are gated and cached per process. The unified retriever only falls back
+to vectors for sentence-like queries (≥2 tokens) or thin lexical results, with
+cosine ≥ 0.35; `ZOLAI_VECTOR_SEARCH=0` disables the pass. `/knowledge/status`
+now reports `db_path` and `vectors_by_source` alongside the count.
+
+Tests: 107 passed across incremental/chunking/contract/route/DB-source/
+canonical suites; ruff clean.

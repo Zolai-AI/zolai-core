@@ -25,6 +25,8 @@
 #   ZOLAI_UPSTREAM      API URL the studio proxies to (default :$ZOLAI_API_PORT)
 #   ZOLAI_STUDIO_DIR    Studio checkout      (default ../zolai-explorer)
 #   ZOLAI_DEV_RUN_DIR   pid/log directory    (default /tmp/zolai-dev)
+#   ZOLAI_DATA_ROOT     data root            (default $WORKSPACE/data)
+#   ZOLAI_DB_PATH       canonical database   (default $ZOLAI_DATA_ROOT/zolai.db)
 #   ZOLAI_ENV_FILE      systemd-style env file sourced before the API starts
 #                       (default: .env.dev if present; .env is loaded by the app)
 # ============================================================================
@@ -115,6 +117,13 @@ start_api() {
     set +a
     say "env: $envfile"
   fi
+
+  # One database for the whole dev stack. Without this the resolver falls back
+  # to its own defaults, which is how a stray zolai-core/data/zolai.db appeared
+  # next to the real 2.9 GB workspace store. An explicit env file still wins.
+  export ZOLAI_DATA_ROOT="${ZOLAI_DATA_ROOT:-$WORKSPACE/data}"
+  export ZOLAI_DB_PATH="${ZOLAI_DB_PATH:-$ZOLAI_DATA_ROOT/zolai.db}"
+  say "db: $ZOLAI_DB_PATH"
 
   say "starting API  :$API_PORT (nginx parity, 127.0.0.1)"
   (

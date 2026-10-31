@@ -75,18 +75,23 @@ while true; do
       echo -e "${G}DB Health Check...${NC}"
       source "$DIR/.venv/bin/activate" 2>/dev/null || true
       cd "$DIR" && python -c "
-import sqlite3, os
-p = os.path.join('$(dirname $DIR)/data', 'zolai.db')
-sz = os.path.getsize(p)/1024/1024
-conn = sqlite3.connect(p, timeout=5)
+from zolai.config import config
+import sqlite3
+p = config.paths.db
+sz = p.stat().st_size/1024/1024
+conn = sqlite3.connect(f'file:{p}?mode=ro', uri=True, timeout=5)
 c = conn.cursor()
-print(f'  DB: {sz:.1f} MB')
+print(f'  DB: {p} ({sz:.1f} MB)')
 c.execute(\"SELECT name FROM sqlite_master WHERE type='table'\")
 for r in c.fetchall():
     t = r[0]
     if t == 'sqlite_sequence': continue
     c.execute(f'SELECT COUNT(*) FROM [{t}]')
     print(f'  {t:25s}: {c.fetchone()[0]:>10,}')
+if 'knowledge_vectors' in {r[0] for r in c.execute(\"SELECT name FROM sqlite_master WHERE type='table'\")}:
+    c.execute('SELECT source, COUNT(*) FROM knowledge_vectors GROUP BY source ORDER BY 2 DESC')
+    for src, n in c.fetchall():
+        print(f'  vectors[{src:20s}]: {n:>10,}')
 conn.close()
 "
       read -p "Press Enter..."

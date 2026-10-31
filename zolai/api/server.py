@@ -1244,7 +1244,13 @@ def create_app() -> FastAPI:
 
     @app.get("/knowledge/status")
     def knowledge_status():
-        """Check knowledge index status."""
+        """Check knowledge index status.
+
+        Reports the store the index is read from, not just a count: a second
+        database or an unbuilt table is invisible in a bare ``indexed_chunks``
+        number, and the old ``index_path`` pointed at a JSONL bundle that the
+        DB-first reader never loads.
+        """
         from sqlalchemy import text as sql_text
 
         from ..data.repositories import get_engine
@@ -1258,11 +1264,19 @@ def create_app() -> FastAPI:
                     "FROM knowledge_vectors"
                 )
             ).first()
+            by_source = dict(
+                conn.execute(
+                    sql_text(
+                        "SELECT source, COUNT(*) FROM knowledge_vectors "
+                        "GROUP BY source ORDER BY COUNT(*) DESC"
+                    )
+                ).all()
+            )
         return {
             "indexed_chunks": int(row[0] or 0),
-            # A row count, not a hydrated matrix: /status must not pull the
-            # ~380 MB vector index into memory just to answer this.
             "has_vectors": int(row[1] or 0) > 0,
+            "db_path": str(config.paths.db),
+            "vectors_by_source": {str(k): int(v) for k, v in by_source.items()},
             "index_path": str(config.paths.data_knowledge / "knowledge_vectors.jsonl"),
         }
 

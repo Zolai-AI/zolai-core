@@ -95,7 +95,7 @@ def _vectors(engine, source: str) -> list[dict]:
         return [
             dict(r._mapping)
             for r in conn.execute(
-                text("SELECT id, metadata FROM knowledge_vectors WHERE source = :s"),
+                text("SELECT id, text, metadata FROM knowledge_vectors WHERE source = :s"),
                 {"s": source},
             ).fetchall()
         ]
@@ -162,6 +162,55 @@ def test_bible_row_reembeds_both_specs(engine) -> None:
     assert {json.loads(v["metadata"])["source_id"] for v in vectors} == {"GEN 1:1"}
     assert summary["reembedded"] == 1
     assert summary["chunks"] == 2
+
+
+def test_reembed_writes_the_embedding_model_identity(engine) -> None:
+    """Every re-embedded row must carry the model tag the full build writes.
+
+    Without it the row is indistinguishable from a foreign embedding: the next
+    full build purges it as untagged, and a reader cannot tell which vector
+    space it belongs to.
+    """
+    from zolai.rag.build import EMBEDDING_MODEL, VECTOR_DIM
+
+    _seed_bible(engine)
+    update_knowledge_vectors_incremental(
+        engine,
+        sources=["bible_verses"],
+        reconcile=True,
+        embedder=FakeEmbedder(),
+    )
+
+    for vector in _vectors(engine, "bible_verses"):
+        meta = json.loads(vector["metadata"])
+        assert meta["embedding_model"] == EMBEDDING_MODEL
+        assert meta["embedding_dim"] == VECTOR_DIM
+        assert meta["source_table"] == "bible_verses"
+
+
+def test_reembed_ids_match_the_full_build(engine) -> None:
+    """A resumed full build must recognise the rows incremental already wrote.
+
+    ``build_knowledge_vectors`` skips ids that exist; if incremental derived
+    different ids, the next build would insert a second copy of every
+    re-embedded row.
+    """
+    from zolai.rag.build import _vector_id
+
+    _seed_bible(engine)
+    update_knowledge_vectors_incremental(
+        engine,
+        sources=["bible_verses"],
+        reconcile=True,
+        embedder=FakeEmbedder(),
+    )
+
+    for vector in _vectors(engine, "bible_verses"):
+        meta = json.loads(vector["metadata"])
+        expected = _vector_id(
+            "bible_verses", meta["source_id"], 0, vector["text"], chunked=False
+        )
+        assert vector["id"] == expected
 
 
 def test_embed_failure_keeps_old_vectors_and_records_retryable_state(engine) -> None:

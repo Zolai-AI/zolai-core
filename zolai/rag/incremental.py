@@ -26,12 +26,15 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from zolai.rag.build import (
+    EMBEDDING_MODEL,
     MAX_CHUNKS_PER_DOC,
     SOURCES,
+    VECTOR_DIM,
     SourceSpec,
     _build_text_for_source,
     _chunk_text,
     _get_embedder,
+    _vector_id,
 )
 from zolai.rag.vectors import encode_embedding
 from zolai.shared.clock import stamp
@@ -205,16 +208,17 @@ def _select_rows(
 
 
 def _piece_ids(spec: SourceSpec, source_id: str, pieces: list[str]) -> list[tuple[str, str]]:
-    """``(vector id, chunk text)`` — identical derivation to ``build.py``."""
-    out: list[tuple[str, str]] = []
-    for chunk_idx, piece in enumerate(pieces):
-        key = (
-            f"{spec.table}:{source_id}:{chunk_idx}:{piece[:50]}"
-            if spec.chunk
-            else f"{spec.table}:{source_id}:{piece[:50]}"
-        )
-        out.append((hashlib.sha256(key.encode()).hexdigest()[:32], piece))
-    return out
+    """``(vector id, chunk text)`` — the full build's id derivation.
+
+    The id must be byte-identical to ``build._vector_id``: the full build
+    skips rows whose id already exists, so an incremental re-embed with a
+    different formula leaves rows the next build cannot recognise and inserts
+    a second copy of every one of them.
+    """
+    return [
+        (_vector_id(spec.table, source_id, chunk_idx, piece, chunked=spec.chunk), piece)
+        for chunk_idx, piece in enumerate(pieces)
+    ]
 
 
 def _row_pieces(
@@ -559,6 +563,12 @@ def update_knowledge_vectors_incremental(
                         "source": table,
                         "source_table": table,
                         "source_id": source_id,
+                        # Same identity fields build.py writes: without the
+                        # model tag a re-embed produces rows the next full
+                        # build treats as foreign and purges, and no reader
+                        # can tell which embedding space a row belongs to.
+                        "embedding_model": EMBEDDING_MODEL,
+                        "embedding_dim": VECTOR_DIM,
                     }
                 ),
                 "emb": encode_embedding(emb),

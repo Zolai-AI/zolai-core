@@ -215,6 +215,39 @@ def test_loaders_follow_the_configured_database(seeded_db: Path) -> None:
     assert ner._dict_cache["vantung"]["pos"] == "N"
 
 
+def test_default_resolver_is_the_workspace_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no env override the DB is ``<workspace>/data/zolai.db``.
+
+    In the monorepo the package sits one level below the store, so the default
+    must climb out of the checkout. A default of ``<package>/data/zolai.db``
+    creates a second, empty database next to the real one (the 16 KB
+    ``zolai-core/data/zolai.db`` stub this gate exists to prevent).
+    """
+    for key in DB_ENV_VARS:
+        monkeypatch.delenv(key, raising=False)
+
+    from zolai.config import Paths
+
+    paths = Paths()
+    package_data = PACKAGE_ROOT.parent / "data"
+    assert paths.db == PACKAGE_ROOT.parent.parent / "data" / "zolai.db"
+    assert paths.db != package_data / "zolai.db"
+    assert paths.zolai_db == paths.db
+
+
+def test_dev_launcher_pins_the_canonical_store() -> None:
+    """The dev stack exports the workspace DB instead of trusting the cwd.
+
+    ``local-stack.sh`` starts uvicorn from the checkout, so a resolver that
+    fell back to a relative path would create a checkout-local database.
+    """
+    script = (PACKAGE_ROOT.parent / "scripts" / "dev" / "local-stack.sh").read_text(
+        encoding="utf-8"
+    )
+    assert 'ZOLAI_DATA_ROOT="${ZOLAI_DATA_ROOT:-$WORKSPACE/data}"' in script
+    assert 'ZOLAI_DB_PATH="${ZOLAI_DB_PATH:-$ZOLAI_DATA_ROOT/zolai.db}"' in script
+
+
 def test_eval_store_follows_the_configured_database(seeded_db: Path) -> None:
     """The eval store schema lands in the configured DB, not beside the old one."""
     from zolai.eval import store
