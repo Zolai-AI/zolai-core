@@ -525,8 +525,11 @@ class TestAdminAPI:
         assert row["api_key_ref"] is None
 
     def test_activate_sets_exactly_one(
-        self, client, provider_db, admin_key
+        self, client, provider_db, admin_key, monkeypatch
     ) -> None:
+        # openrouter needs a resolvable key (activation refuses without one), and
+        # a CI runner has no .env — so supply it rather than inherit the shell's.
+        monkeypatch.setenv("OPENROUTER_API_KEY", "k" * 32)
         response = client.post(
             "/api/v1/admin/ai-providers/openrouter/activate", headers=_headers(admin_key)
         )
