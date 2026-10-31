@@ -51,7 +51,7 @@ from zolai.rag.evidence import EvidencePack
 
 MEMBER = allow_list("member")
 
-# ── Frozen before this batch (HEAD 94414df) ──────────────────────────────────
+# ── Frozen before the B1a batch, re-frozen on deliberate changes ─────────────
 #
 # Captured with the same canonicalisation the assertions below use
 # (``json.dumps(..., sort_keys=True, separators=(",", ":"))`` over the rendered
@@ -121,14 +121,15 @@ _PRE_B1A_NAMES: dict[str, list[str]] = {
     ],
 }
 
-_PRE_B1A_MCP_SHA256: dict[str, str] = {
-    # Re-frozen 2026-10-31: the schema for ``query``/``word``/``text``/``ref``
-    # now marks its single argument required (the handlers always rejected an
-    # empty call; the advertised schema used to say ``required: []``).  The
-    # tool *set* is unchanged, so the prefix test still pins name/order.
-    "public": "d3f39f5a3281de23540ffed9408cc3e8309f6e5d39e97d6d38040c31776b29e3",
-    "member": "0758c40af81ecf9b4e5e2e7bf602cc8f1050b1d303453d08d8bba8b4eb29ab89",
-    "admin": "a3dd3ab93baf1966755701b60c16cb88d4bab273ddd37614b63b1b23fbfddd4c",
+_FROZEN_MCP_SHA256: dict[str, str] = {
+    # Frozen before the B1a batch and re-frozen on deliberate schema changes:
+    # 2026-10-31 marked ``query``/``word``/``text``/``ref`` required, and the
+    # same day gave ``query`` a ``minLength`` (the handlers always rejected an
+    # empty call).  The tool *set* is unchanged, so the prefix test still pins
+    # name/order; this dict pins the rendered entry shape itself.
+    "public": "2481bbab2b981aa1bfd6d7a866d954f39d089265787b1515609cca8959b943e0",
+    "member": "af4ae584fda3943e020ac0cbbd151e5a8dfa06b6662a493846ad9d26487740ed",
+    "admin": "8fbb4f148bcd50b3117f2962737f24dc1d7f7a37633710815b00401472384f16",
 }
 
 #: The three tiers this batch is allowed to touch, and how.
@@ -147,9 +148,9 @@ class TestSurfaceOnlyGrew:
             # nothing removed, nothing reordered
             assert after_names[: len(before_names)] == before_names, tier
             prefix = _digest(render_mcp_for(before_names))
-            assert prefix == _PRE_B1A_MCP_SHA256[tier], (
-                f"{tier}: the pre-B1a payload changed shape — {prefix} != "
-                f"{_PRE_B1A_MCP_SHA256[tier]}"
+            assert prefix == _FROZEN_MCP_SHA256[tier], (
+                f"{tier}: the frozen payload changed shape — {prefix} != "
+                f"{_FROZEN_MCP_SHA256[tier]}"
             )
 
     def test_member_and_admin_are_a_strict_superset_and_the_public_tier_is_untouched(self) -> None:
@@ -174,9 +175,9 @@ class TestSurfaceOnlyGrew:
         for tier in _PRE_B1A_NAMES:
             entries = render_mcp_for(names_for(tier))
             if tier in _GROWN:
-                assert _digest(entries) != _PRE_B1A_MCP_SHA256[tier], tier
+                assert _digest(entries) != _FROZEN_MCP_SHA256[tier], tier
             else:
-                assert _digest(entries) == _PRE_B1A_MCP_SHA256[tier], tier
+                assert _digest(entries) == _FROZEN_MCP_SHA256[tier], tier
 
     def test_public_is_a_proper_subset_of_member_which_is_a_proper_subset_of_admin(self) -> None:
         public, member, admin = (allow_list(t) for t in ("public", "member", "admin"))

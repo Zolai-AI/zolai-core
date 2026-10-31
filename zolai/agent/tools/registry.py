@@ -82,7 +82,7 @@ def _obj(properties: dict[str, Any], required: list[str] | None = None) -> dict[
 
 _PUB_QUERY = _obj(
     {
-        "query": {"type": "string"},
+        "query": {"type": "string", "minLength": 1},
         "limit": {"type": "integer", "minimum": 1, "maximum": 20},
         "source_filter": {
             "type": "array",
