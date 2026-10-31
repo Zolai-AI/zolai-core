@@ -268,6 +268,52 @@ class TestLoopBehaviour:
         assert TOOL_RESULT_MARKER in seen_users[1]
         assert "one tool call per turn" in seen_users[1]
 
+    def test_followup_carries_every_result_so_far(self, monkeypatch) -> None:
+        """Turn 3 still sees turn 1's evidence.
+
+        The marker protocol has no conversation history: each follow-up is a
+        fresh user message. Passing only the current turn's result made a model
+        that looked up two different things forget the first lookup and re-ask
+        for it, burning the turn budget.
+        """
+        from zolai.agent.tools import executor as executor_mod
+        from zolai.agent.tools.types import ToolResult
+
+        def fake_execute(call, allow, *, turn=None):
+            return ToolResult(
+                tool_name=call.name,
+                ok=True,
+                data={"looked_up": call.input.get("query") or call.input.get("word")},
+                turn=call.turn if turn is None else turn,
+            )
+
+        monkeypatch.setattr(executor_mod, "execute_tool", fake_execute)
+
+        responses = [
+            {"text": f'{TOOL_MARKER}\n{{"name": "rag_search", "input": {{"query": "first"}}}}'},
+            {"text": f'{TOOL_MARKER}\n{{"name": "dictionary_lookup", "input": {{"word": "second"}}}}'},
+            {"text": "Answered from both lookups.", "tool_calls": []},
+        ]
+        seen_users: list[str] = []
+
+        def chat(messages, tools=None):
+            seen_users.append(messages[-1]["content"])
+            return responses.pop(0)
+
+        result = run_agent_loop(
+            system_prompt="sys",
+            user_message="Two things?",
+            allow=allow_list("public"),
+            chat=chat,
+        )
+
+        assert result["ok"] is True
+        assert len(seen_users) == 3
+        # Turn 3's follow-up must carry BOTH results, not just the latest.
+        assert '"first"' in seen_users[2]
+        assert '"second"' in seen_users[2]
+        assert seen_users[2].count(TOOL_RESULT_MARKER) == 2
+
     def test_max_turns_enforced_with_real_fallback(self) -> None:
         always_tool = {
             "text": f'{TOOL_MARKER}\n{{"name": "rag_search", "input": {{"query": "x"}}}}',

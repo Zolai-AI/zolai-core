@@ -565,7 +565,13 @@ def run_agent_loop(
         else:
             messages = [
                 {"role": "system", "content": system},
-                {"role": "user", "content": build_followup_prompt(user_message, [result, *declined])},
+                {
+                    "role": "user",
+                    # This track has no conversation history, so every follow-up
+                    # must carry ALL results gathered so far. Sending only this
+                    # turn's result made turn 3 forget turn 1 and re-ask for it.
+                    "content": build_followup_prompt(user_message, [*results, *declined]),
+                },
             ]
 
     # Turns exhausted but evidence WAS gathered. Hand it back for one final
