@@ -158,24 +158,39 @@ class TestCallObservability:
         assert "latency_ms=" in text
         assert "status=200" in text
 
+    def test_resolved_key_is_sent_as_bearer_header(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sentinel_key = "sk-test-abcdefghijklmnop1234"
+        monkeypatch.setattr(adapter_mod, "resolve_api_key", lambda row: sentinel_key)
+        rec = _Recorder()
+        monkeypatch.setattr(adapter_mod, "_post", rec)
+        adapter_mod.chat(
+            {**_ROW, "requires_key": 1},
+            "test-model",
+            [{"role": "user", "content": "hi"}],
+        )
+        assert rec.calls[0]["headers"]["Authorization"] == f"Bearer {sentinel_key}"
+
     def test_log_carries_never_a_key_nor_the_completion(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Identity + timing only: a secret in the header or the prompt must not log."""
+        """Identity + timing only: secrets and user content must not log."""
         sentinel_key = "sk-test-abcdefghijklmnop1234"
         sentinel_prompt = "PROMPT_CONTENT_THAT_MUST_NOT_LOG"
         monkeypatch.setattr(adapter_mod, "resolve_api_key", lambda row: sentinel_key)
-        rec = _Recorder(response=_Response(payload={"choices": [{"message": {"content": "COMPLETION_MUST_NOT_LOG"}}]}))
-        monkeypatch.setattr(adapter_mod, "_post", rec)
-        row = {**_ROW, "requires_key": 1}
-        with caplog.at_level(logging.INFO, logger="zolai.llm.adapter"):
-            adapter_mod.chat(row, "test-model", [{"role": "user", "content": sentinel_prompt}])
-        # The key *was* sent on the wire — that is its job …
-        assert rec.calls[0]["headers"]["Authorization"] == f"Bearer {sentinel_key}"
-        assert sentinel_key not in "\n".join(
-            r.getMessage() for r in caplog.records if r.name == "zolai.llm.adapter"
+        rec = _Recorder(
+            response=_Response(
+                payload={"choices": [{"message": {"content": "COMPLETION_MUST_NOT_LOG"}}]}
+            )
         )
-        # … and neither it, the prompt nor the completion reached the log.
+        monkeypatch.setattr(adapter_mod, "_post", rec)
+        with caplog.at_level(logging.INFO, logger="zolai.llm.adapter"):
+            adapter_mod.chat(
+                {**_ROW, "requires_key": 1},
+                "test-model",
+                [{"role": "user", "content": sentinel_prompt}],
+            )
         text = "\n".join(r.getMessage() for r in caplog.records if r.name == "zolai.llm.adapter")
         assert sentinel_key not in text
         assert sentinel_prompt not in text

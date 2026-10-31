@@ -266,7 +266,7 @@ def _auth_headers(api_key: str) -> dict[str, str]:
     """Build wire headers without exposing the resolved key to observability."""
     headers = {"Content-Type": "application/json"}
     if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+        headers["Authorization"] = "Bearer " + api_key
     return headers
 
 

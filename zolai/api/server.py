@@ -296,6 +296,52 @@ class ZolaiChatRequest(BaseModel):
     model: str = DEFAULT_MODEL
 
 
+def _prepare_zolai_chat_context(
+    message: str,
+    session_id: str,
+) -> tuple[Any, str, str]:
+    """Build legacy chat context away from the event loop."""
+    from .conversation_memory import get_conversation_memory
+    from .rag_context import build_zolai_context
+
+    memory = get_conversation_memory()
+    rag_context = build_zolai_context(message)
+    history = memory.get_history(session_id)
+    history_text = ""
+    if history:
+        turns = [f"{t['role']}: {t['text'][:100]}" for t in history[-3:]]
+        history_text = "Previous conversation:\n" + "\n".join(turns) + "\n\n"
+    return memory, rag_context, history_text
+
+
+def _finish_zolai_chat(
+    memory: Any,
+    session_id: str,
+    message: str,
+    raw_response: str,
+) -> tuple[str, str, list[str], bool]:
+    """Validate, extract, and persist legacy chat data off the event loop."""
+    from .rag_context import get_rag_context
+    from .zvs_strict import check_zvs_compliance
+
+    zvs_result = check_zvs_compliance(raw_response)
+    final_response = (
+        zvs_result["corrected_text"]
+        if not zvs_result["is_compliant"]
+        else raw_response
+    )
+    english_gloss = ""
+    for line in final_response.split("\n"):
+        if line.strip().startswith("English:"):
+            english_gloss = line.replace("English:", "").strip()
+            break
+    vocabulary = get_rag_context().extract_zolai_words(message)
+    memory.add_turn(session_id, "user", message)
+    memory.add_turn(session_id, "assistant", final_response)
+    memory.add_vocabulary(session_id, vocabulary)
+    return final_response, english_gloss, vocabulary, zvs_result["is_compliant"]
+
+
 
 
 class ModelInfo(BaseModel):
@@ -1303,21 +1349,11 @@ def create_app() -> FastAPI:
         200 whose body is an exception sentence.  Use
         ``POST /api/v1/assistant/chat``.
         """
-        from .conversation_memory import get_conversation_memory
-        from .rag_context import build_zolai_context
-        from .zvs_strict import check_zvs_compliance
-
-        memory = get_conversation_memory()
-
-        # Build RAG context
-        rag_context = build_zolai_context(req.message)
-
-        # Get conversation history
-        history = memory.get_history(req.session_id)
-        history_text = ""
-        if history:
-            turns = [f"{t['role']}: {t['text'][:100]}" for t in history[-3:]]
-            history_text = "Previous conversation:\n" + "\n".join(turns) + "\n\n"
+        memory, rag_context, history_text = await run_in_threadpool(
+            _prepare_zolai_chat_context,
+            req.message,
+            req.session_id,
+        )
 
         # Bilingual system prompt with context
         bilingual_prompt = (
@@ -1340,36 +1376,19 @@ def create_app() -> FastAPI:
         )
         raw_response = data.get("response", "").strip()
 
-        # Check ZVS compliance
-        zvs_result = check_zvs_compliance(raw_response)
-        final_response = (
-            zvs_result['corrected_text']
-            if not zvs_result['is_compliant']
-            else raw_response
+        final_response, english_gloss, vocabulary, zvs_compliant = await run_in_threadpool(
+            _finish_zolai_chat,
+            memory,
+            req.session_id,
+            req.message,
+            raw_response,
         )
-
-        # Extract English gloss (look for "English:" line)
-        english_gloss = ""
-        for line in final_response.split("\n"):
-            if line.strip().startswith("English:"):
-                english_gloss = line.replace("English:", "").strip()
-                break
-
-        # Extract vocabulary used
-        from .rag_context import get_rag_context
-        rag = get_rag_context()
-        vocabulary = rag.extract_zolai_words(req.message)
-
-        # Save to memory
-        memory.add_turn(req.session_id, "user", req.message)
-        memory.add_turn(req.session_id, "assistant", final_response)
-        memory.add_vocabulary(req.session_id, vocabulary)
 
         return ZolaiChatResponse(
             zolai_response=final_response,
             english_gloss=english_gloss,
             context_source=rag_context[:200] if rag_context else "No context",
-            zvs_compliant=zvs_result['is_compliant'],
+            zvs_compliant=zvs_compliant,
             vocabulary=vocabulary,
         )
 

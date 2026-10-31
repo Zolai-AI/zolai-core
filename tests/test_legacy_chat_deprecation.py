@@ -23,7 +23,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
-from zolai.api import auth
+from zolai.api import auth, conversation_memory, rag_context, server, zvs_strict
 from zolai.api.auth_middleware import reset_rate_limiter
 from zolai.api.server import create_app
 from zolai.config import config
@@ -96,6 +96,57 @@ def test_chat_zolai_501_never_a_success_body_with_the_failure_text(
     response = client.post("/chat/zolai", json={"message": "khi le"})
     _assert_honest_501(response, "ollama_unavailable")
     assert "cannot reach the language model" not in response.text
+
+
+def test_chat_zolai_offloads_synchronous_context_and_memory_work(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RAG, history, vocabulary, and persistence must not run on the loop."""
+    calls: list[str] = []
+
+    async def fake_run_in_threadpool(fn, *args, **kwargs):
+        calls.append(fn.__name__)
+        return fn(*args, **kwargs)
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"response": "Zolai: Hoih hi\nEnglish: Good."}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc_info) -> None:
+            return None
+
+        async def post(self, *args, **kwargs):
+            return FakeResponse()
+
+    class FakeRag:
+        def extract_zolai_words(self, message: str) -> list[str]:
+            return ["hoih"]
+
+    memory = conversation_memory.ConversationMemory()
+    monkeypatch.setattr(server, "run_in_threadpool", fake_run_in_threadpool)
+    monkeypatch.setattr(server.httpx, "AsyncClient", lambda **kwargs: FakeClient())
+    monkeypatch.setattr(conversation_memory, "get_conversation_memory", lambda: memory)
+    monkeypatch.setattr(rag_context, "build_zolai_context", lambda message: "context")
+    monkeypatch.setattr(rag_context, "get_rag_context", lambda: FakeRag())
+    monkeypatch.setattr(
+        zvs_strict,
+        "check_zvs_compliance",
+        lambda text: {"corrected_text": text, "is_compliant": True},
+    )
+
+    response = client.post("/chat/zolai", json={"message": "khi le"})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["vocabulary"] == ["hoih"]
+    assert calls == ["_prepare_zolai_chat_context", "_finish_zolai_chat"]
+    assert len(memory.get_history("default")) == 2
 
 
 def test_chat_stream_501s_before_the_sse_headers(client: TestClient) -> None:
