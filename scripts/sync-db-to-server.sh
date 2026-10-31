@@ -9,7 +9,8 @@
 #
 # Safety (the server DB is held open by the running API process):
 #   (a) local  : consistent snapshot via `sqlite3 .backup` (WAL-safe)
-#   (b) rsync  : push snapshot to a server temp path (resumable via --partial)
+#   (b) rsync  : push snapshot to a server temp path (resumable: --inplace,
+#                retried automatically when the link stalls)
 #   (c) server : stop the API service (systemctl) — never swap a
 #                hot file the process holds open
 #   (d) server : back up existing DB first (data/backups/zolai-<ts>.db.gz)
@@ -114,10 +115,24 @@ echo "  integrity: ok"
 
 # --- (b) push up --------------------------------------------------------------
 echo "[2/7] rsync → ${SERVER_HOST}:${REMOTE_TMP}"
-# --partial keeps the bytes already sent as the destination file, so a dropped
-# connection resumes by delta instead of restarting a 2.8 GB transfer from zero
-# (seen 2026-10-31: the link stalled at 121 MB and the run aborted).
-rsync -a --partial -e "ssh ${SSH_OPTS[*]}" "${LOCAL_SNAP}" "${SERVER_HOST}:${REMOTE_TMP}"
+# --inplace writes to the destination as it goes, so a dropped connection leaves
+# the bytes already sent *at that path* and the next attempt resumes by delta
+# instead of restarting 2.8 GB. Retries exist because the link to pcore-server
+# has stalled mid-transfer (2026-10-31: twice, at 121 MB and 1.4 GB); --timeout
+# aborts a stalled attempt quickly so the loop can reconnect.
+RSYNC_ATTEMPTS="${ZOLAI_SYNC_ATTEMPTS:-8}"
+for attempt in $(seq 1 "${RSYNC_ATTEMPTS}"); do
+  if rsync -a --partial --inplace --timeout=60 -e "ssh ${SSH_OPTS[*]}" \
+      "${LOCAL_SNAP}" "${SERVER_HOST}:${REMOTE_TMP}"; then
+    break
+  fi
+  echo "  rsync attempt ${attempt}/${RSYNC_ATTEMPTS} failed; resuming in 15s"
+  if [[ "${attempt}" -eq "${RSYNC_ATTEMPTS}" ]]; then
+    echo "ERROR: rsync failed after ${RSYNC_ATTEMPTS} attempts" >&2
+    exit 1
+  fi
+  sleep 15
+done
 echo "  pushed: $(ssh "${SSH_OPTS[@]}" "${SERVER_HOST}" "stat -c %s '${REMOTE_TMP}'") bytes"
 
 # --- (c) stop the API service (server DB is hot) ------------------------------
