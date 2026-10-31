@@ -69,18 +69,25 @@ class VocabularyAgent(BaseAgent, DiscussionMixin):
         return None
 
     async def _build_vocabulary(self, task: dict[str, Any]) -> dict[str, Any]:
-        """Build vocabulary from Bible corpus."""
+        """Build vocabulary from Bible corpus.
+
+        Collocations are *not* gathered here — ``extract_collocations`` is its own
+        task type, and running its full-window scan inside this one cost seconds on
+        every call while the per-entry ``collocations`` field stayed empty.
+        """
         limit = task.get("limit", 1000)
         min_frequency = task.get("min_frequency", 1)
 
         learner = get_bible_learner()
-        vocab = learner.word_freq.most_common(limit)
-        vocab = [(w, c) for w, c in vocab if c >= min_frequency]
+        vocab = [(w, c) for w, c in learner.word_freq.most_common(limit) if c >= min_frequency]
+
+        # One corpus pass for the whole batch; per-word scans cost a pass each.
+        contexts = learner.build_contexts_for_words((w for w, _ in vocab), limit=2)
 
         # Build detailed vocabulary entries
         vocab_entries = []
         for word, freq in vocab:
-            context = self.bible_learner.build_context_for_word(word, limit=2)
+            context = contexts.get(word, "")
             if "No Bible sentences" not in context:
                 entry = {
                     "word": word,
@@ -94,9 +101,6 @@ class VocabularyAgent(BaseAgent, DiscussionMixin):
                 }
                 self.vocabulary[word] = entry
                 vocab_entries.append(entry)
-
-        # Extract collocations
-        await self._extract_collocations({"limit": 100})
 
         result = {
             "vocabulary_size": len(vocab_entries),

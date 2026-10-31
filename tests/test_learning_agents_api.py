@@ -252,3 +252,101 @@ class TestAnonymousBehaviour:
         body = r.json()
         assert body["limit_applied"] == 5
         assert body["limit_clamped"] is False
+
+
+class TestOrchestratorReuse:
+    """``/run`` must not build a fresh orchestrator per request.
+
+    Each instance starts its own agent tasks and queue processor and re-reads the
+    whole Bible corpus — the cold load alone measured 12.9 s, so a task spent most
+    of its timeout budget being constructed.
+    """
+
+    def test_same_database_reuses_one_orchestrator(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from zolai.api import learning_agents_router as router
+
+        monkeypatch.setattr(router, "_orchestrator_cache", None)
+        first = router._orchestrator()
+        assert router._orchestrator() is first
+
+    def test_other_database_builds_a_new_one(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        from zolai.api import learning_agents_router as router
+        from zolai.config import config
+
+        monkeypatch.setattr(router, "_orchestrator_cache", None)
+        first = router._orchestrator()
+        monkeypatch.setattr(config.paths, "db", tmp_path / "other.db")
+        assert router._orchestrator() is not first
+
+    def test_task_history_is_bounded(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from zolai.api import learning_agents_router as router
+        from zolai.learning.agents.learning_orchestrator import COMPLETED_TASK_HISTORY
+
+        monkeypatch.setattr(router, "_orchestrator_cache", None)
+        assert router._orchestrator().completed_tasks.maxlen == COMPLETED_TASK_HISTORY
+
+
+class TestBatchedWordContexts:
+    """``build_contexts_for_words`` replaces a per-word full corpus sweep.
+
+    Vocabulary building asked for one sweep per word — 1000 words re-read 30k
+    verses each, which is how ``build_vocabulary`` reached its timeout.
+    """
+
+    def _learner(self):
+        from collections import Counter, defaultdict
+
+        from zolai.learning.bible_pattern_learner import BiblePatternLearner
+
+        learner = BiblePatternLearner.__new__(BiblePatternLearner)  # no corpus load
+        learner.verses = [
+            {
+                "ref": "GEN 1:1",
+                "zo_tdb77": "Tinte in hnuei hlauhna a thlen salh.",
+                "en_kJV": "In the beginning God created.",
+            },
+            {
+                "ref": "GEN 1:2",
+                "zo_tdb77": "Thil sa in topa hi.",
+                "en_kJV": "The earth was empty.",
+            },
+        ]
+        learner.patterns = defaultdict(list)
+        learner.word_freq = Counter()
+        learner.phrase_patterns = Counter()
+        return learner
+
+    def test_answers_for_every_word_in_one_pass(self) -> None:
+        learner = self._learner()
+        contexts = learner.build_contexts_for_words(["tinte", "thil", "nei"], limit=2)
+
+        assert set(contexts) == {"tinte", "thil", "nei"}
+        assert "GEN 1:1" in contexts["tinte"]
+        assert "GEN 1:2" in contexts["thil"]
+        assert "No Bible sentences" in contexts["nei"]
+
+    def test_matches_the_single_word_lookup(self) -> None:
+        learner = self._learner()
+        batch = learner.build_contexts_for_words(["tinte"], limit=2)
+        assert batch["tinte"] == learner.build_context_for_word("tinte", limit=2)
+
+    def test_refresh_replaces_instead_of_accumulating(self) -> None:
+        """The background cycle must not double the counts every hour."""
+        learner = self._learner()
+        first_patterns, first_freq, _ = learner.fresh_patterns()
+        second_patterns, second_freq, _ = learner.fresh_patterns()
+
+        assert sum(len(v) for v in second_patterns.values()) == sum(
+            len(v) for v in first_patterns.values()
+        )
+        assert second_freq == first_freq
+
+        learner.extract_patterns()
+        learner.extract_patterns()
+        assert sum(len(v) for v in learner.patterns.values()) == 2 * sum(
+            len(v) for v in first_patterns.values()
+        )

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
@@ -21,6 +22,11 @@ from .agent_team import AgentTeamManager, DiscussionFacilitator, create_standard
 from .base_agent import AgentRole, BaseAgent, DiscussionContext
 
 logger = logging.getLogger(__name__)
+
+#: Finished tasks retained in memory. The API caches one orchestrator for the life
+#: of the process and ``submit_and_wait`` rescans this history on every poll tick,
+#: so an unbounded list would grow without limit and slow each poll as it grew.
+COMPLETED_TASK_HISTORY = 200
 
 
 @dataclass
@@ -63,7 +69,7 @@ class LearningOrchestrator:
         # Task queue
         self.task_queue: asyncio.Queue = asyncio.Queue()
         self.active_tasks: dict[str, LearningTask] = {}
-        self.completed_tasks: list[LearningTask] = []
+        self.completed_tasks: deque[LearningTask] = deque(maxlen=COMPLETED_TASK_HISTORY)
 
         # Continuous learning state
         self.continuous_learning_active = False
