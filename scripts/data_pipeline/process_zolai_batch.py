@@ -31,7 +31,7 @@ def process_entry(entry):
     return entry
 
 input_path = '/tmp/batch_final_raw.jsonl'
-output_path = str(Path(__file__).resolve().parents[1]) + "/tmp/batch_final_perfect.jsonl'
+output_path = str(Path(__file__).resolve().parents[1]) + "/tmp/batch_final_perfect.jsonl"
 
 os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
@@ -41,7 +41,7 @@ with open(input_path, 'r') as f_in, open(output_path, 'w') as f_out:
             entry = json.loads(line)
             corrected = process_entry(entry)
             f_out.write(json.dumps(corrected, ensure_ascii=False) + '\n')
-        except Exception as e:
+        except Exception:
             continue
 
 print(f"Processed batch into {output_path}")

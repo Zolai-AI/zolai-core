@@ -20,8 +20,8 @@ def fix_entry(entry):
     entry['category'] = 'standardized'
     return entry
 
-with open(str(Path(__file__).resolve().parents[1]) + "/tmp/batch_working.jsonl', 'r') as f_in, \
-     open(str(Path(__file__).resolve().parents[1]) + "/tmp/batch_54_73_perfect.jsonl', 'w') as f_out:
+with open(str(Path(__file__).resolve().parents[1]) + "/tmp/batch_working.jsonl", 'r') as f_in, \
+     open(str(Path(__file__).resolve().parents[1]) + "/tmp/batch_54_73_perfect.jsonl", "w") as f_out:
     for line in f_in:
         entry = json.loads(line)
         fixed = fix_entry(entry)

@@ -82,7 +82,7 @@ def process_file(file_path):
     return False
 
 def main():
-    root = str(Path(__file__).resolve().parents[2]) + "/'
+    root = str(Path(__file__).resolve().parents[2]) + "/"
     count = 0
     for target in TARGET_DIRS:
         dir_path = os.path.join(root, target)

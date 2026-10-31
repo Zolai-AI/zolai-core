@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import random
 
-base = Path(str(Path(__file__).resolve().parents[2]) + "/data/training')
+base = Path(str(Path(__file__).resolve().parents[2]) + "/data/training")
 
 sources = [
     'llm_train.jsonl',
@@ -61,7 +61,7 @@ train = all_records[:train_size]
 val = all_records[train_size:train_size + val_size]
 test = all_records[train_size + val_size:]
 
-print(f"\nSplitting:")
+print("\nSplitting:")
 print(f"  Train: {len(train):,}")
 print(f"  Val: {len(val):,}")
 print(f"  Test: {len(test):,}")
@@ -74,4 +74,4 @@ for split_name, split_data in [('train', train), ('val', val), ('test', test)]:
             f.write(json.dumps(record, ensure_ascii=False) + '\n')
     print(f"  Wrote final_{split_name}.jsonl")
 
-print(f"\n✓ Final dataset ready")
+print("\n✓ Final dataset ready")

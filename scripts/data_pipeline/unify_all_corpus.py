@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-base = Path(str(Path(__file__).resolve().parents[2]) + "/data/corpus')
+base = Path(str(Path(__file__).resolve().parents[2]) + "/data/corpus")
 
 sources = [
     'corpus_master_v1.jsonl',

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 def combine_sources():
-    base = Path(str(Path(__file__).resolve().parents[2]) + "/data/training')
+    base = Path(str(Path(__file__).resolve().parents[2]) + "/data/training")
     
     sources = [
         ('llm_train.jsonl', 'main'),

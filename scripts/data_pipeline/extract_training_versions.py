@@ -3,8 +3,8 @@
 import json
 from pathlib import Path
 
-archive = Path(str(Path(__file__).resolve().parents[2]) + "/data/archive/training_versions')
-output = Path(str(Path(__file__).resolve().parents[2]) + "/data/training/master_all_versions.jsonl')
+archive = Path(str(Path(__file__).resolve().parents[2]) + "/data/archive/training_versions")
+output = Path(str(Path(__file__).resolve().parents[2]) + "/data/training/master_all_versions.jsonl")
 
 # Key files to extract from
 sources = [

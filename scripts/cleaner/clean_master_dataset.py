@@ -78,7 +78,7 @@ def clean_dataset(input_file, output_file):
     return valid
 
 if __name__ == '__main__':
-    base = Path(str(Path(__file__).resolve().parents[2]) + "/data/training')
+    base = Path(str(Path(__file__).resolve().parents[2]) + "/data/training")
     
     print("Cleaning train split...")
     clean_dataset(base / 'llm_train.jsonl', base / 'train_clean.jsonl')

@@ -18,11 +18,11 @@ def process_entry(entry):
     
     return entry
 
-with open('/tmp/batch_final_raw.jsonl', 'r') as f_in, open(str(Path(__file__).resolve().parents[1]) + "/tmp/batch_final_complete.jsonl', 'w') as f_out:
+with open('/tmp/batch_final_raw.jsonl', 'r') as f_in, open(str(Path(__file__).resolve().parents[1]) + "/tmp/batch_final_complete.jsonl", 'w') as f_out:
     for line in f_in:
         try:
             data = json.loads(line)
             processed = process_entry(data)
             f_out.write(json.dumps(processed, ensure_ascii=False) + '\n')
-        except Exception as e:
+        except Exception:
             continue

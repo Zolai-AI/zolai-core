@@ -2,7 +2,7 @@ import json
 
 def process():
     in_file = '/tmp/batch_9_raw.jsonl'
-    out_file = str(Path(__file__).resolve().parents[1]) + "/tmp/batch_9_final.jsonl'
+    out_file = str(Path(__file__).resolve().parents[1]) + "/tmp/batch_9_final.jsonl"
     
     with open(in_file, 'r') as f:
         lines = f.readlines()

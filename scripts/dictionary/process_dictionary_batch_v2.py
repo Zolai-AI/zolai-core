@@ -33,7 +33,7 @@ def process_entry(entry):
 
     return entry
 
-with open('/tmp/batch_final_raw.jsonl', 'r') as f_in, open(str(Path(__file__).resolve().parents[1]) + "/tmp/batch_final_complete.jsonl', 'w') as f_out:
+with open('/tmp/batch_final_raw.jsonl', 'r') as f_in, open(str(Path(__file__).resolve().parents[1]) + "/tmp/batch_final_complete.jsonl", 'w') as f_out:
     for line in f_in:
         try:
             data = json.loads(line)
