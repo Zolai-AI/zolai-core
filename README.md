@@ -25,6 +25,23 @@ pip install -e ".[gpu]"       # + training stack (NVIDIA required)
 pip install -e ".[dev]"       # + pytest/ruff/mypy
 ```
 
+### Local services
+
+The API and the Studio (zolai-explorer) can be run the way the host runs them —
+API on `127.0.0.1:8001`, Studio on `127.0.0.1:5173`:
+
+```bash
+./scripts/dev/local-stack.sh start all     # or: start api | start studio
+./scripts/dev/local-stack.sh status
+./scripts/dev/local-stack.sh restart all   # or: restart api | restart studio
+./scripts/dev/local-stack.sh stop all
+./scripts/dev/local-stack.sh logs all 50   # or: logs api | logs studio
+```
+
+`./menu.sh` wraps the same commands (options 1–7). Pid files and logs live in
+`/tmp/zolai-dev`; override with `ZOLAI_DEV_RUN_DIR`, `ZOLAI_API_PORT`,
+`ZOLAI_STUDIO_PORT` or `ZOLAI_STUDIO_DIR`.
+
 ```python
 from zolai.syllable import SyllableSegmenter
 from zolai.pos_tagger import ZolaiPOSTagger

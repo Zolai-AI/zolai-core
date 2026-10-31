@@ -20,27 +20,12 @@ echo ""
 echo -e "${Y}1. Activating Python venv...${NC}"
 source "$SCRIPT_DIR/.venv/bin/activate" 2>/dev/null || true
 
-# 2. Check API is already running
-if curl -s http://localhost:8000/health >/dev/null 2>&1; then
-  echo -e "  ${G}✅ API already running on :8000${NC}"
-else
-  echo -e "  ${Y}Starting API server on :8000...${NC}"
-  cd "$SCRIPT_DIR"
-  nohup python -m uvicorn zolai.api.server:app --host 0.0.0.0 --port 8000 > /tmp/zolai-api.log 2>&1 &
-  echo "$!" > /tmp/zolai-api.pid
-  # Startup loads the Bible and models; poll readiness, never sleep a fixed 2s.
-  ready=""
-  for _ in $(seq 1 30); do
-    if curl -s -m 2 http://localhost:8000/health >/dev/null 2>&1; then ready=1; break; fi
-    sleep 1
-  done
-  if [ -n "$ready" ]; then
-    echo -e "  ${G}✅ API started (PID: $(cat /tmp/zolai-api.pid))${NC}"
-  else
-    echo -e "  ${R}❌ API failed to start after 30s. Check: /tmp/zolai-api.log${NC}"
-    exit 1
-  fi
-fi
+# 2. Start the API on the sidecar port (:8000, see zolai-tauri/src-tauri/src/sidecar.rs)
+#    through the shared control script, so stop/restart/logs stay consistent.
+STACK="$SCRIPT_DIR/scripts/dev/local-stack.sh"
+export ZOLAI_API_PORT="${ZOLAI_DESKTOP_API_PORT:-8000}"
+export ZOLAI_DEV_RUN_DIR="${ZOLAI_DESKTOP_RUN_DIR:-/tmp/zolai-desktop}"
+bash "$STACK" start api || exit 1
 
 # 3. Launch Tauri app (skip AppImage bundle due to network)
 echo ""
@@ -58,7 +43,8 @@ fi
 echo ""
 echo -e "${G}Desktop app launched!${NC}"
 echo -e "  API: http://localhost:8000"
-echo -e "  PID file: /tmp/zolai-api.pid"
+echo -e "  Logs: ${ZOLAI_DEV_RUN_DIR}/api.log"
 echo ""
-echo -e "  To stop API later: kill \$(cat /tmp/zolai-api.pid)"
+echo -e "  To stop API later:"
+echo -e "    ZOLAI_API_PORT=8000 ZOLAI_DEV_RUN_DIR=${ZOLAI_DEV_RUN_DIR} bash $STACK stop api"
 echo ""
