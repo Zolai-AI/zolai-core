@@ -1604,3 +1604,69 @@ order matches the ranking even when a caller passes `wanted` explicitly.
 grammar probes correctly, accepting its 429 rate. Single-sample smoke ranking, not a
 statistical benchmark — the grammar numbers are one item each, so re-run before
 trusting them.
+
+## 2026-10-31 (Session — full RAG rebuild, learning cycle, drift closed at `v2026.10.31.2`)
+
+End-to-end: rebuild the whole vector index, run the full learning cycle with
+`--apply`, and re-baseline the snapshot. All figures below were read back from
+`data/zolai.db` after the run.
+
+**Full rebuild.** `zolai rag build` over the 8 tables / 9 specs re-embedded
+**274,215** vectors in 17,962 s with zero errors (up from 269,425, the previous
+baseline). A scoped rebuild of `grammar_patterns` then added **49** vectors for
+the 47 patterns written by the hierarchy pass — two long patterns chunk into two
+pieces each, so 47 rows → 49 vectors. `prune_stale_vectors` found 0 stale of
+6,744 candidates (the earlier "47 missing / 2 stale" reading was a miscount:
+the diff was against the pre-hierarchy pattern set, not against stale rows).
+Final census **274,264**: dictionary 148,515 (84,490 + 64,025), bible 60,560,
+wiki 28,738, observations 18,811, phrases 10,722, grammar_patterns 6,746,
+knowledge_claims 172.
+
+The 2 wiki master pages that produced no vectors (1613, 1650) are FTS-only by
+`MAX_CHUNKS_PER_DOC = 2048`; their content is indexed at the chunk level, the
+page itself is over the per-doc cap. Not a gap.
+
+**Cycle `lr_20261031T100829Z_e41c9e` — SUCCEEDED, 13/13 steps** (10:08:29 →
+11:06:20 UTC, 57.9 min): preflight 191 s (`quick_check ok`, DB 2.96 GB, 29.6 GB
+free), backup 250 s (`zolai.db.bak-lr_20261031T100829Z_e41c9e`, sha256
+`2bc1d8d1…`), study 4 s, knowledge_bible 610 s (`word_usage` repaired:
+230,225 deleted / 230,299 inserted, sentinel counts unchanged), bible_levels
+1,257 s (597,641 layers, 349 openers; bible 131 openers / 92 non-Zolai
+paragraphs skipped, zomidaily 126, wiki 92, lessons 0), knowledge_discovery
+248 s (2,605 CANDIDATE + 702 OBSERVED), knowledge_promote 2 s (10 duplicate
+claims skipped, 6,170 without evidence), knowledge_regression 0.3 s **WARN**,
+train_pos 20 s (macro-F1 0.969194 = gate baseline, PUBLISHED), train_syllable
+45 s (boundary F1 1.0, PUBLISHED), rag_incremental 737 s (200 chunks
+re-embedded, 0 pruned), version_snapshot 105 s, report 0.01 s.
+
+The only WARN is the count-baseline diff against `v2026.10.29.3`: evidence
++99.46 % (86,440 → 172,415), hypotheses +53.43 % (4,028 → 6,180),
+grammar_patterns +6.41 % (6,338 → 6,744). All three are the hierarchy/canonical
+passes landing, not a regression; the cycle's own snapshot (`v2026.10.31.1`)
+verified `ok: true` with `drift []`.
+
+**Drift closed.** `v2026.10.31.1` (id 42, the cycle) still showed drift against
+the pre-cycle content because it snapshotted mid-run; the explicit
+`version_snapshot` content pass as id 43 → **`v2026.10.31.2`**, which is the new
+baseline: `zolai learn verify v2026.10.31.2` → `ok: true`, `drift {}` (19 tables,
+content mode). `knowledge_versions` = **43**.
+
+**Canonical / evidence census after the cycle:** canonical_words 28,445 ·
+canonical_sentences 30,776 · canonical_paragraphs 8,451 · foundation_evidence
+**172,415** · foundation_consensus **67,672** · hypotheses **6,180**
+(CANDIDATE 5,154 / OBSERVED 1,026) · grammar_patterns **6,744** · review queue
+117 pending (75 sentence + 10 paragraph + 32 claim), 68 approved, 20 rejected.
+
+**Merge/push state.** The reconcile work merged into local `main` and pushed as
+`0911cb8`; the user then committed `059f2aa` on top (`version_snapshot` recorded
+`git_commit = 059f2aa`), and a follow-up `9d687be` added the local-stack dev
+controls. Targeted tests on `9d687be`: **253 passed** (109: hierarchy,
+canonical promotion, learning cycle, versioning, RAG chunking/incremental/
+contract + 144: foundation analysis/data layer/review API, RAG vector search/
+integration/contract).
+
+Remaining, deliberately not done here: the workspace-repo (`docs/`) count edits
+are written but left uncommitted because a concurrent session's in-progress
+changes share those files; the two tracked model artifacts
+(`models/pos_tagger_crf.pkl`, `models/crf_syllable.pkl`) are modified by the
+cycle's PUBLISHED step and need an explicit commit decision of their own.
