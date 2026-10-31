@@ -348,6 +348,51 @@ class TestDestructiveHint:
         assert "rag_search" not in mutating_handlers()
 
 
+class TestParameterSchemas:
+    """The published schema must say what the handler will reject.
+
+    Eleven read tools advertised ``required: []`` while their handler raised
+    "X is required" for the very same parameter (``query``, ``word``,
+    ``text``, ``ref``), so a model reading ``tools/list`` had no way to know
+    it must send one.  The enumeration is done from the handler sources, so a
+    tool added with a required argument cannot silently publish it as optional.
+    """
+
+    _REQUIRE = re.compile(r'_require_\w+\(inp, ["\'](\w+)["\']\)')
+
+    def test_handler_required_arguments_are_declared(self) -> None:
+        offenders = []
+        for name, spec in SPECS.items():
+            handler = HANDLERS.get(name)
+            if handler is None:
+                continue
+            needed = set(self._REQUIRE.findall(inspect.getsource(handler)))
+            declared = set((spec.parameters or {}).get("required") or [])
+            missing = sorted(needed - declared)
+            if missing:
+                offenders.append(f"{name}: {missing}")
+        assert not offenders, (
+            "handlers raise 'X is required' for parameters their JSON Schema "
+            "does not mark required:\n  " + "\n  ".join(offenders)
+        )
+
+    def test_public_reads_declare_their_single_required_input(self) -> None:
+        expected = {
+            "rag_search": ["query"],
+            "word_evidence": ["word"],
+            "word_related": ["word"],
+            "analyze_text": ["text"],
+            "grammar_check": ["text"],
+            "dictionary_lookup": ["word"],
+            "verse_lookup": ["ref"],
+            "search_myanmar_dictionary": ["query"],
+            "translate_zo_to_myanmar": ["word"],
+            "translate_myanmar_to_zo": ["word"],
+        }
+        for name, required in expected.items():
+            assert SPECS[name].parameters["required"] == required, name
+
+
 class TestToolNameGuard:
     def test_dotted_name_is_refused(self) -> None:
         with pytest.raises(ToolSpecError, match="illegal tool name"):
