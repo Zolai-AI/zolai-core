@@ -1,14 +1,17 @@
 """Quarantined user-text intake contracts."""
 from __future__ import annotations
 
+import hashlib
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from types import SimpleNamespace
 
 from sqlalchemy import text
 
 from zolai.data.database import DatabaseManager
-from zolai.data.migrations import create_foundation_tables
+from zolai.data.migrations import create_foundation_tables, create_monitoring_tables
 from zolai.foundation.user_submissions import UserTextSubmissionService
 
 
@@ -102,3 +105,71 @@ def test_non_zvs_and_mixed_text_remain_quarantined(tmp_path, monkeypatch):
     assert non_zvs["validation_status"] == "non_zvs"
     assert mixed["status"] == "quarantined"
     assert mixed["validation_status"] == "mixed"
+
+
+def test_submission_reuses_existing_corpus_raw_row(tmp_path, monkeypatch):
+    manager = _manager(tmp_path)
+    create_monitoring_tables(manager)
+    with manager.engine.begin() as conn:
+        raw_id = conn.execute(
+            text(
+                "INSERT INTO foundation_raw_corpus "
+                "(source_type, source_path, content_hash, payload, imported_at) "
+                "VALUES ('bible_usx', 'bible.xml', :hash, :payload, '2026-01-01')"
+            ),
+            {
+                "hash": "placeholder",
+                "payload": json.dumps({"text": "Ka pai hi."}),
+            },
+        ).lastrowid
+        content_hash = hashlib.sha256("Ka pai hi.".encode()).hexdigest()
+        conn.execute(
+            text(
+                "UPDATE foundation_raw_corpus SET content_hash = :hash "
+                "WHERE id = :id"
+            ),
+            {"hash": content_hash, "id": raw_id},
+        )
+
+    monkeypatch.setattr("zolai.foundation.user_submissions.validate", lambda *a, **k: _valid_report())
+    result = UserTextSubmissionService(
+        manager, FakeAnalyzer(FakeAnalysis("Ka pai hi", True, True))
+    ).submit("Ka pai hi.", "sentence")
+
+    assert result["duplicate"] is False
+    with manager.engine.connect() as conn:
+        linked = conn.execute(
+            text(
+                "SELECT raw_id, content_hash FROM foundation_user_submissions"
+            )
+        ).first()
+        raw = conn.execute(
+            text("SELECT source_type, COUNT(*) FROM foundation_raw_corpus GROUP BY source_type")
+        ).all()
+    assert linked == (raw_id, content_hash)
+    assert raw == [("bible_usx", 1)]
+
+
+def test_concurrent_duplicate_submissions_return_one_candidate(tmp_path, monkeypatch):
+    manager = _manager(tmp_path)
+    create_monitoring_tables(manager)
+    barrier = threading.Barrier(2)
+    monkeypatch.setattr("zolai.foundation.user_submissions.validate", lambda *a, **k: _valid_report())
+
+    class SynchronizedAnalyzer:
+        def analyze_sentence(self, sentence: str) -> FakeAnalysis:
+            barrier.wait(timeout=5)
+            return FakeAnalysis(sentence, True, True)
+
+    db_url = manager._db_url
+
+    def submit_once():
+        return UserTextSubmissionService(
+            DatabaseManager(db_url), SynchronizedAnalyzer()
+        ).submit("Ka pai hi.", "sentence")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: submit_once(), range(2)))
+
+    assert sorted(result["duplicate"] for result in results) == [False, True]
+    assert results[0]["id"] == results[1]["id"]

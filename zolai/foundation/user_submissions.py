@@ -9,6 +9,7 @@ from dataclasses import asdict, is_dataclass
 from typing import Any
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from ..data.database import DatabaseManager
 from ..data.migrations import (
@@ -73,11 +74,12 @@ class UserTextSubmissionService:
                     "duplicate": True,
                 }
 
-            raw = conn.execute(
+            conn.execute(
                 text(
                     "INSERT INTO foundation_raw_corpus "
                     "(source_type, source_path, content_hash, payload, imported_at) "
-                    "VALUES (:source_type, :source_path, :hash, :payload, :created)"
+                    "VALUES (:source_type, :source_path, :hash, :payload, :created) "
+                    "ON CONFLICT DO NOTHING"
                 ),
                 {
                     "source_type": "user_submission",
@@ -90,7 +92,10 @@ class UserTextSubmissionService:
                     "created": stamp(),
                 },
             )
-            raw_id = raw.lastrowid
+            raw_id = conn.execute(
+                text("SELECT id FROM foundation_raw_corpus WHERE content_hash = :hash"),
+                {"hash": content_hash},
+            ).scalar_one()
 
             try:
                 sentences = _sentences(normalized)
@@ -127,31 +132,53 @@ class UserTextSubmissionService:
                 "content_hash": content_hash,
                 "auth_source": auth_source,
             }
-            row = conn.execute(
-                text(
-                    "INSERT INTO foundation_user_submissions "
-                    "(raw_id, content_hash, content_type, user_id, submitted_by, auth_source, "
-                    "analysis_json, provenance_json, zvs_compliant, sov_valid, "
-                    "validation_status, quarantine_reason, created_at, updated_at) "
-                    "VALUES (:raw_id, :hash, :content_type, :user_id, :submitted_by, :auth_source, "
-                    ":analysis, :provenance, :zvs, :sov, :status, :reason, :created, :created)"
-                ),
-                {
-                    "raw_id": raw_id,
-                    "hash": content_hash,
-                    "content_type": content_type,
-                    "user_id": user_id,
-                    "submitted_by": submitted_by,
-                    "auth_source": auth_source,
-                    "analysis": json.dumps(analysis, ensure_ascii=False),
-                    "provenance": json.dumps(provenance, ensure_ascii=False),
-                    "zvs": int(zvs_compliant),
-                    "sov": int(sov_valid),
-                    "status": validation_status,
-                    "reason": reason,
-                    "created": created,
-                },
-            )
+            try:
+                # The pre-check above is only a fast path.  The unique
+                # constraint is the authority when two submissions race.
+                with conn.begin_nested():
+                    row = conn.execute(
+                        text(
+                            "INSERT INTO foundation_user_submissions "
+                            "(raw_id, content_hash, content_type, user_id, submitted_by, auth_source, "
+                            "analysis_json, provenance_json, zvs_compliant, sov_valid, "
+                            "validation_status, quarantine_reason, created_at, updated_at) "
+                            "VALUES (:raw_id, :hash, :content_type, :user_id, :submitted_by, :auth_source, "
+                            ":analysis, :provenance, :zvs, :sov, :status, :reason, :created, :created)"
+                        ),
+                        {
+                            "raw_id": raw_id,
+                            "hash": content_hash,
+                            "content_type": content_type,
+                            "user_id": user_id,
+                            "submitted_by": submitted_by,
+                            "auth_source": auth_source,
+                            "analysis": json.dumps(analysis, ensure_ascii=False),
+                            "provenance": json.dumps(provenance, ensure_ascii=False),
+                            "zvs": int(zvs_compliant),
+                            "sov": int(sov_valid),
+                            "status": validation_status,
+                            "reason": reason,
+                            "created": created,
+                        },
+                    )
+            except IntegrityError:
+                existing = conn.execute(
+                    text(
+                        "SELECT id, validation_status, quarantine_reason "
+                        "FROM foundation_user_submissions WHERE content_hash = :hash"
+                    ),
+                    {"hash": content_hash},
+                ).first()
+                if existing is None:
+                    raise
+                return {
+                    "id": existing[0],
+                    "content_hash": content_hash,
+                    "status": "quarantined",
+                    "validation_status": existing[1],
+                    "quarantine_reason": existing[2],
+                    "duplicate": True,
+                }
             return {
                 "id": row.lastrowid,
                 "content_hash": content_hash,
