@@ -27,6 +27,7 @@ from fastapi.testclient import TestClient
 
 from zolai.agent import loop as loop_mod
 from zolai.agent.loop import (
+    AGENT_MAX_TOOL_CALLS_PER_TURN,
     HOLD_CHARS,
     TOOL_MARKER,
     TOOL_RESULT_MARKER,
@@ -205,7 +206,7 @@ class TestMarkerProtocol:
         assert section.startswith("## TOOLS")
         assert '"rag_search"' in section
         assert TOOL_MARKER in section
-        assert "at most ONE tool" in section
+        assert f"at most {AGENT_MAX_TOOL_CALLS_PER_TURN} tools" in section
 
     def test_token_gate_holds_and_drops_marker_prefix(self) -> None:
         out: list[str] = []
@@ -229,13 +230,57 @@ class TestMarkerProtocol:
 
 
 class TestLoopBehaviour:
-    def test_one_tool_per_turn_and_followup_keeps_question(self) -> None:
+    def test_batch_of_two_word_lookups_both_run(self, monkeypatch) -> None:
+        """The "Dam maw" case: two ``word_detail`` calls in one turn are not serialized.
+
+        One-call-per-turn made a model that asked for both words get one, be told
+        the other was declined, then re-ask on the next turn — spending a third of
+        a 3-turn budget to look up two words. The tools are local reads, so the
+        batch costs the same single follow-up completion.
+        """
+        from zolai.agent.tools import executor as executor_mod
+        from zolai.agent.tools.types import ToolResult
+
+        def fake_execute(call, allow, *, turn=None):
+            return ToolResult(
+                tool_name=call.name,
+                ok=True,
+                data={"word": call.input.get("word")},
+                turn=call.turn if turn is None else turn,
+            )
+
+        monkeypatch.setattr(executor_mod, "execute_tool", fake_execute)
+
         two_markers = (
-            f'{TOOL_MARKER}\n{{"name": "rag_search", "input": {{"query": "a"}}}}\n'
-            f'{TOOL_MARKER}\n{{"name": "dictionary_lookup", "input": {{"word": "b"}}}}'
+            f'{TOOL_MARKER}\n{{"name": "word_detail", "input": {{"word": "dam"}}}}\n'
+            f'{TOOL_MARKER}\n{{"name": "word_detail", "input": {{"word": "maw"}}}}'
         )
         responses = [
             {"text": two_markers, "tool_calls": []},
+            {"text": "Final answer from evidence.", "tool_calls": []},
+        ]
+
+        def chat(messages, tools=None):
+            return responses.pop(0)
+
+        result = run_agent_loop(
+            system_prompt="sys",
+            user_message="Dam maw",
+            allow=allow_list("member"),
+            chat=chat,
+        )
+        executed = [t for t in result["tool_calls"] if t["status"] == "completed"]
+        assert [t["input"]["word"] for t in executed] == ["dam", "maw"]
+        assert [t for t in result["tool_calls"] if t["status"] == "declined"] == []
+
+    def test_tools_per_turn_cap_declines_only_the_overflow(self) -> None:
+        cap = AGENT_MAX_TOOL_CALLS_PER_TURN
+        markers = "\n".join(
+            f'{TOOL_MARKER}\n{{"name": "rag_search", "input": {{"query": "q{i}"}}}}'
+            for i in range(cap + 1)
+        )
+        responses = [
+            {"text": markers, "tool_calls": []},
             {"text": "Final answer from evidence.", "tool_calls": []},
         ]
         seen_users: list[str] = []
@@ -252,27 +297,29 @@ class TestLoopBehaviour:
         )
         assert result["ok"] is True
         assert result["turns"] == 2
-        # exactly one tool executed despite two markers in the turn …
+        # the batch up to the cap executes …
         executed = [t for t in result["tool_calls"] if t["status"] == "completed"]
-        assert len(executed) == 1
-        assert executed[0]["name"] == "rag_search"
-        assert executed[0]["input"] == {"query": "a"}
-        # … and the second is declined out loud, not silently discarded
+        assert len(executed) == cap
+        assert [t["input"]["query"] for t in executed] == [f"q{i}" for i in range(cap)]
+        # … and the one call past it is declined out loud, not silently discarded
         declined = [t for t in result["tool_calls"] if t["status"] == "declined"]
-        assert [t["name"] for t in declined] == ["dictionary_lookup"]
+        assert len(declined) == 1
+        assert declined[0]["name"] == "rag_search"
         assert declined[0]["error_code"] == "budget_exceeded"
         assert result["reply"] == "Final answer from evidence."
         assert TOOL_MARKER not in result["reply"]
         # follow-up turn keeps the original question alongside the result
         assert seen_users[1].startswith("What is pasian?")
         assert TOOL_RESULT_MARKER in seen_users[1]
-        assert "one tool call per turn" in seen_users[1]
+        assert f"{cap} tool calls per turn" in seen_users[1]
+        # every executed result rides back, not just the first
+        assert seen_users[1].count(TOOL_RESULT_MARKER) == cap + 1
 
     def test_followup_carries_every_result_so_far(self, monkeypatch) -> None:
         """Turn 3 still sees turn 1's evidence.
 
         The marker protocol has no conversation history: each follow-up is a
-        fresh user message. Passing only the current turn's result made a model
+        fresh user message. Passing only the current turn's results made a model
         that looked up two different things forget the first lookup and re-ask
         for it, burning the turn budget.
         """
@@ -542,21 +589,22 @@ class TestNativeMultiTurnTrack:
         assert result["ok"] is True
 
     def test_native_parallel_calls_are_answered_not_dropped(self) -> None:
-        """A model asking for two tools in one turn gets one result and two replies.
+        """A batch past the per-turn cap leaves no unanswered id on the wire.
 
-        The budget is still ≤1 executed call. What changed is that the declined
-        call is *reported*: echoed on the wire with an explicit refusal, so no id
-        dangles (strict providers reject an unanswered tool_call) and the model
-        learns it was declined instead of asking for the same three tools again.
+        The cap still refuses the overflow. What matters is that the declined call
+        is *reported*: echoed with an explicit refusal, so no id dangles (strict
+        providers reject an unanswered tool_call) and the model learns it was
+        declined instead of asking for the same tools again.
         """
+        cap = AGENT_MAX_TOOL_CALLS_PER_TURN
         seen_messages: list = []
         responses = [
             {
                 "text": "",
-                "tool_calls": [
-                    _native_call("call_1", '{"text": "a"}'),
-                    _native_call("call_2", '{"query": "x"}', name="rag_search"),
-                ],
+                "tool_calls": (
+                    [_native_call(f"call_{i}", '{"text": "a"}') for i in range(cap)]
+                    + [_native_call("call_extra", '{"query": "x"}', name="rag_search")]
+                ),
             },
             {"text": "done", "tool_calls": []},
         ]
@@ -575,18 +623,18 @@ class TestNativeMultiTurnTrack:
         trace = result["tool_calls"]
         executed = [t for t in trace if t["status"] == "completed"]
         declined = [t for t in trace if t["status"] == "declined"]
-        assert [t["name"] for t in executed] == ["grammar_check"]
+        assert [t["name"] for t in executed] == ["grammar_check"] * cap
         assert [t["name"] for t in declined] == ["rag_search"]
         assert declined[0]["error_code"] == "budget_exceeded"
 
         history = seen_messages[1]
         echoed = [c["id"] for m in history if m["role"] == "assistant" for c in m["tool_calls"]]
         answered = [m["tool_call_id"] for m in history if m["role"] == "tool"]
-        assert echoed == ["call_1", "call_2"]
+        assert echoed == [f"call_{i}" for i in range(cap)] + ["call_extra"]
         # the wire invariant: every id the assistant echoes is answered.
         assert sorted(echoed) == sorted(answered)
-        refusals = [m["content"] for m in history if m["role"] == "tool" and m["tool_call_id"] == "call_2"]
-        assert "one tool call per turn" in refusals[0]
+        refusals = [m["content"] for m in history if m["role"] == "tool" and m["tool_call_id"] == "call_extra"]
+        assert f"{cap} tool calls per turn" in refusals[0]
 
     def test_idless_native_call_gets_a_stable_paired_id(self) -> None:
         seen_messages: list = []

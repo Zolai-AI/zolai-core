@@ -11,8 +11,9 @@ prompt-embedded JSON:
 - results ride back as ``<<<TOOL_RESULT>>>`` follow-up turns that keep the
   original question in the user message.
 
-Rules enforced here: **≤1 tool per turn**, default ``AGENT_MAX_TURNS=3``
-tool calls followed by at most **one** final synthesis turn when evidence
+Rules enforced here: at most ``AGENT_MAX_TOOL_CALLS_PER_TURN`` (3) tool calls
+executed per turn, ``AGENT_MAX_TURNS=3`` turns of tool calls followed by at most
+**one** final synthesis turn when evidence
 was gathered (so a model that spends every turn researching still answers
 instead of being told to rephrase),
 native ``tools`` offered on turn 1 for ``openai``/``openrouter`` rows and kept
@@ -46,11 +47,18 @@ TOOL_RESULT_MARKER = "<<<TOOL_RESULT>>>"
 HOLD_CHARS = 16
 
 #: Loop budgets (env-overtable, plan §C determinism block).
-#: ``AGENT_MAX_STEPS`` was dropped here: the loop enforces ≤1 tool call per
-#: turn, so turns *are* the step count, and advertising a second, larger bound
+#: ``AGENT_MAX_STEPS`` was dropped here: the loop caps calls per turn, so turns
+#: *are* the step count, and advertising a second, larger bound
 #: on the status route was a number nothing read.
 AGENT_MAX_TURNS = max(1, int(os.environ.get("AGENT_MAX_TURNS", "3")))
 AGENT_TIMEOUT_S = max(1, int(os.environ.get("AGENT_TIMEOUT_S", "60")))
+
+#: Tool calls executed per turn. The tools are local SQLite reads, so running a
+#: whole batch costs one follow-up completion either way; serialising them spent
+#: a turn per lookup ("Dam maw" asking ``word_detail`` for both words lost the
+#: second call and had to re-ask). Overflow past this cap is still refused by
+#: name, never dropped.
+AGENT_MAX_TOOL_CALLS_PER_TURN = max(1, int(os.environ.get("AGENT_MAX_TOOL_CALLS_PER_TURN", "3")))
 
 MAX_TURNS_EXCEEDED = "Max turns reached"
 
@@ -216,7 +224,8 @@ def build_tools_section(names: Iterable[str]) -> str:
             "Tool definitions (JSON Schema):",
             json.dumps(schemas, ensure_ascii=False, indent=2),
             "",
-            f"Call at most ONE tool per turn. After a {TOOL_RESULT_MARKER} block arrives",
+            f"Call at most {AGENT_MAX_TOOL_CALLS_PER_TURN} tools per turn. After a "
+            f"{TOOL_RESULT_MARKER} block arrives",
             "those are real results for this question: use them to write the final",
             "answer and cite each claim as [source ref]. Never invent tool results,",
             "and never claim a tool is missing once you have called it.",
@@ -501,75 +510,82 @@ def run_agent_loop(
         if not calls:
             return finish(STOP_ANSWERED, reply=reply, ok=True)
 
-        # ≤1 tool per turn. The rest of a parallel batch is not dropped: a model
-        # that asked for three lookups and got one, with no word about the other
-        # two, asks for the same three next turn and spends the whole budget
-        # re-asking. Each extra is refused by name, in the trace and on the wire.
-        call = calls[0]
+        # A batch is executed up to the per-turn cap. What is left over is not
+        # dropped: a model that asked for five lookups and got three, with no
+        # word about the other two, asks for the same five next turn and spends
+        # the whole budget re-asking. Each overflow is refused by name, in the
+        # trace and on the wire.
+        cap = AGENT_MAX_TOOL_CALLS_PER_TURN
+        executed = calls[:cap]
         declined = [
             ToolResult(
                 tool_name=extra.name,
                 ok=False,
                 error=(
-                    "not executed: this run answers one tool call per turn. "
+                    f"not executed: this run answers {cap} tool calls per turn. "
                     "Ask again for it, or answer from the results above."
                 ),
                 error_code=ToolErrorCode.BUDGET_EXCEEDED,
                 turn=turns_used,
                 call_id=extra.call_id,
             )
-            for extra in calls[1:]
+            for extra in calls[cap:]
         ]
-        if on_tool_event:
-            on_tool_event({"name": call.name, "status": "started", "latency_ms": 0.0, "turn": turns_used})
-        emit("tool_started", turns_used, name=call.name, source=call.source)
-        result = execute_tool(call, allow, turn=turns_used)
-        results.append(result)
-        entry = result.to_dict()
-        entry["input"] = call.input or {}
-        entry["status"] = "completed" if result.ok else "failed"
-        trace.append(entry)
-        for extra, refusal in zip(calls[1:], declined, strict=True):
+        turn_results: list[ToolResult] = []
+        for call in executed:
+            if on_tool_event:
+                on_tool_event({"name": call.name, "status": "started", "latency_ms": 0.0, "turn": turns_used})
+            emit("tool_started", turns_used, name=call.name, source=call.source)
+            result = execute_tool(call, allow, turn=turns_used)
+            turn_results.append(result)
+            entry = result.to_dict()
+            entry["input"] = call.input or {}
+            entry["status"] = "completed" if result.ok else "failed"
+            trace.append(entry)
+            if on_tool_event:
+                on_tool_event(
+                    {
+                        "name": call.name,
+                        "status": "completed" if result.ok else "failed",
+                        "latency_ms": result.latency_ms,
+                        "turn": turns_used,
+                    }
+                )
+            emit(
+                "tool_completed",
+                turns_used,
+                name=call.name,
+                ok=result.ok,
+                latency_ms=result.latency_ms,
+                error_code=getattr(result.error_code, "value", result.error_code),
+            )
+        for extra, refusal in zip(calls[cap:], declined, strict=True):
             skipped = refusal.to_dict()
             skipped["input"] = extra.input or {}
             skipped["status"] = "declined"
             trace.append(skipped)
             emit("tool_declined", turns_used, name=extra.name)
-        if on_tool_event:
-            on_tool_event(
-                {
-                    "name": call.name,
-                    "status": "completed" if result.ok else "failed",
-                    "latency_ms": result.latency_ms,
-                    "turn": turns_used,
-                }
-            )
-        emit(
-            "tool_completed",
-            turns_used,
-            name=call.name,
-            ok=result.ok,
-            latency_ms=result.latency_ms,
-            error_code=getattr(result.error_code, "value", result.error_code),
-        )
+        results.extend(turn_results)
         if native_track:
             # Native replay: the model needs the turn it asked in and the turn
             # that answers it, in the OpenAI wire shape — including an answer for
             # every call id it made, so the declined ones are echoed and refused.
             messages.append(build_native_assistant_message(calls, reply))
-            messages.append(build_native_tool_message(result, call))
+            for call, result in zip(executed, turn_results, strict=True):
+                messages.append(build_native_tool_message(result, call))
             messages.extend(
                 build_native_tool_message(refusal, extra)
-                for extra, refusal in zip(calls[1:], declined, strict=True)
+                for extra, refusal in zip(calls[cap:], declined, strict=True)
             )
         else:
             messages = [
                 {"role": "system", "content": system},
                 {
                     "role": "user",
-                    # This track has no conversation history, so every follow-up
-                    # must carry ALL results gathered so far. Sending only this
-                    # turn's result made turn 3 forget turn 1 and re-ask for it.
+                    # The marker protocol has no conversation history to carry
+                    # earlier evidence, so every follow-up carries ALL results
+                    # gathered so far. Sending only this turn's results made a
+                    # third turn forget the first lookup and re-ask for it.
                     "content": build_followup_prompt(user_message, [*results, *declined]),
                 },
             ]

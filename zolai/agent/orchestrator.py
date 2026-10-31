@@ -24,7 +24,7 @@ from ..engines import engine_mode, llm_allowed
 from ..notifications import get_notification_service
 from ..shared.clock import stamp
 from . import store
-from .loop import run_agent_loop
+from .loop import AGENT_MAX_TOOL_CALLS_PER_TURN, run_agent_loop
 from .synthesis import make_chat_fn, rule_draft
 from .tools.errors import classify_failure
 from .tools.executor import execute_tool
@@ -78,10 +78,12 @@ SYSTEM_PROMPT = (
     "2. BUILD: Synthesize answer from evidence. Cite everything with [source ref].\n"
     "3. REVIEW: Validate against ZVS 2018 (orthography, SOV, ergative 'in').\n"
     "4. SHIP: Deliver final answer with full citations.\n\n"
-    "Available tools: rag_search, kb_research, word_evidence, word_related, "
+    "Available tools: rag_search, kb_research, word_detail, word_evidence, "
+    "word_related, "
     "analyze_text, grammar_check, dictionary_lookup, verse_lookup, knowledge_stats, "
     "review_queue_submit, provider_status, web_search.\n"
-    "Rules: One tool per turn. Max 3 turns. Never invent results. If evidence "
+    f"Rules: Up to {AGENT_MAX_TOOL_CALLS_PER_TURN} tool calls per turn. Max 3 turns. "
+    "Never invent results. If evidence "
     "missing, say so. Keep ZVS 2018: pasian/gam/tapa/topa, SOV, ergative 'in'."
 )
 
