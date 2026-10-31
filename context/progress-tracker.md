@@ -1429,10 +1429,23 @@ stray 528k scratch DB here, and skips on CI where that path does not exist.
 file is `--ignore`d in CI and all 14 of its tests pass with `ZOLAI_DATA_ROOT` pointed
 at the real corpus. Ruff clean.
 
-**OpenRouter free-model bake-off (availability + task fit).** The active `openrouter`
-row has `selected_model` empty, so both the adapter and the providers fall through to
-`models[0]` = `recursive/flint-v1.0:free`, which returns **503 "no upstreams
-available"** — `scripts/deploy.sh`'s provider probe aborted on exactly that. Probing
+**OpenRouter free-model bake-off (availability + task fit).** `selected_model` is
+empty on the `openrouter` row in **both** the local curated store and the server, so
+the adapter falls through to `models[0]` — which means the live default is an artefact
+of list ordering, not a decision. Locally `models[0]` is
+`nvidia/nemotron-3-ultra-550b-a55b:free` and the list also carries
+`recursive/flint-v1.0:free`, which returns **503 "no upstreams available"** if it is
+ever selected by ordering. On the server `models[0]` is
+`nvidia/nemotron-3.5-lightning:free` (alive), and the row carrying `is_active=1` there
+is `pcore-brain`, whose `/test` returned 200 in the log. Two consequences worth
+naming: the server's `openrouter.models` is **not** free-only (it still lists
+`openai/gpt-4o-mini`, `anthropic/claude-haiku-4.5`, `deepseek/deepseek-chat`), so
+"free models only" is a catalog write, not a code default; and `scripts/deploy.sh`
+probes the **active** row through the admin API, which it cannot reach here because
+`ADMIN_USER`/`ADMIN_PASS` are absent from the server's `.env.dev` — the probe is a
+silent skip in that case. Earlier in this session the same probe returned 503 naming a
+`recursive/` model, which is only reachable through this fall-through, so pinning
+`selected_model` closes it either way. Probing
 all 16 catalog rows: 200 for nemotron-3.5-super-vl, dots-3-note-preview,
 nemotron-3.5-lightning, poolside/laguna-s-2.1, cohere/north-mini-code,
 nemotron-3-ultra-550b-a55b, nemotron-3-nano-omni-30b-reasoning; **403** for both
@@ -1459,8 +1472,10 @@ Round two, score and mean latency:
 Read as: every free model passes marker protocol and strict JSON, so those are not
 differentiators; the discriminator is grammar judgement, where the best scorer is the
 one that gets rate-limited. Recommendation, not applied — setting the default is an
-admin catalog write, and `selected_model` on the `openrouter` row is still empty,
-which is what makes the dead `recursive/flint-v1.0:free` the implicit default today.
+admin catalog write (`PUT /api/v1/admin/ai-providers/{id}` then `POST .../activate`),
+and `selected_model` is empty on every row, so the default is whichever model happens
+to sit at `models[0]`. The minimal fix is to pin `selected_model` explicitly and trim
+the server's `openrouter.models` to free entries only.
 Suggested chain: `nemotron-3.5-super-vl:free` primary (fast, 5/6, no 429),
 `nemotron-3.5-lightning:free` for latency-critical paths, `laguna-s-2.1:free` for
 grammar/linguistic judgement accepting the 429 risk, `nemotron-3-ultra-550b-a55b:free`
