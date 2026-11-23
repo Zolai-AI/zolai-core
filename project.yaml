@@ -1,0 +1,43 @@
+project:
+  name: zolai-core
+  slug: zolai-core
+  display_name: zolai-core
+  type: api
+  category: ai-platform
+  owner: Zolai-AI
+
+  description: >
+    Python toolkit and RAG Knowledge Brain for Zolai.
+
+version:
+  current: 2.0.0
+  channel: dev
+  release_name: genesis
+  build_number: 001
+
+lifecycle:
+  stage: development
+  status: active
+  started: 2024-01-01
+  updated: 2026-11-23
+
+repository:
+  url: git@github.com:Zolai-AI/zolai-core.git
+  branch: main
+  provider: github
+  visibility: public
+
+stack:
+  languages:
+    - python
+  frameworks:
+    - fastapi
+    - hono?
+  package_manager: uv
+  runtime: python
+
+ai:
+  assistant: cursor
+  context_dir: context/
+  entry_point: AGENTS.md
+  rules: []
