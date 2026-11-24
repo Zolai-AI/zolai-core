@@ -52,6 +52,7 @@ from ..api.record_review_router import router as record_review_router
 from ..api.records_router import router as records_router
 from ..api.role_requests_router import router as role_requests_router
 from ..api.security import SecurityHeadersMiddleware, cors_kwargs, get_cors_origins
+from ..api.tts import router as tts_router
 from ..api.user_text_router import router as user_text_router
 from ..api.word_engine_router import router as word_engine_router
 from ..cleaner.pipeline import CleanPipeline
@@ -595,6 +596,9 @@ def create_app() -> FastAPI:
     app.include_router(linguistics_router)
     app.include_router(records_router)
     app.include_router(record_review_router)
+    # TTS voice/generation registry (read-only, member-gated) — same rule:
+    # register BEFORE the catch-all below.
+    app.include_router(tts_router)
     app.include_router(word_engine_router)
     app.include_router(contributions_router)
     app.include_router(learning_agents_router)

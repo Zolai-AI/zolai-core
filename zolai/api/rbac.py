@@ -327,6 +327,13 @@ MEMBER_PREFIXES: tuple[str, ...] = (
     # back your own submissions needs a resolved account, so "a key is required"
     # is the honest class for the sub-resource.
     "/api/v1/contributions",
+    # ``/api/v1/tts`` — read-only TTS voice/generation registry
+    # (``zolai/api/tts.py``).  Every route is GET and gated at the router with
+    # ``require_role(ROLE_MEMBER, strict=True)``; there is no write route at
+    # all (publishing is blocked in the zolai-tts manifest gate, not here).
+    # Declared member so ``classify_route`` stays honest for the completeness
+    # guard in tests/test_rbac_public_matrix.py.
+    "/api/v1/tts",
 )
 
 #: Strict admin surface (401 anon in warn *and* enforce + scope-gated).

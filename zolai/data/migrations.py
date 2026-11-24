@@ -2790,6 +2790,85 @@ def add_dictionary_lifecycle_columns(mgr: DatabaseManager) -> dict[str, Any]:
     return {"added": added, "skipped": skipped, "errors": errors}
 
 
+# ---------------------------------------------------------------------------
+# TTS voice registry + generation log (additive IF NOT EXISTS only).
+#
+# owner/license/consent_ref deliberately do NOT live here — they belong to the
+# tracked batch manifest in the zolai-tts repo only.  legal_status defaults to
+# 'unverified'; only 'verified' passes the publish gate.  Provider-owned default
+# voices are never claimed as Zolai-owned audio.
+# ---------------------------------------------------------------------------
+TTS_VOICES_DDL = """
+CREATE TABLE IF NOT EXISTS tts_voices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    voice_key TEXT NOT NULL UNIQUE,
+    provider TEXT NOT NULL,
+    provider_voice_id TEXT NOT NULL,
+    style_default TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    legal_status TEXT NOT NULL DEFAULT 'unverified',
+    legal_notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
+)
+"""
+
+TTS_GENERATIONS_DDL = """
+CREATE TABLE IF NOT EXISTS tts_generations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    voice_id INTEGER NOT NULL REFERENCES tts_voices(id),
+    batch_id TEXT NOT NULL,
+    input_sha256 TEXT NOT NULL,
+    source_ref TEXT,
+    model TEXT NOT NULL,
+    api_version TEXT,
+    style TEXT,
+    manifest_path TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
+)
+"""
+
+TTS_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_tts_voices_provider ON tts_voices(provider)",
+    "CREATE INDEX IF NOT EXISTS ix_tts_generations_batch ON tts_generations(batch_id)",
+    "CREATE INDEX IF NOT EXISTS ix_tts_generations_voice ON tts_generations(voice_id)",
+]
+
+
+def create_tts_tables(mgr: DatabaseManager) -> dict[str, Any]:
+    """Create ``tts_voices`` + ``tts_generations`` (idempotent, additive only).
+
+    A table that already exists is reported as ``skipped`` and never rebuilt,
+    so existing rows survive untouched.  Registered in
+    :func:`run_all_migrations` (not ``apply_migrations``).
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+    wanted = (
+        ("tts_voices", TTS_VOICES_DDL),
+        ("tts_generations", TTS_GENERATIONS_DDL),
+    )
+    try:
+        with mgr.engine.connect() as conn:
+            for table, ddl in wanted:
+                if table in existing_tables:
+                    skipped.append(f"{table} (already exists)")
+                    continue
+                conn.execute(text(ddl))
+                created.append(table)
+            for idx_sql in TTS_INDEXES:
+                conn.execute(text(idx_sql))
+            conn.commit()
+    except Exception as exc:
+        errors.append(f"tts_tables: {exc}")
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
 def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
     """Run all constraint and index migrations including Foundation tables.
 
@@ -2844,6 +2923,7 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "learning_run_tables": create_learning_run_tables(mgr),
         "corpus_learning_tables": create_corpus_learning_tables(mgr),
         "oauth_tables": create_oauth_tables(mgr),
+        "tts_tables": create_tts_tables(mgr),
     }
 
 
