@@ -84,7 +84,8 @@ def test_teams_list_show_run(data_db: Path, auth_db: DatabaseManager, client: Te
     assert any(t["team_id"] == "data" for t in teams)
     r2 = client.get("/api/v1/agent/teams/data", headers=_h(key))
     assert r2.status_code == 200
-    r3 = client.post("/api/v1/agent/teams/data/run", headers=_h(key), json={"dry_run": True, "member_mode": "manual", "input": {}})
+    r3 = client.post("/api/v1/agent/teams/data/run", headers=_h(key), json={"dry_run": True, "member_mode": "manual",
+        "input": {}})
     assert r3.status_code == 200
     body = r3.json()
     assert body["output"]["team_id"] == "data"
@@ -94,7 +95,8 @@ def test_teams_list_show_run(data_db: Path, auth_db: DatabaseManager, client: Te
 def test_domain_run_create_and_events(data_db: Path, auth_db: DatabaseManager, client: TestClient, key: dict) -> None:
     manifests = client.get("/api/v1/agent/manifests", headers=_h(key)).json()["items"]
     agent_id = manifests[0]["agent_id"]
-    r = client.post("/api/v1/agent/domain-runs", headers=_h(key), json={"agent_id": agent_id, "mode": "manual", "input": {"task": "smoke"}, "dry_run": True})
+    r = client.post("/api/v1/agent/domain-runs", headers=_h(key), json={"agent_id": agent_id, "mode": "manual",
+        "input": {"task": "smoke"}, "dry_run": True})
     assert r.status_code == 200
     run = r.json()
     run_id = run["id"]
@@ -105,9 +107,12 @@ def test_domain_run_create_and_events(data_db: Path, auth_db: DatabaseManager, c
     assert r3.json()["count"] >= 1
 
 
-def test_existing_p3_runs_contract_still_works(data_db: Path, auth_db: DatabaseManager, client: TestClient, key: dict, monkeypatch) -> None:
+def test_existing_p3_runs_contract_still_works(data_db: Path, auth_db: DatabaseManager, client: TestClient, key: dict,
+    monkeypatch) -> None:
     monkeypatch.setenv("ZOLAI_ENGINE_MODE", "rule")
-    r = client.post("/api/v1/agent/runs", headers=_h(key), json={"goal": "What is pasian?"})
+    r = client.post(
+        "/api/v1/agent/runs", headers=_h(key), json={"goal": "What is pasian?"}
+    )
     assert r.status_code == 200
     body = r.json()
     assert body["status"] in {"succeeded", "failed"}

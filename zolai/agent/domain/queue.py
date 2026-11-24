@@ -24,14 +24,20 @@ def _autonomous_enabled() -> bool:
     return os.environ.get("ZOLAI_AGENT_AUTONOMOUS", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def enqueue_domain_run(domain_run_id: int, *, priority: int = 0, max_attempts: int = QUEUE_MAX_ATTEMPTS) -> dict[str, Any]:
+def enqueue_domain_run(domain_run_id: int, *, priority: int = 0, max_attempts: int = QUEUE_MAX_ATTEMPTS) -> dict[str,
+    Any]:
     eng = get_engine()
     store.ensure_domain_agent_tables(eng)
     with eng.begin() as conn:
         conn.execute(
             sa_text(
-                "INSERT OR IGNORE INTO agent_queue (domain_run_id, priority, available_at, attempts, max_attempts, lock_owner, lock_until, status, created_at, updated_at) "
-                "VALUES (:domain_run_id, :priority, :available_at, 0, :max_attempts, '', NULL, 'queued', :created_at, :updated_at)"
+                "INSERT OR IGNORE INTO agent_queue ("
+                "domain_run_id, priority, available_at, attempts, max_attempts, "
+                "lock_owner, lock_until, status, created_at, updated_at"
+                ") VALUES ("
+                ":domain_run_id, :priority, :available_at, 0, :max_attempts, "
+                "'', NULL, 'queued', :created_at, :updated_at"
+                ")"
             ),
             {
                 "domain_run_id": int(domain_run_id),
@@ -66,15 +72,18 @@ def _claim_one(lock_owner: str) -> dict[str, Any] | None:
         attempts = int(row[2] or 0)
         max_attempts = int(row[3] or QUEUE_MAX_ATTEMPTS)
         if attempts >= max_attempts:
-            conn.execute(sa_text("UPDATE agent_queue SET status='dead', updated_at=:u WHERE id=:id"), {"id": int(row[0]), "u": now_s})
+            conn.execute(sa_text("UPDATE agent_queue SET status='dead', updated_at=:u WHERE id=:id"),
+                {"id": int(row[0]), "u": now_s})
             return None
         conn.execute(
             sa_text(
-                "UPDATE agent_queue SET status='running', lock_owner=:owner, lock_until=:lu, attempts=attempts+1, updated_at=:u WHERE id=:id"
+                "UPDATE agent_queue SET status='running', lock_owner=:owner, "
+                "lock_until=:lu, attempts=attempts+1, updated_at=:u WHERE id=:id"
             ),
             {"owner": lock_owner, "lu": lock_until, "u": now_s, "id": int(row[0])},
         )
-    return {"queue_id": int(row[0]), "domain_run_id": int(row[1]), "attempts": attempts + 1, "max_attempts": max_attempts}
+    return {"queue_id": int(row[0]), "domain_run_id": int(row[1]), "attempts": attempts + 1,
+        "max_attempts": max_attempts}
 
 
 def _complete(queue_id: int, *, status: str, error: str = "") -> None:

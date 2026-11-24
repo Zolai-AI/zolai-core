@@ -28,7 +28,8 @@ def data_db(tmp_path, monkeypatch) -> Iterator[Path]:
 def test_manual_mode_returns_plan(data_db: Path) -> None:
     reg = get_domain_registry(force=True)
     agent_id = reg.reports()[0].agent_id
-    result = run_domain_agent(agent_id, mode="manual", input_data={"task": "smoke"}, dry_run=True, scope="admin", requested_by="test")
+    result = run_domain_agent(agent_id, mode="manual", input_data={"task": "smoke"}, dry_run=True, scope="admin",
+        requested_by="test")
     assert result["status"] == "manual"
     assert result["output"]["mode"] == "manual"
     assert result["output"]["dry_run"] is True
@@ -40,7 +41,8 @@ def test_unknown_agent_not_found(data_db: Path) -> None:
 
 
 def test_team_run_dry_run_bounded(data_db: Path) -> None:
-    result = run_domain_team("data", input_data={"member_mode": "manual"}, dry_run=True, scope="admin", requested_by="test")
+    result = run_domain_team("data", input_data={"member_mode": "manual"}, dry_run=True, scope="admin",
+        requested_by="test")
     assert result["status"] in {"succeeded", "failed"}
     assert result["output"]["team_id"] == "data"
     assert isinstance(result["output"]["child_runs"], list)

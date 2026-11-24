@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -16,7 +15,8 @@ runner = CliRunner()
 def test_agents_list_json(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "zolai.db"
     mgr = DatabaseManager(f"sqlite:///{db_path}")
-    mgr.init_db(); run_all_migrations(mgr)
+    mgr.init_db()
+    run_all_migrations(mgr)
     monkeypatch.setattr(config.paths, "data", tmp_path)
     monkeypatch.setattr(config.paths, "db", db_path)
     res = runner.invoke(agent_app, ["agents", "list", "--json"])
@@ -29,7 +29,8 @@ def test_agents_list_json(tmp_path, monkeypatch) -> None:
 def test_teams_list_and_run_dry(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "zolai.db"
     mgr = DatabaseManager(f"sqlite:///{db_path}")
-    mgr.init_db(); run_all_migrations(mgr)
+    mgr.init_db()
+    run_all_migrations(mgr)
     monkeypatch.setattr(config.paths, "data", tmp_path)
     monkeypatch.setattr(config.paths, "db", db_path)
     res = runner.invoke(agent_app, ["teams", "list", "--json"])

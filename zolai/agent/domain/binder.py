@@ -68,7 +68,8 @@ def _bind_workflow(name: str, steps: list[Any], tool_bindings: dict[str, dict[st
         if isinstance(step, str):
             step_name = step.strip()
         elif isinstance(step, dict):
-            step_name = str(step.get("tool") or step.get("name") or step.get("action") or step.get("step") or "").strip()
+            step_name = str(step.get("tool") or step.get("name") or step.get("action") or step.get("step") or
+                "").strip()
         else:
             step_name = str(step)
         # Step may reference a tool name; bind if known.

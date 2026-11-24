@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import text
+from sqlalchemy.engine import Engine
 
 from .database import DatabaseManager
 from .models import Base
@@ -361,11 +362,16 @@ FOUNDATION_PERFORMANCE_INDEXES = [
     ("foundation_raw_llm", "CREATE INDEX IF NOT EXISTS ix_frawllm_created ON foundation_raw_llm(created_at)"),
     # Staging layer
     ("foundation_staging_words", "CREATE INDEX IF NOT EXISTS ix_fstg_word_pos ON foundation_staging_words(pos)"),
-    ("foundation_staging_words", "CREATE INDEX IF NOT EXISTS ix_fstg_word_zvs ON foundation_staging_words(zvs_compliant)"),
-    ("foundation_staging_words", "CREATE INDEX IF NOT EXISTS ix_fstg_word_created ON foundation_staging_words(created_at)"),
-    ("foundation_staging_sentences", "CREATE INDEX IF NOT EXISTS ix_fstg_sent_created ON foundation_staging_sentences(created_at)"),
-    ("foundation_staging_paragraphs", "CREATE INDEX IF NOT EXISTS ix_fstg_para_created ON foundation_staging_paragraphs(created_at)"),
-    ("foundation_staging_evidence", "CREATE INDEX IF NOT EXISTS ix_fstg_ev_confidence ON foundation_staging_evidence(confidence)"),
+    ("foundation_staging_words", "CREATE INDEX IF NOT EXISTS ix_fstg_word_zvs "
+        "ON foundation_staging_words(zvs_compliant)"),
+    ("foundation_staging_words", "CREATE INDEX IF NOT EXISTS ix_fstg_word_created "
+        "ON foundation_staging_words(created_at)"),
+    ("foundation_staging_sentences", "CREATE INDEX IF NOT EXISTS ix_fstg_sent_created "
+        "ON foundation_staging_sentences(created_at)"),
+    ("foundation_staging_paragraphs", "CREATE INDEX IF NOT EXISTS ix_fstg_para_created "
+        "ON foundation_staging_paragraphs(created_at)"),
+    ("foundation_staging_evidence", "CREATE INDEX IF NOT EXISTS ix_fstg_ev_confidence "
+        "ON foundation_staging_evidence(confidence)"),
     # Canonical layer
     ("canonical_words", "CREATE INDEX IF NOT EXISTS ix_cword_pos ON canonical_words(pos)"),
     ("canonical_words", "CREATE INDEX IF NOT EXISTS ix_cword_zvs ON canonical_words(zvs_compliant)"),
@@ -375,7 +381,8 @@ FOUNDATION_PERFORMANCE_INDEXES = [
     # Evidence/Consensus
     ("foundation_evidence", "CREATE INDEX IF NOT EXISTS ix_fev_source ON foundation_evidence(source)"),
     ("foundation_evidence", "CREATE INDEX IF NOT EXISTS ix_fev_created ON foundation_evidence(created_at)"),
-    ("foundation_verifications", "CREATE INDEX IF NOT EXISTS ix_fver_candidate ON foundation_verifications(candidate_id)"),
+    ("foundation_verifications", "CREATE INDEX IF NOT EXISTS ix_fver_candidate "
+        "ON foundation_verifications(candidate_id)"),
     ("foundation_verifications", "CREATE INDEX IF NOT EXISTS ix_fver_created ON foundation_verifications(created_at)"),
     ("foundation_consensus", "CREATE INDEX IF NOT EXISTS ix_fcon_confidence ON foundation_consensus(confidence)"),
     ("foundation_consensus", "CREATE INDEX IF NOT EXISTS ix_fcon_created ON foundation_consensus(created_at)"),
@@ -2556,7 +2563,8 @@ CREATE TABLE IF NOT EXISTS eval_cases (
 """
 
 EVAL_INDEXES: tuple[tuple[str, str], ...] = (
-    ("idx_eval_cases_lookup", "CREATE INDEX IF NOT EXISTS idx_eval_cases_lookup ON eval_cases(set_name, is_active, ordinal)"),
+    ("idx_eval_cases_lookup", "CREATE INDEX IF NOT EXISTS idx_eval_cases_lookup "
+        "ON eval_cases(set_name, is_active, ordinal)"),
     ("idx_eval_cases_kind", "CREATE INDEX IF NOT EXISTS idx_eval_cases_kind ON eval_cases(kind)"),
 )
 
@@ -2885,11 +2893,11 @@ def create_kg_tables(engine: Engine) -> list[str]:
     """Create knowledge graph tables (nodes + edges) — additive only."""
     from sqlalchemy import inspect as sa_inspect
     from sqlalchemy import text
-    
+
     inspector = sa_inspect(engine)
     existing = set(inspector.get_table_names())
     created: list[str] = []
-    
+
     with engine.begin() as conn:
         # kg_nodes
         if "kg_nodes" not in existing:
@@ -2912,7 +2920,7 @@ def create_kg_tables(engine: Engine) -> list[str]:
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_kg_nodes_label ON kg_nodes(label)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_kg_nodes_source ON kg_nodes(source, source_id)"))
             created.append("kg_nodes")
-        
+
         # kg_edges
         if "kg_edges" not in existing:
             conn.execute(text("""
@@ -2920,7 +2928,10 @@ def create_kg_tables(engine: Engine) -> list[str]:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     source_id INTEGER NOT NULL,
                     target_id INTEGER NOT NULL,
-                    relation TEXT NOT NULL,            -- 'has_form' | 'has_pos' | 'derived_from' | 'contains_morpheme' | 'occurs_with' | 'occurs_in' | 'participates_in' | 'similar_to' | 'variant_of' | 'attested_by'
+                    relation TEXT NOT NULL,
+                        -- 'has_form' | 'has_pos' | 'derived_from' | 'contains_morpheme'
+                        -- | 'occurs_with' | 'occurs_in' | 'participates_in'
+                        -- | 'similar_to' | 'variant_of' | 'attested_by'
                     properties TEXT NOT NULL DEFAULT '{}',  -- JSON: {frequency, confidence, evidence_ids, etc.}
                     confidence REAL DEFAULT 0.0,
                     source TEXT,                       -- 'auto_discovery' | 'human' | 'bible_parallel' | 'dictionary'
@@ -2936,7 +2947,7 @@ def create_kg_tables(engine: Engine) -> list[str]:
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_kg_edges_target ON kg_edges(target_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_kg_edges_relation ON kg_edges(relation)"))
             created.append("kg_edges")
-    
+
     return created
 
 # Register in run_all_migrations
@@ -3190,11 +3201,15 @@ def create_agent_manifests_table(mgr: DatabaseManager) -> dict[str, Any]:
 
 
 def create_agent_domain_runs_table(mgr: DatabaseManager) -> dict[str, Any]:
-    return _create_simple_table(mgr, "agent_domain_runs", AGENT_DOMAIN_RUNS_DDL, AGENT_DOMAIN_RUNS_INDEXES, "agent_domain_runs")
+    return _create_simple_table(
+        mgr, "agent_domain_runs", AGENT_DOMAIN_RUNS_DDL, AGENT_DOMAIN_RUNS_INDEXES, "agent_domain_runs"
+    )
 
 
 def create_agent_run_events_table(mgr: DatabaseManager) -> dict[str, Any]:
-    return _create_simple_table(mgr, "agent_run_events", AGENT_RUN_EVENTS_DDL, AGENT_RUN_EVENTS_INDEXES, "agent_run_events")
+    return _create_simple_table(
+        mgr, "agent_run_events", AGENT_RUN_EVENTS_DDL, AGENT_RUN_EVENTS_INDEXES, "agent_run_events"
+    )
 
 
 def create_agent_queue_table(mgr: DatabaseManager) -> dict[str, Any]:

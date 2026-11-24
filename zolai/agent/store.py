@@ -245,7 +245,14 @@ def ensure_domain_agent_tables(engine: Engine | None = None) -> None:
 
 def _domain_row_to_dict(row: Any) -> dict[str, Any]:
     data = dict(row._mapping) if hasattr(row, "_mapping") else dict(row)
-    for key in ("input_json", "output_json", "manifest_json", "capabilities_json", "validation_errors_json", "payload_json"):
+    for key in (
+        "input_json",
+        "output_json",
+        "manifest_json",
+        "capabilities_json",
+        "validation_errors_json",
+        "payload_json",
+    ):
         if key in data and isinstance(data[key], str) and data[key]:
             try:
                 data[key] = json.loads(data[key])
@@ -295,8 +302,13 @@ def upsert_manifest_record(record: dict[str, Any], *, engine: Engine | None = No
         else:
             cursor = conn.execute(
                 sa_text(
-                    "INSERT INTO agent_manifests (agent_id, name, version, source_path, manifest_json, status, capabilities_json, validation_errors_json, registered_at, updated_at) "
-                    "VALUES (:agent_id, :name, :version, :source_path, :manifest_json, :status, :capabilities_json, :validation_errors_json, :registered_at, :updated_at)"
+                    "INSERT INTO agent_manifests ("
+                    "agent_id, name, version, source_path, manifest_json, status, "
+                    "capabilities_json, validation_errors_json, registered_at, updated_at"
+                    ") VALUES ("
+                    ":agent_id, :name, :version, :source_path, :manifest_json, :status, "
+                    ":capabilities_json, :validation_errors_json, :registered_at, :updated_at"
+                    ")"
                 ),
                 payload,
             )
@@ -349,8 +361,13 @@ def create_domain_run(record: dict[str, Any], *, engine: Engine | None = None) -
     with eng.begin() as conn:
         cursor = conn.execute(
             sa_text(
-                "INSERT INTO agent_domain_runs (run_id, agent_id, mode, status, input_json, output_json, error, dry_run, autonomous, requested_by, scope, started_at, finished_at, created_at) "
-                "VALUES (:run_id, :agent_id, :mode, :status, :input_json, :output_json, :error, :dry_run, :autonomous, :requested_by, :scope, :started_at, :finished_at, :created_at)"
+                "INSERT INTO agent_domain_runs ("
+                "run_id, agent_id, mode, status, input_json, output_json, error, "
+                "dry_run, autonomous, requested_by, scope, started_at, finished_at, created_at"
+                ") VALUES ("
+                ":run_id, :agent_id, :mode, :status, :input_json, :output_json, :error, "
+                ":dry_run, :autonomous, :requested_by, :scope, :started_at, :finished_at, :created_at"
+                ")"
             ),
             payload,
         )
@@ -392,7 +409,9 @@ def get_domain_run(domain_run_id: int, *, engine: Engine | None = None) -> dict[
     return _domain_row_to_dict(row) if row else None
 
 
-def list_domain_runs(*, limit: int = 20, agent_id: str | None = None, engine: Engine | None = None) -> list[dict[str, Any]]:
+def list_domain_runs(
+    *, limit: int = 20, agent_id: str | None = None, engine: Engine | None = None
+) -> list[dict[str, Any]]:
     eng = engine or _engine()
     ensure_domain_agent_tables(eng)
     limit = max(1, min(int(limit or 20), 100))

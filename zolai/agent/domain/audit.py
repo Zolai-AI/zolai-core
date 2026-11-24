@@ -117,8 +117,11 @@ def append_event(
     with engine.begin() as conn:
         cursor = conn.execute(
             sa_text(
-                "INSERT INTO agent_run_events (domain_run_id, seq, event_type, phase, tool_name, payload_json, created_at) "
-                "VALUES (:domain_run_id, :seq, :event_type, :phase, :tool_name, :payload_json, :created_at)"
+                "INSERT INTO agent_run_events ("
+                "domain_run_id, seq, event_type, phase, tool_name, payload_json, created_at"
+                ") VALUES ("
+                ":domain_run_id, :seq, :event_type, :phase, :tool_name, :payload_json, :created_at"
+                ")"
             ),
             row,
         )

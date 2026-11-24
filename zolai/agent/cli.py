@@ -151,7 +151,8 @@ def agents_list(json_output: bool = typer.Option(False, "--json", help="JSON out
     for r in reports:
         tools = sum(1 for t in r.get("tool_bindings", []) if t.get("bound"))
         wfs = sum(1 for w in r.get("workflow_bindings", []) if w.get("bound"))
-        table.add_row(r["agent_id"], r.get("name", "")[:32], r.get("status", ""), f"{tools}/{len(r.get('tool_bindings', []))}", f"{wfs}/{len(r.get('workflow_bindings', []))}")
+        table.add_row(r["agent_id"], r.get("name", "")[:32], r.get("status", ""), f"{tools}/{len(r.get('tool_bindings',
+            []))}", f"{wfs}/{len(r.get('workflow_bindings', []))}")
     console.print(table)
     console.print(reg.summary())
 
@@ -192,7 +193,8 @@ def agents_run(
     except Exception as exc:
         console.print(f"[red]error:[/red] invalid --input JSON: {exc}")
         raise typer.Exit(code=2) from exc
-    result = run_domain_agent(agent_id, mode=mode, input_data=input_data, dry_run=dry_run, autonomous=autonomous, scope=scope, requested_by="cli")
+    result = run_domain_agent(agent_id, mode=mode, input_data=input_data, dry_run=dry_run, autonomous=autonomous,
+        scope=scope, requested_by="cli")
     console.print_json(json.dumps(result, ensure_ascii=False, default=str))
     if result.get("status") == "failed":
         raise typer.Exit(code=1)
@@ -213,7 +215,8 @@ def teams_list(json_output: bool = typer.Option(False, "--json")) -> None:
     for col in ("team_id", "name", "lead", "agents", "status"):
         table.add_column(col)
     for t in items:
-        table.add_row(t["team_id"], t.get("name", "")[:32], t.get("lead", ""), str(len(t.get("agents", []))), t.get("status", ""))
+        table.add_row(t["team_id"], t.get("name", "")[:32], t.get("lead", ""), str(len(t.get("agents", []))),
+            t.get("status", ""))
     console.print(table)
 
 
@@ -245,7 +248,8 @@ def teams_run(
         console.print(f"[red]error:[/red] invalid --input JSON: {exc}")
         raise typer.Exit(code=2) from exc
     input_data.setdefault("member_mode", member_mode)
-    result = run_domain_team(team_id, input_data=input_data, dry_run=dry_run, scope=scope, requested_by="cli", member_mode=member_mode)
+    result = run_domain_team(team_id, input_data=input_data, dry_run=dry_run, scope=scope, requested_by="cli",
+        member_mode=member_mode)
     console.print_json(json.dumps(result, ensure_ascii=False, default=str))
     if result.get("status") == "failed":
         raise typer.Exit(code=1)
@@ -265,16 +269,18 @@ def runs_status(run_id: int = typer.Argument(...)) -> None:
 
 
 @runs_app.command("logs")
-def runs_logs(run_id: int = typer.Argument(...), tail: int = typer.Option(200, "--tail", "-n"), json_output: bool = typer.Option(False, "--json")) -> None:
-    from .domain.audit import list_events
+def runs_logs(run_id: int = typer.Argument(...), tail: int = typer.Option(200, "--tail", "-n"),
+    json_output: bool = typer.Option(False, "--json")) -> None:
     from ..data.repositories import get_engine
+    from .domain.audit import list_events
 
     events = list_events(get_engine(), run_id, limit=tail)
     if json_output:
         console.print_json(json.dumps({"items": events}, ensure_ascii=False))
         return
     for e in events:
-        console.print(f"[{e.get('seq')}] {e.get('event_type')} phase={e.get('phase')} tool={e.get('tool_name')} {json.dumps(e.get('payload', {}), ensure_ascii=False)[:200]}")
+        console.print(f"[{e.get('seq')}] {e.get('event_type')} phase={e.get('phase')} tool={e.get('tool_name')} {
+            json.dumps(e.get('payload', {}), ensure_ascii=False)[:200]}")
 
 
 @agent_app.command("worker")

@@ -12,10 +12,8 @@ All timestamps via zolai.shared.clock.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import time
 from typing import Any
 
 from sqlalchemy.engine import Engine
@@ -23,9 +21,10 @@ from sqlalchemy.engine import Engine
 from ...shared.clock import stamp
 from .. import store
 from ..tools.executor import execute_tool
-from ..tools.registry import allow_list as tier_allow_list, get_tool
-from ..tools.types import ToolCall, ToolErrorCode
-from .audit import append_event, list_events, redact
+from ..tools.registry import allow_list as tier_allow_list
+from ..tools.registry import get_tool
+from ..tools.types import ToolCall
+from .audit import append_event, redact
 from .registry import get_domain_registry
 
 logger = logging.getLogger(__name__)
@@ -67,12 +66,15 @@ def _effective_allow(manifest_report: dict[str, Any], scope: str) -> tuple[froze
     return frozenset(allowed), bound
 
 
-def _audit(eng: Engine, domain_run_id: int, seq: int, event_type: str, *, phase: str = "", tool_name: str = "", payload: dict[str, Any] | None = None) -> int:
-    append_event(eng, domain_run_id=domain_run_id, seq=seq, event_type=event_type, phase=phase, tool_name=tool_name, payload=payload)
+def _audit(eng: Engine, domain_run_id: int, seq: int, event_type: str, *, phase: str = "", tool_name: str = "",
+    payload: dict[str, Any] | None = None) -> int:
+    append_event(eng, domain_run_id=domain_run_id, seq=seq, event_type=event_type, phase=phase, tool_name=tool_name,
+        payload=payload)
     return seq + 1
 
 
-def _finish(eng: Engine, domain_run: dict[str, Any], *, status: str, output: dict[str, Any], error: str = "") -> dict[str, Any]:
+def _finish(eng: Engine, domain_run: dict[str, Any], *, status: str, output: dict[str, Any],
+    error: str = "") -> dict[str, Any]:
     finished = stamp()
     updated = store.update_domain_run(
         int(domain_run["id"]),
@@ -105,9 +107,11 @@ def _run_manual(manifest, report, *, input_data: dict[str, Any], dry_run: bool, 
     return plan
 
 
-def _run_workflow(manifest, report, *, input_data: dict[str, Any], dry_run: bool, scope: str, eng: Engine, domain_run_id: int, seq: int) -> tuple[dict[str, Any], int]:
+def _run_workflow(manifest, report, *, input_data: dict[str, Any], dry_run: bool, scope: str, eng: Engine,
+    domain_run_id: int, seq: int) -> tuple[dict[str, Any], int]:
     allow, _ = _effective_allow(report, scope)
-    workflow_name = str(input_data.get("workflow") or (manifest.workflow_names()[0] if manifest.workflow_names() else "default"))
+    workflow_name = str(input_data.get("workflow") or (manifest.workflow_names()[0] if manifest.workflow_names() else
+        "default"))
     workflows = {w["name"]: w for w in (report.get("workflow_bindings") or [])}
     wf = workflows.get(workflow_name)
     if wf is None:
@@ -115,7 +119,23 @@ def _run_workflow(manifest, report, *, input_data: dict[str, Any], dry_run: bool
         steps = manifest.workflows.get(workflow_name)
         if steps is None and manifest.workflows:
             workflow_name, steps = next(iter(manifest.workflows.items()))
-        wf = {"name": workflow_name, "status": "manual", "bound": False, "reason": "workflow not found in binding report", "steps": [{"index": i, "step": s, "name": str(s), "bound": False, "status": "unsupported", "reason": "workflow not bound"} for i, s in enumerate(steps or [])]}
+        wf = {
+            "name": workflow_name,
+            "status": "manual",
+            "bound": False,
+            "reason": "workflow not found in binding report",
+            "steps": [
+                {
+                    "index": i,
+                    "step": s,
+                    "name": str(s),
+                    "bound": False,
+                    "status": "unsupported",
+                    "reason": "workflow not bound",
+                }
+                for i, s in enumerate(steps or [])
+            ],
+        }
     results = []
     status = "succeeded"
     for s in (wf.get("steps") or [])[:MAX_STEPS]:
@@ -125,32 +145,83 @@ def _run_workflow(manifest, report, *, input_data: dict[str, Any], dry_run: bool
         if not bound or spec is None or step_name not in allow:
             results.append({"step": s, "status": "unsupported", "reason": s.get("reason") or "not bound/allowed"})
             status = "manual" if status == "succeeded" else status
-            seq = _audit(eng, domain_run_id, seq, "workflow.step.skipped", phase="workflow", tool_name=step_name, payload={"reason": s.get("reason"), "bound": bound})
+            seq = _audit(
+        eng,
+        domain_run_id,
+        seq,
+        "workflow.step.skipped",
+        phase="workflow",
+        tool_name=step_name,
+        payload={"reason": s.get("reason"), "bound": bound},
+    )
             continue
         if dry_run and _is_side_effect_tool(step_name):
-            results.append({"step": s, "status": "dry_run_blocked", "tool": step_name, "reason": "side-effecting tool blocked in dry-run"})
-            seq = _audit(eng, domain_run_id, seq, "workflow.step.dry_run_blocked", phase="workflow", tool_name=step_name, payload={"input": redact(input_data.get("step_input") or input_data)})
+            results.append(
+                {
+                    "step": s,
+                    "status": "dry_run_blocked",
+                    "tool": step_name,
+                    "reason": "side-effecting tool blocked in dry-run",
+                }
+            )
+            seq = _audit(
+                eng,
+                domain_run_id,
+                seq,
+                "workflow.step.dry_run_blocked",
+                phase="workflow",
+                tool_name=step_name,
+                payload={"input": redact(input_data.get("step_input") or input_data)},
+            )
             continue
-        call_input = input_data.get("step_input") if isinstance(input_data.get("step_input"), dict) else {"query": str(input_data.get("goal") or input_data.get("task") or "")}
+        call_input = (
+            input_data.get("step_input")
+            if isinstance(input_data.get("step_input"), dict)
+            else {"query": str(input_data.get("goal") or input_data.get("task") or "")}
+        )
         # allow per-step input map
         step_inputs = input_data.get("steps") if isinstance(input_data.get("steps"), dict) else {}
         if step_name in step_inputs and isinstance(step_inputs[step_name], dict):
             call_input = step_inputs[step_name]
-        seq = _audit(eng, domain_run_id, seq, "workflow.step.start", phase="workflow", tool_name=step_name, payload={"input": redact(call_input)})
-        res = execute_tool(ToolCall(name=step_name, input=call_input, source="workflow"), allow, turn=s.get("index", 0))
+        seq = _audit(
+            eng,
+            domain_run_id,
+            seq,
+            "workflow.step.start",
+            phase="workflow",
+            tool_name=step_name,
+            payload={"input": redact(call_input)},
+        )
+        res = execute_tool(
+            ToolCall(name=step_name, input=call_input, source="workflow"),
+            allow,
+            turn=s.get("index", 0),
+        )
         row = res.to_dict()
         row["status"] = "completed" if res.ok else "failed"
         row["data"] = redact(res.data) if res.ok else None
         row["error"] = res.error
         results.append({"step": s, "status": row["status"], "tool": step_name, "result": row})
-        seq = _audit(eng, domain_run_id, seq, "workflow.step.end", phase="workflow", tool_name=step_name, payload={"ok": res.ok, "error_code": getattr(res.error_code, "value", res.error_code)})
+        seq = _audit(
+            eng,
+            domain_run_id,
+            seq,
+            "workflow.step.end",
+            phase="workflow",
+            tool_name=step_name,
+            payload={
+                "ok": res.ok,
+                "error_code": getattr(res.error_code, "value", res.error_code),
+            },
+        )
         if not res.ok:
             status = "failed"
             break
     return {"workflow": workflow_name, "status": status, "steps": results}, seq
 
 
-def _run_goal(manifest, report, *, input_data: dict[str, Any], dry_run: bool, autonomous: bool, scope: str, requested_by: str, eng: Engine, domain_run_id: int, seq: int) -> tuple[dict[str, Any], int]:
+def _run_goal(manifest, report, *, input_data: dict[str, Any], dry_run: bool, autonomous: bool, scope: str,
+    requested_by: str, eng: Engine, domain_run_id: int, seq: int) -> tuple[dict[str, Any], int]:
     from ..orchestrator import run_agent_goal
 
     goal = str(input_data.get("goal") or input_data.get("task") or input_data.get("query") or "").strip()
@@ -159,7 +230,14 @@ def _run_goal(manifest, report, *, input_data: dict[str, Any], dry_run: bool, au
     allow, _ = _effective_allow(report, scope)
     if not allow:
         # Still run but with no tools; mark manual-ish.
-        seq = _audit(eng, domain_run_id, seq, "goal.no_bound_tools", phase="goal", payload={"agent_id": manifest.agent_id})
+        seq = _audit(
+        eng,
+        domain_run_id,
+        seq,
+        "goal.no_bound_tools",
+        phase="goal",
+        payload={"agent_id": manifest.agent_id},
+    )
     if dry_run:
         # Dry-run goal: produce plan only, no P3 execution.
         plan = {
@@ -175,10 +253,24 @@ def _run_goal(manifest, report, *, input_data: dict[str, Any], dry_run: bool, au
         seq = _audit(eng, domain_run_id, seq, "goal.dry_run", phase="goal", payload=plan)
         return plan, seq
 
-    seq = _audit(eng, domain_run_id, seq, "goal.start", phase="goal", payload={"goal": redact(goal), "allow": sorted(allow)})
+    seq = _audit(
+        eng,
+        domain_run_id,
+        seq,
+        "goal.start",
+        phase="goal",
+        payload={"goal": redact(goal), "allow": sorted(allow)},
+    )
     # Reuse existing P3 runtime. It creates its own agent_runs row.
     run = run_agent_goal(goal, created_by=requested_by, scope=scope, tool_allowlist=allow)
-    seq = _audit(eng, domain_run_id, seq, "goal.end", phase="goal", payload={"run_id": run.get("id"), "status": run.get("status")})
+    seq = _audit(
+        eng,
+        domain_run_id,
+        seq,
+        "goal.end",
+        phase="goal",
+        payload={"run_id": run.get("id"), "status": run.get("status")},
+    )
     return {
         "status": run.get("status"),
         "agent_run_id": run.get("id"),
@@ -234,14 +326,36 @@ def run_domain_agent(
     )
     domain_run_id = int(created["id"])
     seq = 0
-    seq = _audit(eng, domain_run_id, seq, "run.start", phase="start", payload={"agent_id": manifest.agent_id, "mode": mode, "dry_run": dry_run, "autonomous": autonomous, "scope": scope})
+    seq = _audit(
+        eng,
+        domain_run_id,
+        seq,
+        "run.start",
+        phase="start",
+        payload={
+            "agent_id": manifest.agent_id,
+            "mode": mode,
+            "dry_run": dry_run,
+            "autonomous": autonomous,
+            "scope": scope,
+        },
+    )
     try:
         if mode == "manual":
             output = _run_manual(manifest, report, input_data=input_data, dry_run=dry_run, scope=scope)
             seq = _audit(eng, domain_run_id, seq, "run.plan", phase="manual", payload={"status": output.get("status")})
             out = _finish(eng, created, status="manual", output=output)
         elif mode == "workflow":
-            output, seq = _run_workflow(manifest, report, input_data=input_data, dry_run=dry_run, scope=scope, eng=eng, domain_run_id=domain_run_id, seq=seq)
+            output, seq = _run_workflow(
+                manifest,
+                report,
+                input_data=input_data,
+                dry_run=dry_run,
+                scope=scope,
+                eng=eng,
+                domain_run_id=domain_run_id,
+                seq=seq,
+            )
             status = str(output.get("status") or "manual")
             if status == "succeeded":
                 final_status = "succeeded"
@@ -251,11 +365,24 @@ def run_domain_agent(
                 final_status = "manual"
             out = _finish(eng, created, status=final_status, output=output, error=str(output.get("error") or ""))
         elif mode == "goal":
-            output, seq = _run_goal(manifest, report, input_data=input_data, dry_run=dry_run, autonomous=autonomous, scope=scope, requested_by=requested_by, eng=eng, domain_run_id=domain_run_id, seq=seq)
+            output, seq = _run_goal(
+                manifest,
+                report,
+                input_data=input_data,
+                dry_run=dry_run,
+                autonomous=autonomous,
+                scope=scope,
+                requested_by=requested_by,
+                eng=eng,
+                domain_run_id=domain_run_id,
+                seq=seq,
+            )
             final_status = str(output.get("status") or "failed")
             if final_status not in {"succeeded", "failed", "dry_run", "manual"}:
                 final_status = "failed"
-            out = _finish(eng, created, status="succeeded" if final_status == "succeeded" else ("manual" if final_status in {"dry_run", "manual"} else "failed"), output=output, error=str(output.get("error") or ""))
+            final = "succeeded" if final_status == "succeeded" else ("manual" if final_status in {"dry_run",
+                "manual"} else "failed")
+            out = _finish(eng, created, status=final, output=output, error=str(output.get("error") or ""))
             if output.get("agent_run_id"):
                 store.update_domain_run(domain_run_id, engine=eng, run_id=int(output["agent_run_id"]))
                 out = store.get_domain_run(domain_run_id, engine=eng) or out
@@ -272,7 +399,14 @@ def run_domain_agent(
             batch_status = "succeeded"
             for i, item in enumerate(items):
                 item_input = item if isinstance(item, dict) else {"goal": str(item)}
-                seq = _audit(eng, domain_run_id, seq, "batch.item.start", phase="batch", payload={"index": i, "child_mode": child_mode})
+                seq = _audit(
+                    eng,
+                    domain_run_id,
+                    seq,
+                    "batch.item.start",
+                    phase="batch",
+                    payload={"index": i, "child_mode": child_mode},
+                )
                 child = run_domain_agent(
                     manifest.agent_id,
                     mode=child_mode,
@@ -283,18 +417,49 @@ def run_domain_agent(
                     requested_by=requested_by,
                     engine=eng,
                 )
-                results.append({"index": i, "child_run_id": child.get("id"), "status": child.get("status"), "error": child.get("error")})
-                seq = _audit(eng, domain_run_id, seq, "batch.item.end", phase="batch", payload={"index": i, "status": child.get("status")})
+                results.append(
+                    {
+                        "index": i,
+                        "child_run_id": child.get("id"),
+                        "status": child.get("status"),
+                        "error": child.get("error"),
+                    }
+                )
+                seq = _audit(
+                    eng,
+                    domain_run_id,
+                    seq,
+                    "batch.item.end",
+                    phase="batch",
+                    payload={"index": i, "status": child.get("status")},
+                )
                 if child.get("status") == "failed":
                     batch_status = "failed"
-            out = _finish(eng, created, status=batch_status, output={"mode": "batch", "child_mode": child_mode, "items": results, "count": len(results)})
+            out = _finish(
+                eng,
+                created,
+                status=batch_status,
+                output={
+                    "mode": "batch",
+                    "child_mode": child_mode,
+                    "items": results,
+                    "count": len(results),
+                },
+            )
         else:
             out = _finish(eng, created, status="failed", output={}, error="unreachable")
         seq = _audit(eng, domain_run_id, seq, "run.end", phase="end", payload={"status": out.get("status")})
         return out
     except Exception as exc:
         logger.exception("domain run failed: %s", exc)
-        append_event(eng, domain_run_id=domain_run_id, seq=seq, event_type="run.error", phase="error", payload={"error": str(exc)})
+        append_event(
+            eng,
+            domain_run_id=domain_run_id,
+            seq=seq,
+            event_type="run.error",
+            phase="error",
+            payload={"error": str(exc)},
+        )
         return _finish(eng, created, status="failed", output={"error": str(exc)}, error=str(exc))
 
 
@@ -340,7 +505,19 @@ def run_domain_team(
     )
     domain_run_id = int(created["id"])
     seq = 0
-    seq = _audit(eng, domain_run_id, seq, "team.start", phase="team", payload={"team_id": team.team_id, "members": members, "member_mode": member_mode, "dry_run": dry_run})
+    seq = _audit(
+        eng,
+        domain_run_id,
+        seq,
+        "team.start",
+        phase="team",
+        payload={
+            "team_id": team.team_id,
+            "members": members,
+            "member_mode": member_mode,
+            "dry_run": dry_run,
+        },
+    )
     child_runs = []
     status = "succeeded"
     for idx, agent_id in enumerate(members):
@@ -354,7 +531,14 @@ def run_domain_team(
         member_input = dict(input_data.get("member_input") or {})
         if isinstance(input_data.get("members"), dict) and isinstance(input_data["members"].get(agent_id), dict):
             member_input = {**member_input, **input_data["members"][agent_id]}
-        seq = _audit(eng, domain_run_id, seq, "team.member.start", phase="team", payload={"agent_id": agent_id, "index": idx, "mode": member_mode})
+        seq = _audit(
+            eng,
+            domain_run_id,
+            seq,
+            "team.member.start",
+            phase="team",
+            payload={"agent_id": agent_id, "index": idx, "mode": member_mode},
+        )
         child = run_domain_agent(
             agent_id,
             mode=member_mode,
@@ -365,8 +549,27 @@ def run_domain_team(
             requested_by=requested_by,
             engine=eng,
         )
-        child_runs.append({"index": idx, "agent_id": agent_id, "child_run_id": child.get("id"), "status": child.get("status"), "error": child.get("error")})
-        seq = _audit(eng, domain_run_id, seq, "team.member.end", phase="team", payload={"agent_id": agent_id, "child_run_id": child.get("id"), "status": child.get("status")})
+        child_runs.append(
+            {
+                "index": idx,
+                "agent_id": agent_id,
+                "child_run_id": child.get("id"),
+                "status": child.get("status"),
+                "error": child.get("error"),
+            }
+        )
+        seq = _audit(
+            eng,
+            domain_run_id,
+            seq,
+            "team.member.end",
+            phase="team",
+            payload={
+                "agent_id": agent_id,
+                "child_run_id": child.get("id"),
+                "status": child.get("status"),
+            },
+        )
         if child.get("status") == "failed":
             status = "failed"
     output = {
@@ -379,6 +582,14 @@ def run_domain_team(
         "child_runs": child_runs,
         "count": len(child_runs),
     }
-    out = _finish(eng, created, status=status, output=output, error="" if status == "succeeded" else "one or more team members failed/not_found")
-    seq = _audit(eng, domain_run_id, seq, "team.end", phase="team", payload={"status": out.get("status"), "count": len(child_runs)})
+    err = "" if status == "succeeded" else "one or more team members failed/not_found"
+    out = _finish(eng, created, status=status, output=output, error=err)
+    seq = _audit(
+        eng,
+        domain_run_id,
+        seq,
+        "team.end",
+        phase="team",
+        payload={"status": out.get("status"), "count": len(child_runs)},
+    )
     return out
