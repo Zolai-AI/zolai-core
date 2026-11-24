@@ -95,6 +95,9 @@ def _created_by(request: Request) -> str:
     return "anonymous"
 
 
+_TIER_RANK = {"public": 0, "member": 1, "admin": 2}
+
+
 def _granted(request: Request) -> list[str] | None:
     """The caller's own scope set, for the registry's narrowing-only filter.
 
@@ -106,6 +109,53 @@ def _granted(request: Request) -> list[str] | None:
     record: dict[str, Any] | None = getattr(request.state, "api_key", None)
     scopes = record.get("scopes") if isinstance(record, dict) else None
     return [str(s) for s in scopes] if isinstance(scopes, (list, tuple, set)) else None
+
+
+def _effective_scope(request: Request, requested: str) -> str:
+    """Derive effective tool tier from authenticated record; ignore escalation."""
+    from ..agent.tools.registry import tool_tier_for_record
+
+    record: dict[str, Any] | None = getattr(request.state, "api_key", None)
+    effective = tool_tier_for_record(record)
+    requested = str(requested or "public").lower().strip()
+    if requested not in _TIER_RANK:
+        requested = "public"
+    # Ignore unprivileged escalation: clamp to caller's effective tier.
+    if _TIER_RANK.get(requested, 0) > _TIER_RANK.get(effective, 0):
+        return effective
+    # Also never grant more than effective tier.
+    return requested if _TIER_RANK.get(requested, 0) <= _TIER_RANK.get(effective, 0) else effective
+
+
+def _require_autonomous(request: Request, autonomous: bool) -> bool:
+    """Enforce autonomous env gate + admin-only authorization."""
+    if not autonomous:
+        return False
+    import os
+
+    enabled = os.environ.get("ZOLAI_AGENT_AUTONOMOUS", "").strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "autonomous_disabled",
+                "message": "Autonomous execution is disabled. Set ZOLAI_AGENT_AUTONOMOUS=1 and retry as admin.",
+            },
+        )
+    from ..agent.tools.registry import tool_tier_for_record
+
+    record: dict[str, Any] | None = getattr(request.state, "api_key", None)
+    tier = tool_tier_for_record(record)
+    if tier != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "autonomous_admin_required",
+                "message": "Autonomous execution requires admin scope.",
+                "effective": tier,
+            },
+        )
+    return True
 
 
 @router.post("/runs", dependencies=[RUN_DEP])
@@ -291,16 +341,19 @@ def run_team(team_id: str, body: TeamRunIn, request: Request) -> dict[str, Any]:
     from ..agent.domain.runner import run_domain_team
 
     _check_run_rate(request)
+    autonomous = _require_autonomous(request, body.autonomous)
+    scope = _effective_scope(request, body.scope)
     payload = dict(body.input or {})
     payload.setdefault("member_mode", body.member_mode)
     result = run_domain_team(
         team_id,
         input_data=payload,
         dry_run=body.dry_run,
-        autonomous=body.autonomous,
-        scope=body.scope,
+        autonomous=autonomous,
+        scope=scope,
         requested_by=_created_by(request),
         member_mode=body.member_mode,
+        granted=_granted(request),
     )
     if result.get("status") == "not_found":
         raise HTTPException(status_code=404, detail={"error": "team_not_found", "team_id": team_id})
@@ -312,14 +365,17 @@ def create_domain_run(body: DomainRunIn, request: Request) -> dict[str, Any]:
     from ..agent.domain.runner import run_domain_agent
 
     _check_run_rate(request)
+    autonomous = _require_autonomous(request, body.autonomous)
+    scope = _effective_scope(request, body.scope)
     result = run_domain_agent(
         body.agent_id,
         mode=body.mode,
         input_data=body.input,
         dry_run=body.dry_run,
-        autonomous=body.autonomous,
-        scope=body.scope,
+        autonomous=autonomous,
+        scope=scope,
         requested_by=_created_by(request),
+        granted=_granted(request),
     )
     if result.get("status") == "not_found":
         raise HTTPException(status_code=404, detail={"error": "manifest_not_found", "agent_id": body.agent_id})

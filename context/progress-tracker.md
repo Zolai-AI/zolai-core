@@ -1791,3 +1791,12 @@ cost is the one-time matrix hydration, not the cache check.
 offload, POS, oauth); 151 passed for the five newest commits; `ruff check
 zolai tests` clean.
 
+
+## 2026-11-24 — Domain agent runtime hardening (fix loop)
+
+- Additive domain runtime landed in `zolai/agent/domain/*` with manifest/team loading, binding reports, runner modes (goal/workflow/batch/manual), audit events, and queue worker.
+- Fix loop hardening: queued autonomous execution now executes existing domain run in-place (no duplicate run), uses future lock lease + conditional claim guard, bounded attempts with dead-letter/failure requeue, and enqueue wired from authorized autonomous run paths.
+- Autonomous gate enforced: `ZOLAI_AGENT_AUTONOMOUS` env gate + admin-only authorization across API/CLI/runner; unauthorized requests return clear blocked/403 status.
+- Scope escalation prevented: domain API derives effective tool tier from authenticated record (`tool_tier_for_record`) and clamps requested scope; runner applies granted-scope narrowing via `allow_list(scope, granted=...)`.
+- Batch mode remains MVP synchronous bounded fan-out (`MAX_BATCH_ITEMS`) with explicit comment; not per-item queued.
+- Verification: ruff requested scope clean; domain/agent regression tests run (see commit/PR notes for exact command output).

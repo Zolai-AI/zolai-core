@@ -196,7 +196,7 @@ def agents_run(
     result = run_domain_agent(agent_id, mode=mode, input_data=input_data, dry_run=dry_run, autonomous=autonomous,
         scope=scope, requested_by="cli")
     console.print_json(json.dumps(result, ensure_ascii=False, default=str))
-    if result.get("status") == "failed":
+    if result.get("status") in {"failed", "blocked"}:
         raise typer.Exit(code=1)
 
 
@@ -237,6 +237,7 @@ def teams_run(
     team_id: str = typer.Argument(...),
     input_json: str = typer.Option("{}", "--input"),
     dry_run: bool = typer.Option(False, "--dry-run"),
+    autonomous: bool = typer.Option(False, "--autonomous", help="Queue autonomous execution (env+admin gated)"),
     member_mode: str = typer.Option("manual", "--member-mode", help="goal|workflow|manual"),
     scope: str = typer.Option("admin", "--scope"),
 ) -> None:
@@ -248,10 +249,10 @@ def teams_run(
         console.print(f"[red]error:[/red] invalid --input JSON: {exc}")
         raise typer.Exit(code=2) from exc
     input_data.setdefault("member_mode", member_mode)
-    result = run_domain_team(team_id, input_data=input_data, dry_run=dry_run, scope=scope, requested_by="cli",
-        member_mode=member_mode)
+    result = run_domain_team(team_id, input_data=input_data, dry_run=dry_run, autonomous=autonomous, scope=scope,
+        requested_by="cli", member_mode=member_mode)
     console.print_json(json.dumps(result, ensure_ascii=False, default=str))
-    if result.get("status") == "failed":
+    if result.get("status") in {"failed", "blocked"}:
         raise typer.Exit(code=1)
 
 

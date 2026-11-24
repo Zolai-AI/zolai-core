@@ -17,17 +17,21 @@ from sqlalchemy import text as sa_text
 from ...data.repositories import get_engine
 from ...shared.clock import now, stamp
 from .. import store
-from .runner import QUEUE_MAX_ATTEMPTS, run_domain_agent
+
+QUEUE_MAX_ATTEMPTS = max(1, int(os.environ.get("AGENT_QUEUE_MAX_ATTEMPTS", "3")))
+QUEUE_LEASE_SECONDS = max(30, int(os.environ.get("AGENT_QUEUE_LEASE_SECONDS", "300")))
 
 
 def _autonomous_enabled() -> bool:
     return os.environ.get("ZOLAI_AGENT_AUTONOMOUS", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def enqueue_domain_run(domain_run_id: int, *, priority: int = 0, max_attempts: int = QUEUE_MAX_ATTEMPTS) -> dict[str,
-    Any]:
+def enqueue_domain_run(
+    domain_run_id: int, *, priority: int = 0, max_attempts: int = QUEUE_MAX_ATTEMPTS
+) -> dict[str, Any]:
     eng = get_engine()
     store.ensure_domain_agent_tables(eng)
+    now_s = stamp()
     with eng.begin() as conn:
         conn.execute(
             sa_text(
@@ -42,21 +46,26 @@ def enqueue_domain_run(domain_run_id: int, *, priority: int = 0, max_attempts: i
             {
                 "domain_run_id": int(domain_run_id),
                 "priority": int(priority),
-                "available_at": stamp(),
+                "available_at": now_s,
                 "max_attempts": max(1, int(max_attempts)),
-                "created_at": stamp(),
-                "updated_at": stamp(),
+                "created_at": now_s,
+                "updated_at": now_s,
             },
         )
     return {"domain_run_id": int(domain_run_id), "status": "queued"}
+
+
+def _future_lease(seconds: int = QUEUE_LEASE_SECONDS) -> str:
+    from datetime import timedelta
+
+    return stamp(now() + timedelta(seconds=max(30, int(seconds))))
 
 
 def _claim_one(lock_owner: str) -> dict[str, Any] | None:
     eng = get_engine()
     store.ensure_domain_agent_tables(eng)
     now_s = stamp()
-    lock_until = stamp(now().replace(microsecond=0))
-    # Simple claim: find one queued/available, lock it. SQLite-safe enough for bounded worker.
+    lease_until = _future_lease()
     with eng.begin() as conn:
         row = conn.execute(
             sa_text(
@@ -69,21 +78,37 @@ def _claim_one(lock_owner: str) -> dict[str, Any] | None:
         ).fetchone()
         if row is None:
             return None
+        qid = int(row[0])
         attempts = int(row[2] or 0)
         max_attempts = int(row[3] or QUEUE_MAX_ATTEMPTS)
         if attempts >= max_attempts:
-            conn.execute(sa_text("UPDATE agent_queue SET status='dead', updated_at=:u WHERE id=:id"),
-                {"id": int(row[0]), "u": now_s})
+            conn.execute(
+                sa_text(
+                    "UPDATE agent_queue SET status='dead', lock_owner='', lock_until=NULL, updated_at=:u "
+                    "WHERE id=:id AND status IN ('queued','failed')"
+                ),
+                {"id": qid, "u": now_s},
+            )
             return None
-        conn.execute(
+        # Conditional claim guard: only claim if still available/unlocked.
+        result = conn.execute(
             sa_text(
-                "UPDATE agent_queue SET status='running', lock_owner=:owner, "
-                "lock_until=:lu, attempts=attempts+1, updated_at=:u WHERE id=:id"
+                "UPDATE agent_queue SET status='running', lock_owner=:owner, lock_until=:lu, "
+                "attempts=attempts+1, updated_at=:u "
+                "WHERE id=:id AND status IN ('queued','failed') "
+                "AND (lock_until IS NULL OR lock_until <= :now)"
             ),
-            {"owner": lock_owner, "lu": lock_until, "u": now_s, "id": int(row[0])},
+            {"owner": lock_owner, "lu": lease_until, "u": now_s, "id": qid, "now": now_s},
         )
-    return {"queue_id": int(row[0]), "domain_run_id": int(row[1]), "attempts": attempts + 1,
-        "max_attempts": max_attempts}
+        if int(getattr(result, "rowcount", 0) or 0) <= 0:
+            return None
+    return {
+        "queue_id": qid,
+        "domain_run_id": int(row[1]),
+        "attempts": attempts + 1,
+        "max_attempts": max_attempts,
+        "lock_until": lease_until,
+    }
 
 
 def _complete(queue_id: int, *, status: str, error: str = "") -> None:
@@ -91,7 +116,8 @@ def _complete(queue_id: int, *, status: str, error: str = "") -> None:
     with eng.begin() as conn:
         conn.execute(
             sa_text(
-                "UPDATE agent_queue SET status=:status, lock_owner='', lock_until=NULL, updated_at=:u WHERE id=:id"
+                "UPDATE agent_queue SET status=:status, lock_owner='', lock_until=NULL, "
+                "updated_at=:u WHERE id=:id"
             ),
             {"status": status, "u": stamp(), "id": int(queue_id)},
         )
@@ -107,27 +133,74 @@ def process_one(lock_owner: str | None = None) -> dict[str, Any]:
     if run is None:
         _complete(int(job["queue_id"]), status="dead", error="domain run not found")
         return {"processed": True, "queue_id": job["queue_id"], "status": "dead", "error": "domain run not found"}
-    # Safety: only execute if autonomous flag present on run or env allows.
     if not _autonomous_enabled():
         _complete(int(job["queue_id"]), status="queued")
-        return {"processed": False, "reason": "autonomous_disabled"}
+        return {"processed": False, "reason": "autonomous_disabled", "queue_id": job["queue_id"]}
+
+    from .runner import execute_queued_domain_run
+
     try:
-        result = run_domain_agent(
-            str(run.get("agent_id")),
-            mode=str(run.get("mode") or "manual"),
-            input_data=run.get("input_json") if isinstance(run.get("input_json"), dict) else {},
-            dry_run=bool(run.get("dry_run")),
-            autonomous=True,
-            scope=str(run.get("scope") or "admin"),
-            requested_by=str(run.get("requested_by") or "worker"),
-            engine=eng,
-        )
-        status = "succeeded" if result.get("status") in {"succeeded", "manual"} else "failed"
-        _complete(int(job["queue_id"]), status=status)
-        return {"processed": True, "queue_id": job["queue_id"], "domain_run_id": job["domain_run_id"], "status": status}
+        result = execute_queued_domain_run(int(job["domain_run_id"]), engine=eng)
+        status = str(result.get("status") or "failed")
+        if status in {"succeeded", "manual", "blocked"}:
+            qstatus = "succeeded" if status == "succeeded" else "manual"
+            _complete(int(job["queue_id"]), status=qstatus)
+        else:
+            attempts = int(job.get("attempts") or 1)
+            max_attempts = int(job.get("max_attempts") or QUEUE_MAX_ATTEMPTS)
+            if attempts >= max_attempts:
+                _complete(int(job["queue_id"]), status="dead", error=str(result.get("error") or "failed"))
+                qstatus = "dead"
+            else:
+                # requeue with backoff
+                with eng.begin() as conn:
+                    conn.execute(
+                        sa_text(
+                            "UPDATE agent_queue SET status='failed', lock_owner='', lock_until=NULL, "
+                            "available_at=:avail, updated_at=:u WHERE id=:id"
+                        ),
+                        {
+                            "id": int(job["queue_id"]),
+                            "u": stamp(),
+                            "avail": stamp(now()),
+
+                        },
+                    )
+                qstatus = "failed"
+        return {
+            "processed": True,
+            "queue_id": job["queue_id"],
+            "domain_run_id": job["domain_run_id"],
+            "status": qstatus,
+            "run_status": status,
+        }
     except Exception as exc:
-        _complete(int(job["queue_id"]), status="failed", error=str(exc))
-        return {"processed": True, "queue_id": job["queue_id"], "status": "failed", "error": str(exc)}
+        attempts = int(job.get("attempts") or 1)
+        max_attempts = int(job.get("max_attempts") or QUEUE_MAX_ATTEMPTS)
+        qstatus = "dead" if attempts >= max_attempts else "failed"
+        if qstatus == "failed":
+            with eng.begin() as conn:
+                conn.execute(
+                    sa_text(
+                        "UPDATE agent_queue SET status='failed', lock_owner='', lock_until=NULL, "
+                        "available_at=:avail, updated_at=:u WHERE id=:id"
+                    ),
+                    {
+                        "id": int(job["queue_id"]),
+                        "u": stamp(),
+                        "avail": stamp(now()),
+
+                    },
+                )
+        else:
+            _complete(int(job["queue_id"]), status="dead", error=str(exc))
+        return {
+            "processed": True,
+            "queue_id": job["queue_id"],
+            "domain_run_id": job["domain_run_id"],
+            "status": qstatus,
+            "error": str(exc),
+        }
 
 
 def run_worker(*, once: bool = False, poll_seconds: int = 5, max_jobs: int = 100) -> dict[str, Any]:
