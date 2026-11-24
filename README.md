@@ -1,4 +1,6 @@
 # zolai-core
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Version: 2.0.0](https://img.shields.io/badge/Version-2.0.0-blue.svg)
 
 Python toolkit + RAG Knowledge Brain for Tedim Zolai (ZVS 2018).
 
