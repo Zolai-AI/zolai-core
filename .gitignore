@@ -22,6 +22,7 @@ models/runs/
 !zolai/eval/sets/*.jsonl
 !kaggle_dataset/*.json
 logs/
+*.log
 tmp/
 *.tsbuildinfo
 notebooks/
