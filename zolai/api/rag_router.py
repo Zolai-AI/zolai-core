@@ -97,6 +97,14 @@ class AnalyzeSentenceResponse(BaseModel):
     pos: list[str] = []
     grammar: list[dict[str, Any]] = []
     entities: list[dict[str, Any]] = []
+    # Additive provenance/compat fields (core#26): defaults keep old clients and
+    # every existing constructor call valid. ``entities`` has no NER source in
+    # SentenceAnalysis, so ``entities_source`` makes that emptiness explicit.
+    analysis: dict[str, Any] = {}
+    analysis_source: str = ""
+    entities_source: str = ""
+    token_count: int = 0
+    language: str = ""
 
 
 class AnalyzeParagraphRequest(BaseModel):
@@ -349,6 +357,11 @@ async def analyze_sentence(
         pos=result.get("pos", []),
         grammar=result.get("grammar", []),
         entities=result.get("entities", []),
+        analysis=result.get("analysis", {}),
+        analysis_source=result.get("analysis_source", ""),
+        entities_source=result.get("entities_source", ""),
+        token_count=result.get("token_count", 0),
+        language=result.get("language", ""),
     )
 
 

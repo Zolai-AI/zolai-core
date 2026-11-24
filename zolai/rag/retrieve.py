@@ -9,9 +9,13 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from zolai.foundation import FoundationAnalyzer
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -57,6 +61,25 @@ _VECTOR_CACHE_KEY: tuple[Any, ...] | None = None
 #: One embedder per model name per process — see ``UnifiedRetriever._get_embedder``
 #: for why it cannot live on the instance. Cleared by tests that fake the model.
 _EMBEDDER_CACHE: dict[str, Any] = {}
+
+#: Sentence analysis delegates to FoundationAnalyzer, whose POS/morphology engines
+#: are expensive to construct. One lazy instance per process (not per retriever:
+#: ``get_retriever`` builds a fresh retriever on every request). The lock keeps
+#: the first, concurrent request from paying the cold start twice.
+_SENTENCE_ANALYZER: FoundationAnalyzer | None = None
+_SENTENCE_ANALYZER_LOCK = threading.Lock()
+
+
+def _get_sentence_analyzer() -> FoundationAnalyzer:
+    """Return the process-wide analyzer, constructing it on first use."""
+    global _SENTENCE_ANALYZER  # noqa: PLW0603
+    if _SENTENCE_ANALYZER is None:
+        with _SENTENCE_ANALYZER_LOCK:
+            if _SENTENCE_ANALYZER is None:
+                from zolai.foundation import FoundationAnalyzer
+
+                _SENTENCE_ANALYZER = FoundationAnalyzer()
+    return _SENTENCE_ANALYZER
 
 
 def invalidate_vector_cache() -> None:
@@ -347,16 +370,57 @@ class UnifiedRetriever:
 
     # --- Sentence/paragraph analysis ---
     def analyze_sentence(self, text: str) -> dict[str, Any]:
-        """Analyze a Zolai sentence (tokenize, POS, grammar, entities)."""
-        # This is a placeholder - full implementation would use the discovery pipeline
-        from zolai.shared.text import tokenize_words
-        tokens = tokenize_words(text)
+        """Analyze a Zolai sentence via :class:`FoundationAnalyzer`.
+
+        Frozen keys (``text``, ``tokens``, ``pos``, ``grammar``, ``entities``)
+        keep their names and types. ``SentenceAnalysis`` has no NER field, so
+        ``entities`` stays empty and ``entities_source`` says why — an empty
+        list must never be mistaken for "no entities found" by a consumer.
+        """
+        if not text.strip():
+            # The analyzer rejects empty input; keep the old route's tolerant
+            # behaviour for an empty word/sentence instead of raising a 500.
+            return {
+                "text": text,
+                "tokens": [],
+                "pos": [],
+                "grammar": [],
+                "entities": [],
+                "entities_source": "unavailable",
+                "analysis_source": "foundation_analyzer",
+                "token_count": 0,
+                "language": "zolai",
+                "analysis": {"source": "foundation_analyzer", "status": "empty_input"},
+            }
+
+        result = _get_sentence_analyzer().analyze_sentence(text)
+        tokens = [t.form for t in result.tokens]
+        grammar = [{
+            "sov_valid": result.sov_valid,
+            "ergative_present": result.ergative_present,
+            "negation_type": result.negation_type,
+            "question_type": result.question_type,
+            "tense": result.tense,
+            "grammar_patterns_matched": list(result.grammar_patterns_matched),
+            "zvs_compliant": result.zvs_compliant,
+            "zvs_violations": list(result.zvs_violations),
+        }]
 
         return {
+            "text": text,
             "tokens": tokens,
+            "pos": [p.tag for p in result.pos_tags],
+            "grammar": grammar,
+            "entities": [],
+            "entities_source": "unavailable",
+            "analysis_source": "foundation_analyzer",
             "token_count": len(tokens),
             "language": "zolai",
-            "analysis": "placeholder - full analysis requires discovery pipeline",
+            "analysis": {
+                "source": "foundation_analyzer",
+                "status": "analyzed",
+                "bible_reference": result.bible_reference,
+            },
         }
 
     def analyze_paragraph(self, text: str) -> dict[str, Any]:
