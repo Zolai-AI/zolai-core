@@ -136,7 +136,7 @@ def main(db_path: Path, dry_run: bool, vacuum: bool) -> bool:
 
     # --- VACUUM ---
     if vacuum:
-        print(f"\nRunning VACUUM (this may take a while)...")
+        print("\nRunning VACUUM (this may take a while)...")
         try:
             cur.execute("VACUUM")
             print("  ✓ VACUUM complete")
