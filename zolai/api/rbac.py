@@ -155,6 +155,8 @@ PUBLIC_ROUTES: tuple[tuple[str | None, str], ...] = (
     (None, "/api/v1/health"),
     # Identity probe — never 401s, so Studio can gate its own UI.
     ("GET", "/api/v1/auth/me"),
+    # Additive capability contract — public, server-authoritative, never 401s.
+    ("GET", "/api/v1/auth/capabilities"),
     # core#15 — the unversioned status echo (``serve_frontend`` in
     # ``zolai/api/server.py``). Declared rather than inherited: the middleware
     # gate is now default-deny, so an anonymous ``GET /`` would 401 under
@@ -553,6 +555,56 @@ def require_role(minimum: str, *, strict: bool = False) -> Callable[..., dict[st
 
 auth_router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
+CAPABILITIES_CONTRACT_VERSION = "1.0.0-draft"
+CAPABILITIES_CANONICAL_V1_ROLES = (
+    ROLE_ANONYMOUS,
+    ROLE_MEMBER,
+    ROLE_ADMIN,
+    ROLE_SUPERADMIN,
+)
+
+
+def _capability_auth_source(request: Request, record: dict[str, Any] | None) -> str:
+    """Resolve auth source without leaking credential material."""
+    if not record:
+        return ROLE_ANONYMOUS
+    declared = str(record.get("auth_source") or "").strip().lower()
+    if declared in {"session", "oauth", "api_key", "anonymous"}:
+        return declared
+    if getattr(request.state, "session", None):
+        return "session"
+    if getattr(request.state, "oauth", None):
+        return "oauth"
+    return "api_key"
+
+
+def _derived_capabilities(role: str, scopes: list[str]) -> dict[str, bool]:
+    """Minimal server-authoritative capability booleans derived from role/scopes."""
+    scope_set = set(scopes)
+    is_admin = _RANK.get(role, 0) >= _RANK[ROLE_ADMIN]
+    is_superadmin = _RANK.get(role, 0) >= _RANK[ROLE_SUPERADMIN]
+    return {
+        "can_read_public": True,
+        "can_chat_assistant": True,
+        "can_run_agent": auth.scope_allows(list(scope_set), "agent:run"),
+        "can_read_agent": auth.scope_allows(list(scope_set), "agent:read"),
+        "can_manage_users": is_admin and auth.scope_allows(list(scope_set), "user:manage"),
+        "can_manage_api_keys": is_admin and auth.scope_allows(list(scope_set), "apikey:manage"),
+        "can_manage_settings": is_admin and auth.scope_allows(list(scope_set), "settings:write"),
+        "can_manage_roles": is_superadmin and auth.scope_allows(list(scope_set), "role:manage"),
+        "can_view_audit": is_admin and auth.scope_allows(list(scope_set), "audit:read"),
+    }
+
+
+def _capability_feature_flags() -> dict[str, bool]:
+    """Minimal additive feature flags safe for public discovery."""
+    return {
+        "public_assistant": True,
+        "public_contributions": True,
+        "session_auth_enabled": os.environ.get("ZOLAI_AUTH_SESSIONS", "on").strip().lower()
+        not in {"0", "off", "false", "no", "disabled"},
+    }
+
 
 @auth_router.get("/me")
 def auth_me(request: Request) -> dict[str, Any]:
@@ -595,3 +647,27 @@ def auth_me(request: Request) -> dict[str, Any]:
         body["user_id"] = record.get("user_id")
         body["expires_at"] = record.get("expires_at")
     return body
+
+
+@auth_router.get("/capabilities")
+def auth_capabilities(request: Request) -> dict[str, Any]:
+    """Public, additive capability contract for Studio/web clients.
+
+    Server-authoritative and public-safe: never 401s, never exposes raw keys,
+    tokens, passwords, or secrets. ``role`` is the resolved core role; v1 keeps
+    ``canonical_role`` as an alias for compatibility while contracts evolve.
+    """
+    record: dict[str, Any] | None = getattr(request.state, "api_key", None)
+    role = role_for(record)
+    scopes = list((record or {}).get("scopes") or [])
+    auth_source = _capability_auth_source(request, record)
+    return {
+        "role": role,
+        "canonical_role": role if role in CAPABILITIES_CANONICAL_V1_ROLES else ROLE_ANONYMOUS,
+        "scopes": scopes,
+        "capabilities": _derived_capabilities(role, scopes),
+        "feature_flags": _capability_feature_flags(),
+        "auth_source": auth_source,
+        "mode": auth.api_auth_mode(),
+        "contract_version": CAPABILITIES_CONTRACT_VERSION,
+    }

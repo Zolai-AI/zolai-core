@@ -266,6 +266,7 @@ class TestRouteCompleteness:
             ("GET", "/api/v1/lexicon/pasian"),
             ("GET", "/api/v1/lexicon"),
             ("GET", "/api/v1/auth/me"),
+            ("GET", "/api/v1/auth/capabilities"),
             ("POST", "/api/v1/assistant/chat"),
             # Username sign-in/out — public or sign-in is impossible under enforce.
             ("POST", "/api/v1/auth/login"),
@@ -319,6 +320,20 @@ class TestPublicUnderEnforce:
         # additive auth_source marker) — nothing a Studio client reads is gone.
         assert set(body) == {"role", "key_prefix", "scopes", "mode", "auth_source"}
         assert body["auth_source"] == "anonymous"
+
+    def test_auth_capabilities_is_200_and_anonymous(self, client, auth_db, monkeypatch) -> None:
+        monkeypatch.setenv("ZOLAI_API_AUTH", "enforce")
+        resp = client.get("/api/v1/auth/capabilities")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["role"] == "anonymous"
+        assert body["canonical_role"] == "anonymous"
+        assert body["scopes"] == []
+        assert body["mode"] == "enforce"
+        assert body["auth_source"] == "anonymous"
+        assert body["contract_version"] == rbac.CAPABILITIES_CONTRACT_VERSION
+        assert isinstance(body["capabilities"], dict)
+        assert isinstance(body["feature_flags"], dict)
 
     def test_login_and_logout_are_public_under_enforce(
         self, client, auth_db, monkeypatch
