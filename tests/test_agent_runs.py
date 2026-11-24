@@ -873,7 +873,14 @@ class TestLearnIsProposalOnly:
     #: ``POST /api/v1/contributions`` twin byte-for-byte. Same credential class as
     #: ``review_queue_submit`` — admin only, additive, pending review. Everything
     #: else in ``zolai/agent/`` still has to go through ``agent_runs``.
-    SANCTIONED_WRITE_TABLES = frozenset({"agent_runs", "contributions"})
+    SANCTIONED_WRITE_TABLES = frozenset({
+        "agent_runs",
+        "agent_manifests",
+        "agent_domain_runs",
+        "agent_run_events",
+        "agent_queue",
+        "contributions",
+    })
 
     @staticmethod
     def _code_lines(text: str) -> list[str]:

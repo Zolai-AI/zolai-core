@@ -2826,6 +2826,10 @@ def run_all_migrations(mgr: DatabaseManager) -> dict[str, Any]:
         "observation_tables": create_observation_tables(mgr),
         "ai_provider_tables": create_ai_provider_tables(mgr),
         "agent_runs_table": create_agent_runs_table(mgr),
+        "agent_manifests_table": create_agent_manifests_table(mgr),
+        "agent_domain_runs_table": create_agent_domain_runs_table(mgr),
+        "agent_run_events_table": create_agent_run_events_table(mgr),
+        "agent_queue_table": create_agent_queue_table(mgr),
         "assistant_chat_feedback_table": create_assistant_chat_feedback_table(mgr),
         "notification_tables": create_notification_tables(mgr),
         "eval_tables": create_eval_tables(mgr),
@@ -3073,6 +3077,128 @@ def create_agent_runs_table(mgr: DatabaseManager) -> dict[str, Any]:
     except Exception as exc:
         errors.append(f"agent_runs: {exc}")
     return {"created": created, "skipped": skipped, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
+# Domain agent runtime (additive) — manifests, domain runs, events, queue
+# ---------------------------------------------------------------------------
+
+AGENT_MANIFESTS_DDL = """
+CREATE TABLE IF NOT EXISTS agent_manifests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL DEFAULT '',
+    version TEXT NOT NULL DEFAULT '',
+    source_path TEXT NOT NULL DEFAULT '',
+    manifest_json TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'unknown',
+    capabilities_json TEXT NOT NULL DEFAULT '{}',
+    validation_errors_json TEXT NOT NULL DEFAULT '[]',
+    registered_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
+)
+"""
+AGENT_MANIFESTS_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_agent_manifests_status ON agent_manifests(status)",
+]
+
+AGENT_DOMAIN_RUNS_DDL = """
+CREATE TABLE IF NOT EXISTS agent_domain_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER,
+    agent_id TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    input_json TEXT NOT NULL DEFAULT '{}',
+    output_json TEXT NOT NULL DEFAULT '{}',
+    error TEXT NOT NULL DEFAULT '',
+    dry_run INTEGER NOT NULL DEFAULT 0,
+    autonomous INTEGER NOT NULL DEFAULT 0,
+    requested_by TEXT NOT NULL DEFAULT 'system',
+    scope TEXT NOT NULL DEFAULT 'admin',
+    started_at TEXT,
+    finished_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
+)
+"""
+AGENT_DOMAIN_RUNS_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_agent_domain_runs_agent_status ON agent_domain_runs(agent_id, status)",
+    "CREATE INDEX IF NOT EXISTS ix_agent_domain_runs_created_at ON agent_domain_runs(created_at)",
+]
+
+AGENT_RUN_EVENTS_DDL = """
+CREATE TABLE IF NOT EXISTS agent_run_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain_run_id INTEGER NOT NULL,
+    seq INTEGER NOT NULL DEFAULT 0,
+    event_type TEXT NOT NULL,
+    phase TEXT NOT NULL DEFAULT '',
+    tool_name TEXT NOT NULL DEFAULT '',
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
+)
+"""
+AGENT_RUN_EVENTS_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_agent_run_events_run_seq ON agent_run_events(domain_run_id, seq)",
+]
+
+AGENT_QUEUE_DDL = """
+CREATE TABLE IF NOT EXISTS agent_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain_run_id INTEGER NOT NULL UNIQUE,
+    priority INTEGER NOT NULL DEFAULT 0,
+    available_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    lock_owner TEXT NOT NULL DEFAULT '',
+    lock_until TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%f+00:00','now'))
+)
+"""
+AGENT_QUEUE_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_agent_queue_status_available ON agent_queue(status, available_at)",
+]
+
+
+def _create_simple_table(mgr: DatabaseManager, table: str, ddl: str, indexes: list[str], label: str) -> dict[str, Any]:
+    from sqlalchemy import inspect as sa_inspect
+
+    inspector = sa_inspect(mgr.engine)
+    existing_tables = set(inspector.get_table_names())
+    created: list[str] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+    try:
+        with mgr.engine.connect() as conn:
+            if table in existing_tables:
+                skipped.append(f"{table} (already exists)")
+            else:
+                conn.execute(text(ddl))
+                created.append(table)
+            for idx_sql in indexes:
+                conn.execute(text(idx_sql))
+            conn.commit()
+    except Exception as exc:
+        errors.append(f"{label}: {exc}")
+    return {"created": created, "skipped": skipped, "errors": errors}
+
+
+def create_agent_manifests_table(mgr: DatabaseManager) -> dict[str, Any]:
+    return _create_simple_table(mgr, "agent_manifests", AGENT_MANIFESTS_DDL, AGENT_MANIFESTS_INDEXES, "agent_manifests")
+
+
+def create_agent_domain_runs_table(mgr: DatabaseManager) -> dict[str, Any]:
+    return _create_simple_table(mgr, "agent_domain_runs", AGENT_DOMAIN_RUNS_DDL, AGENT_DOMAIN_RUNS_INDEXES, "agent_domain_runs")
+
+
+def create_agent_run_events_table(mgr: DatabaseManager) -> dict[str, Any]:
+    return _create_simple_table(mgr, "agent_run_events", AGENT_RUN_EVENTS_DDL, AGENT_RUN_EVENTS_INDEXES, "agent_run_events")
+
+
+def create_agent_queue_table(mgr: DatabaseManager) -> dict[str, Any]:
+    return _create_simple_table(mgr, "agent_queue", AGENT_QUEUE_DDL, AGENT_QUEUE_INDEXES, "agent_queue")
 
 
 # ---------------------------------------------------------------------------

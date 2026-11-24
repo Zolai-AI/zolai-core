@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from ..engines import engine_mode, llm_allowed
@@ -165,6 +165,8 @@ def run_agent_goal(
     scope: str = DEFAULT_RUN_SCOPE,
     granted: Iterable[str] | None = None,
     extra_allow: Iterable[str] | None = None,
+    tool_allowlist: Iterable[str] | None = None,
+    audit_callback: Callable[[str, dict[str, Any]], None] | None = None,
     assistant: str = "admin",
     max_turns: int | None = None,
     provider: str | None = None,
@@ -189,6 +191,10 @@ def run_agent_goal(
             is dropped from the run's tool set rather than offered and then
             refused.  ``None`` (the default) leaves the tier exactly as it
             was.
+        tool_allowlist: Optional explicit allow-list (additive hook). When
+            provided, effective tools are ``tool_allowlist ∩ allow_list(scope,
+            granted)``. Default ``None`` preserves legacy behavior.
+        audit_callback: Optional additive hook ``(event_type, payload)``.
 
     Returns:
         The full run (phases, tool trace, evidence, answer, provider,
@@ -200,12 +206,21 @@ def run_agent_goal(
 
     started = time.monotonic()
     mode = engine_mode()
-    allow = set(allow_list(scope, granted=granted))
-    if extra_allow:
-        allow |= {str(a) for a in extra_allow}
+    tier = set(allow_list(scope, granted=granted))
+    if tool_allowlist is not None:
+        allow = tier & {str(a) for a in tool_allowlist}
+    else:
+        allow = set(tier)
+        if extra_allow:
+            allow |= {str(a) for a in extra_allow}
 
     run = store.create_run(goal, created_by=created_by, mode=mode)
     run_id = int(run["id"])
+    if audit_callback:
+        try:
+            audit_callback("run.start", {"run_id": run_id, "goal": goal, "scope": scope})
+        except Exception:
+            logger.debug("audit_callback failed", exc_info=True)
     phases: dict[str, Any] = {}
     trace: list[dict[str, Any]] = []
     error = ""
