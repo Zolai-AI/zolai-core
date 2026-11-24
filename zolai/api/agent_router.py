@@ -211,3 +211,147 @@ def agent_health() -> dict[str, Any]:
         "timeout_s": AGENT_TIMEOUT_S,
         "store_ready": ready,
     }
+
+
+# ---------------------------------------------------------------------------
+# Domain agent runtime (additive) — manifests, teams, domain runs, events
+# ---------------------------------------------------------------------------
+
+class DomainRunIn(BaseModel):
+    agent_id: str = Field(min_length=1, max_length=200)
+    mode: str = Field(default="manual", pattern="^(goal|workflow|batch|manual)$")
+    input: dict[str, Any] = Field(default_factory=dict)
+    dry_run: bool = False
+    autonomous: bool = False
+    scope: str = Field(default="admin", pattern="^(public|member|admin)$")
+
+
+class TeamRunIn(BaseModel):
+    input: dict[str, Any] = Field(default_factory=dict)
+    dry_run: bool = False
+    autonomous: bool = False
+    scope: str = Field(default="admin", pattern="^(public|member|admin)$")
+    member_mode: str = Field(default="manual", pattern="^(goal|workflow|manual)$")
+
+
+@router.get("/manifests", dependencies=[READ_DEP])
+def list_manifests() -> dict[str, Any]:
+    from ..agent.domain.registry import get_domain_registry
+
+    reg = get_domain_registry(force=True)
+    return {"items": [r.to_dict() for r in reg.reports()], "summary": reg.summary()}
+
+
+@router.get("/manifests/{agent_id}", dependencies=[READ_DEP])
+def get_manifest(agent_id: str) -> dict[str, Any]:
+    from ..agent.domain.registry import get_domain_registry
+
+    reg = get_domain_registry(force=True)
+    report = reg.get_report(agent_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail={"error": "manifest_not_found", "agent_id": agent_id})
+    return report.to_dict()
+
+
+@router.post("/manifests/validate", dependencies=[READ_DEP])
+def validate_manifests(agent_id: str | None = None, all: bool = False) -> dict[str, Any]:  # noqa: A002
+    from ..agent.domain.registry import get_domain_registry
+
+    reg = get_domain_registry(force=True)
+    if agent_id:
+        items = reg.validate(agent_id)
+    elif all:
+        items = reg.validate(None)
+    else:
+        items = reg.validate(None)
+    return {"items": items, "summary": reg.summary()}
+
+
+@router.get("/teams", dependencies=[READ_DEP])
+def list_teams() -> dict[str, Any]:
+    from ..agent.domain.registry import get_domain_registry
+
+    reg = get_domain_registry(force=True)
+    return {"items": reg.validate_team(None)}
+
+
+@router.get("/teams/{team_id}", dependencies=[READ_DEP])
+def get_team(team_id: str) -> dict[str, Any]:
+    from ..agent.domain.registry import get_domain_registry
+
+    reg = get_domain_registry(force=True)
+    items = reg.validate_team(team_id)
+    if not items or items[0].get("status") == "not_found":
+        raise HTTPException(status_code=404, detail={"error": "team_not_found", "team_id": team_id})
+    return items[0]
+
+
+@router.post("/teams/{team_id}/run", dependencies=[RUN_DEP])
+def run_team(team_id: str, body: TeamRunIn, request: Request) -> dict[str, Any]:
+    from ..agent.domain.runner import run_domain_team
+
+    _check_run_rate(request)
+    payload = dict(body.input or {})
+    payload.setdefault("member_mode", body.member_mode)
+    result = run_domain_team(
+        team_id,
+        input_data=payload,
+        dry_run=body.dry_run,
+        autonomous=body.autonomous,
+        scope=body.scope,
+        requested_by=_created_by(request),
+        member_mode=body.member_mode,
+    )
+    if result.get("status") == "not_found":
+        raise HTTPException(status_code=404, detail={"error": "team_not_found", "team_id": team_id})
+    return result
+
+
+@router.post("/domain-runs", dependencies=[RUN_DEP])
+def create_domain_run(body: DomainRunIn, request: Request) -> dict[str, Any]:
+    from ..agent.domain.runner import run_domain_agent
+
+    _check_run_rate(request)
+    result = run_domain_agent(
+        body.agent_id,
+        mode=body.mode,
+        input_data=body.input,
+        dry_run=body.dry_run,
+        autonomous=body.autonomous,
+        scope=body.scope,
+        requested_by=_created_by(request),
+    )
+    if result.get("status") == "not_found":
+        raise HTTPException(status_code=404, detail={"error": "manifest_not_found", "agent_id": body.agent_id})
+    return result
+
+
+@router.get("/domain-runs", dependencies=[READ_DEP])
+def list_domain_runs(limit: int = 20, agent_id: str | None = None) -> dict[str, Any]:
+    from ..agent import store
+
+    items = store.list_domain_runs(limit=limit, agent_id=agent_id)
+    return {"items": items, "count": len(items)}
+
+
+@router.get("/domain-runs/{run_id}", dependencies=[READ_DEP])
+def get_domain_run(run_id: int) -> dict[str, Any]:
+    from ..agent import store
+
+    run = store.get_domain_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail={"error": "domain_run_not_found", "run_id": run_id})
+    return run
+
+
+@router.get("/domain-runs/{run_id}/events", dependencies=[READ_DEP])
+def get_domain_run_events(run_id: int, limit: int = 500) -> dict[str, Any]:
+    from ..agent import store
+    from ..agent.domain.audit import list_events
+    from ..data.repositories import get_engine
+
+    run = store.get_domain_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail={"error": "domain_run_not_found", "run_id": run_id})
+    events = list_events(get_engine(), run_id, limit=limit)
+    return {"run_id": run_id, "items": events, "count": len(events)}
