@@ -1800,3 +1800,11 @@ zolai tests` clean.
 - Scope escalation prevented: domain API derives effective tool tier from authenticated record (`tool_tier_for_record`) and clamps requested scope; runner applies granted-scope narrowing via `allow_list(scope, granted=...)`.
 - Batch mode remains MVP synchronous bounded fan-out (`MAX_BATCH_ITEMS`) with explicit comment; not per-item queued.
 - Verification: ruff requested scope clean; domain/agent regression tests run (see commit/PR notes for exact command output).
+
+## 2026-11-24 — Stage 1 gap #2: versioned v2 scope declaration (orchestra loop)
+
+- Added an opt-in, declaration-only v2 scope vocabulary in `zolai/api/auth.py`: `SCOPE_VOCABULARY_V2 = "2.0.0-draft"` and the 11 proposed actions from the workspace governance contract (cost, observer, telemetry, learning, contribution).
+- Frozen v1 33-action vocabulary, `require_scope`, and 4-role enforcement are unchanged; `validate_scopes_v2()` / `scope_allows_v2()` are pure, opt-in, and not imported by any route. Ratification owner is unknown, so no enforcement change was made.
+- Added `tests/test_scope_vocabulary_v2.py` (frozen v1 set, exact v2 set, no role escalation) and a **DRAFT, NOT ENFORCED** note in `docs/admin/permissions.md` §2.
+- Verification: 328 focused tests passed; ruff clean; staged diff secret-free; 4 full-suite failures reproduce on `HEAD~1` and are unrelated to auth.
+- Commit: `676e22c` (`feat(auth): declare versioned v2 scope vocabulary (additive)`). Stage 1 gaps #3-#7 (TS role mapping, explorer/web consumption, SSE stream contract, cost/observer schema) remain deferred.
