@@ -96,6 +96,27 @@ Per-action rate budgets live in `rate_limit.ACTION_LIMITS` (a write action is
 those numbers; it states the rule: **an action that changes state costs less
 traffic than one that reads.**
 
+### Draft v2 scope declaration — declaration only, opt-in
+
+**DRAFT, NOT ENFORCED.** `auth.SCOPE_VOCABULARY_V2 == "2.0.0-draft"` names an
+additive declaration of eleven *proposed* actions (`auth.V2_PROPOSED_ACTIONS`),
+matching the machine-readable draft
+`docs/governance/rbac-capabilities.contract.json` (Stage 1 inventory, gap #2):
+
+`cost:read`, `cost:manage`, `observer:read`, `observer:manage`, `telemetry:read`,
+`learning:read`, `learning:run`, `learning:manage`, `contribution:read`,
+`contribution:review`, `contribution:manage`.
+
+`auth.validate_scopes_v2()` and `auth.scope_allows_v2()` are the only helpers
+that resolve these names, using the same exact / `*` / `<resource>:*` / `*:read`
+forms against v1 ∪ proposed. They are pure functions: no route, `require_scope`,
+`VALID_ACTIONS`, role grant, database row or environment flag changes with them.
+The proposed set is disjoint from the frozen 33, and **widening enforcement or
+granting these actions requires ratification** — no owner has been named for
+that decision yet. Until then `validate_scopes(["cost:read"])` and
+`require_scope("cost:read")` still raise, and `rbac.role_for` still ranks a key
+holding `cost:manage` as `member`.
+
 ---
 
 ## §3 Role → scope grants

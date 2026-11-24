@@ -216,6 +216,90 @@ def scope_allows(scopes: list[str], action: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Draft v2 vocabulary — opt-in declaration only, enforced nowhere (Stage 1 gap
+# #2).  The frozen 33-action set above stays the authority for every route,
+# role grant and key-minting validation; these helpers exist so a caller can
+# describe proposed actions without changing live authorization.
+# ---------------------------------------------------------------------------
+
+#: Version of the additive scope declaration draft.
+SCOPE_VOCABULARY_V2 = "2.0.0-draft"
+
+#: Proposed additions from docs/governance/rbac-capabilities.contract.json
+#: (workspace Stage 1 inventory, gap #2).  Exact, disjoint from VALID_ACTIONS.
+V2_PROPOSED_ACTIONS: frozenset[str] = frozenset(
+    {
+        "cost:read",
+        "cost:manage",
+        "observer:read",
+        "observer:manage",
+        "telemetry:read",
+        "learning:read",
+        "learning:run",
+        "learning:manage",
+        "contribution:read",
+        "contribution:review",
+        "contribution:manage",
+    }
+)
+
+#: Resolution domain for the v2 helpers only: frozen v1 ∪ proposed.  Nothing
+#: below the helpers reads these sets, so enforcement cannot widen by accident.
+_V2_ACTIONS: frozenset[str] = VALID_ACTIONS | V2_PROPOSED_ACTIONS
+_V2_RESOURCES: frozenset[str] = frozenset(a.split(":", 1)[0] for a in _V2_ACTIONS)
+_V2_SUFFIXES: frozenset[str] = frozenset(a.split(":", 1)[1] for a in _V2_ACTIONS)
+
+
+def validate_scopes_v2(scopes: list[str]) -> list[str]:
+    """Validate scopes against the draft-v2 declaration (v1 ∪ proposed).
+
+    Opt-in, declaration-only counterpart of :func:`validate_scopes`: the same
+    exact / ``*`` / ``<resource>:*`` / ``*:<suffix>`` forms and order-preserving
+    dedupe, resolved over the frozen 33 actions plus the eleven proposed ones.
+    Every route, key minting and role grant still uses :func:`validate_scopes`.
+    """
+    if not scopes:
+        raise ValueError("scopes must not be empty")
+    cleaned: list[str] = []
+    for raw in scopes:
+        scope = str(raw).strip()
+        if not scope:
+            continue
+        if scope == "*" or scope in _V2_ACTIONS:
+            cleaned.append(scope)
+            continue
+        resource, sep, suffix = scope.partition(":")
+        if not sep:
+            raise ValueError(f"unknown scope '{raw}' — expected resource:action")
+        if resource == "*" and suffix in _V2_SUFFIXES:
+            cleaned.append(scope)
+        elif suffix == "*" and resource in _V2_RESOURCES:
+            cleaned.append(scope)
+        else:
+            raise ValueError(f"unknown scope '{raw}' — not in the v2 draft scope vocabulary")
+    if not cleaned:
+        raise ValueError("scopes must not be empty")
+    # Deduplicate, keep order (same contract as the frozen-v1 validator).
+    return list(dict.fromkeys(cleaned))
+
+
+def scope_allows_v2(scopes: list[str], action: str) -> bool:
+    """Match an action declared in v2 using the v1 matcher's sugar rules.
+
+    Opt-in and declaration-only: ``require_scope`` and every route keep calling
+    :func:`scope_allows`, which still rejects proposed actions.
+    """
+    if not action or action not in _V2_ACTIONS:
+        return False
+    if "*" in scopes:
+        return True
+    if action in scopes:
+        return True
+    resource, suffix = action.split(":", 1)
+    return f"{resource}:*" in scopes or f"*:{suffix}" in scopes
+
+
+# ---------------------------------------------------------------------------
 # Manager accessor + table bootstrap (monkeypatch seam for tests)
 # ---------------------------------------------------------------------------
 
