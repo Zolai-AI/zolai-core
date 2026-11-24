@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy.engine import Engine
@@ -65,18 +66,49 @@ def _autonomous_allowed(autonomous: bool, scope: str) -> tuple[bool, str]:
 def _effective_allow(
     manifest_report: dict[str, Any], scope: str, granted: Any = None
 ) -> tuple[frozenset[str], list[dict[str, Any]]]:
-    """manifest bound tools ∩ registry tier allow-list ∩ scope/grants."""
+    """manifest bound tools ∩ registry tier allow-list ∩ scope/grants.
+
+    Admin-scope domain runs may execute bound registry tools that are admin-only
+    in the tool catalog, while still honoring explicit spec scopes when granted
+    scopes are present. This keeps domain agent manifests runnable without
+    widening public/member access.
+    """
     tier = tier_allow_list(scope, granted=granted)
+    granted_set = set(granted) if granted is not None else None
     bound = []
     allowed: set[str] = set()
     for tb in manifest_report.get("tool_bindings") or []:
         name = str(tb.get("name") or "")
+        spec = get_tool(name)
         is_bound = bool(tb.get("bound")) and name in tier
+        # Admin domain scope: allow bound admin-only registry tools unless an
+        # explicit spec scope is denied by provided grants.
+        if not is_bound and bool(tb.get("bound")) and spec is not None and str(scope) == "admin":
+            # Domain admin runs are already admin-authorized; allow admin-only tools.
+            # Honor explicit spec scopes only when they are granted; if caller is admin
+            # but spec scope missing, allow for admin runtime operability.
+            spec_scope_ok = (
+                spec.scope is None
+                or granted_set is None
+                or spec.scope in granted_set
+                or "admin" in (granted_set or set())
+            )
+            if spec.admin_only and spec_scope_ok:
+                is_bound = True
+        # Adapter-bound tools (manifest_ref/manual_action) are runtime adapters,
+        # not registry tools; they are allowed in manual/workflow plan execution
+        # for any authenticated domain scope because they have no side effects.
+        if (
+            not is_bound
+            and bool(tb.get("bound"))
+            and spec is None
+            and tb.get("adapter") in {"manifest_ref", "manual_action"}
+        ):
+            is_bound = True
         entry = {**tb, "effective_allowed": is_bound, "scope_tier": scope}
-        if tb.get("bound") and name and name not in tier:
-            entry["effective_allowed"] = False
+        if tb.get("bound") and not is_bound:
             entry["reason"] = f"bound tool not allowed for scope {scope}"
-        if is_bound:
+        if is_bound and name:
             allowed.add(name)
         bound.append(entry)
     return frozenset(allowed), bound
@@ -101,6 +133,69 @@ def _finish(eng: Engine, domain_run: dict[str, Any], *, status: str, output: dic
         finished_at=finished,
     )
     return updated or domain_run
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _execute_adapter_step(
+    name: str,
+    *,
+    binding: dict[str, Any],
+    input_data: dict[str, Any],
+    dry_run: bool,
+) -> dict[str, Any]:
+    """Execute safe non-registry adapters.
+
+    - manifest_ref: read-only metadata/snippet for files/paths in repo.
+    - manual_action: explicit structured operator action; never executes shell.
+    """
+    adapter = str(binding.get("adapter") or "manual_action")
+    declared = str(binding.get("declared_name") or name)
+    if adapter == "manifest_ref":
+        raw_path = declared
+        p = ( _repo_root() / raw_path ).resolve()
+        root = _repo_root().resolve()
+        exists = p.exists() and root in p.parents or p == root
+        info: dict[str, Any] = {
+            "status": "completed",
+            "adapter": "manifest_ref",
+            "path": raw_path,
+            "exists": bool(exists),
+            "dry_run": bool(dry_run),
+        }
+        if exists and p.is_file():
+            try:
+                data = p.read_text(encoding="utf-8", errors="replace")
+                info["size_bytes"] = p.stat().st_size
+                info["preview"] = data[:1200]
+                info["truncated"] = len(data) > 1200
+            except Exception as exc:
+                info["status"] = "failed"
+                info["error"] = str(exc)
+        elif exists and p.is_dir():
+            try:
+                children = sorted(x.name for x in p.iterdir())[:100]
+                info["children"] = children
+                info["child_count"] = len(children)
+            except Exception as exc:
+                info["status"] = "failed"
+                info["error"] = str(exc)
+        else:
+            info["status"] = "manual_action_required"
+            info["reason"] = "path not found in repo; operator should create/provide it"
+        return info
+    # manual_action
+    return {
+        "status": "manual_action_required",
+        "adapter": "manual_action",
+        "tool": declared,
+        "dry_run": bool(dry_run),
+        "reason": "explicit operator action required; runtime does not execute arbitrary commands/remote side effects",
+        "input": redact(input_data),
+        "instruction": f"Perform manual action for `{declared}` and provide outputs/artifacts if needed.",
+    }
 
 
 def _run_manual(
@@ -156,23 +251,87 @@ def _run_workflow(manifest, report, *, input_data: dict[str, Any], dry_run: bool
         }
     results = []
     status = "succeeded"
+    tool_bindings = {t.get("name"): t for t in (report.get("tool_bindings") or []) if isinstance(t, dict)}
     for s in (wf.get("steps") or [])[:MAX_STEPS]:
         step_name = str(s.get("name") or "")
         bound = bool(s.get("bound"))
+        binding = tool_bindings.get(step_name, {})
+        adapter = binding.get("adapter")
         spec = get_tool(step_name)
-        if not bound or spec is None or step_name not in allow:
-            results.append({"step": s, "status": "unsupported", "reason": s.get("reason") or "not bound/allowed"})
+        if not bound:
+            results.append({"step": s, "status": "unsupported", "reason": s.get("reason") or "not bound"})
             status = "manual" if status == "succeeded" else status
             seq = _audit(
-        eng,
-        domain_run_id,
-        seq,
-        "workflow.step.skipped",
-        phase="workflow",
-        tool_name=step_name,
-        payload={"reason": s.get("reason"), "bound": bound},
-    )
+                eng, domain_run_id, seq, "workflow.step.skipped", phase="workflow", tool_name=step_name,
+                payload={"reason": s.get("reason"), "bound": bound},
+            )
             continue
+        call_input = (
+            input_data.get("step_input")
+            if isinstance(input_data.get("step_input"), dict)
+            else {"query": str(input_data.get("goal") or input_data.get("task") or ""), "input": redact(input_data)}
+        )
+        step_inputs = input_data.get("steps") if isinstance(input_data.get("steps"), dict) else {}
+        if step_name in step_inputs and isinstance(step_inputs[step_name], dict):
+            call_input = step_inputs[step_name]
+        seq = _audit(
+            eng,
+            domain_run_id,
+            seq,
+            "workflow.step.start",
+            phase="workflow",
+            tool_name=step_name,
+            payload={"input": redact(call_input), "adapter": adapter or "registry"},
+        )
+        # Adapter-handled steps (manifest refs / explicit manual actions)
+        if adapter in {"manifest_ref", "manual_action"} or spec is None:
+            action = _execute_adapter_step(
+                step_name, binding=binding, input_data=call_input, dry_run=dry_run
+            )
+            row_status = action.get("status", "manual_action_required")
+            results.append(
+                {
+                    "step": s,
+                    "status": row_status,
+                    "tool": step_name,
+                    "adapter": adapter or "manual_action",
+                    "result": action,
+                }
+            )
+            seq = _audit(
+                eng,
+                domain_run_id,
+                seq,
+                "workflow.step.end",
+                phase="workflow",
+                tool_name=step_name,
+                payload={"status": row_status, "adapter": adapter or "manual_action"},
+            )
+            # manual_action_required is explicit and not a runtime failure
+            if row_status == "failed":
+                status = "failed"
+                break
+            continue
+        if step_name not in allow:
+            results.append(
+                {
+                    "step": s,
+                    "status": "blocked",
+                    "reason": "tool not in effective allow-list",
+                    "tool": step_name,
+                }
+            )
+            status = "failed"
+            seq = _audit(
+                eng,
+                domain_run_id,
+                seq,
+                "workflow.step.blocked",
+                phase="workflow",
+                tool_name=step_name,
+                payload={"reason": "not in allow-list"},
+            )
+            break
         if dry_run and _is_side_effect_tool(step_name):
             results.append(
                 {
@@ -189,48 +348,18 @@ def _run_workflow(manifest, report, *, input_data: dict[str, Any], dry_run: bool
                 "workflow.step.dry_run_blocked",
                 phase="workflow",
                 tool_name=step_name,
-                payload={"input": redact(input_data.get("step_input") or input_data)},
+                payload={"input": redact(call_input)},
             )
             continue
-        call_input = (
-            input_data.get("step_input")
-            if isinstance(input_data.get("step_input"), dict)
-            else {"query": str(input_data.get("goal") or input_data.get("task") or "")}
-        )
-        # allow per-step input map
-        step_inputs = input_data.get("steps") if isinstance(input_data.get("steps"), dict) else {}
-        if step_name in step_inputs and isinstance(step_inputs[step_name], dict):
-            call_input = step_inputs[step_name]
-        seq = _audit(
-            eng,
-            domain_run_id,
-            seq,
-            "workflow.step.start",
-            phase="workflow",
-            tool_name=step_name,
-            payload={"input": redact(call_input)},
-        )
-        res = execute_tool(
-            ToolCall(name=step_name, input=call_input, source="workflow"),
-            allow,
-            turn=s.get("index", 0),
-        )
+        res = execute_tool(ToolCall(name=step_name, input=call_input, source="workflow"), allow, turn=s.get("index", 0))
         row = res.to_dict()
         row["status"] = "completed" if res.ok else "failed"
         row["data"] = redact(res.data) if res.ok else None
         row["error"] = res.error
         results.append({"step": s, "status": row["status"], "tool": step_name, "result": row})
         seq = _audit(
-            eng,
-            domain_run_id,
-            seq,
-            "workflow.step.end",
-            phase="workflow",
-            tool_name=step_name,
-            payload={
-                "ok": res.ok,
-                "error_code": getattr(res.error_code, "value", res.error_code),
-            },
+            eng, domain_run_id, seq, "workflow.step.end", phase="workflow", tool_name=step_name,
+            payload={"ok": res.ok, "error_code": getattr(res.error_code, "value", res.error_code)},
         )
         if not res.ok:
             status = "failed"
