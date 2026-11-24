@@ -118,3 +118,32 @@ def test_existing_p3_runs_contract_still_works(data_db: Path, auth_db: DatabaseM
     assert body["status"] in {"succeeded", "failed"}
     r2 = client.get("/api/v1/agent/runs", headers=_h(key))
     assert r2.status_code == 200
+
+
+def test_domain_run_autonomous_requires_env_gate(
+    data_db: Path, auth_db: DatabaseManager, client: TestClient, key: dict, monkeypatch
+) -> None:
+    monkeypatch.delenv("ZOLAI_AGENT_AUTONOMOUS", raising=False)
+    manifests = client.get("/api/v1/agent/manifests", headers=_h(key)).json()["items"]
+    agent_id = manifests[0]["agent_id"]
+    r = client.post("/api/v1/agent/domain-runs", headers=_h(key), json={
+        "agent_id": agent_id, "mode": "manual", "input": {"task": "smoke"}, "dry_run": True, "autonomous": True,
+    })
+    assert r.status_code == 403
+    assert r.json()["detail"]["error"] == "autonomous_disabled"
+
+
+def test_domain_run_scope_escalation_clamped(
+    data_db: Path, auth_db: DatabaseManager, client: TestClient
+) -> None:
+    # agent:read+agent:run key resolves to member tier; requesting admin must be clamped.
+    member_key = auth.create_api_key(name="member", scopes=["agent:read", "agent:run"], created_by="test")
+    manifests = client.get("/api/v1/agent/manifests", headers=_h(member_key)).json()["items"]
+    agent_id = manifests[0]["agent_id"]
+    r = client.post("/api/v1/agent/domain-runs", headers=_h(member_key), json={
+        "agent_id": agent_id, "mode": "manual", "input": {"task": "smoke"}, "dry_run": True, "scope": "admin",
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["scope"] == "member"
+    assert all(tb.get("scope_tier") == "member" for tb in body.get("output", {}).get("tool_bindings", []))
