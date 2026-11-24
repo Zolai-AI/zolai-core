@@ -1,3 +1,5 @@
+> **DEPRECATED (2026-11-24)** — canonical: [`docs/ROADMAP.md`](../../../docs/ROADMAP.md). This file is retained for history only; do not use it as the current roadmap.
+
 # Foundation Roadmap — Phased Plan A–F
 
 This roadmap maps the 54-section reference ontology onto the existing `zolai/` structure and guides the Foundation module build-out.

@@ -1,3 +1,5 @@
+> **DEPRECATED (2026-11-24)** — canonical: [`docs/ROADMAP.md`](../docs/ROADMAP.md). This file is retained for history only; do not use it as the current roadmap.
+
 # Zolai Second Brain — Open Source Roadmap
 
 > Building a fully capable AI second brain for the Zomi people in Tedim Zolai.

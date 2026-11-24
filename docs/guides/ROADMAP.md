@@ -1,3 +1,5 @@
+> **DEPRECATED (2026-11-24)** — canonical: [`docs/ROADMAP.md`](../../../docs/ROADMAP.md). This file is retained for history only; do not use it as the current roadmap.
+
 # Zolai AI Pipeline — Master Roadmap
 
 > No artificial size limits. Get ALL clean Zolai data possible.

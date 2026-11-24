@@ -59,3 +59,21 @@ manifest version, RAG feed). See `README.md` > Connect.
 - `scripts/backup_nightly.py` JSONL backup log and any CLI/`--json` output must never include key material (sizes/hashes/row counts only).
 - The server consumer-keys path (`/home/ubuntu/.zolai/consumer-keys.txt`) and its contents stay out of code, docs, and commit messages.
 - Canonical rules: workspace-root `AGENTS.md` § Secret Hygiene. Full procedure: `../context/code-standards.md` § Secret Hygiene — Prevention. Staged-change scan gate: `secret-scan` subagent; checklist: `secret-hygiene` skill. Do not duplicate that block here.
+
+## Workspace alignment (2026-11-24)
+
+`zolai-core` is the Python-authoritative language/data engine. This repo follows the
+workspace-canonical 7-stage SDLC and document map; no stage gate is skipped.
+
+### ALIGNMENT RECORD — zolai-core
+
+- Canonical SDLC: [`../docs/SDLC.md`](../docs/SDLC.md)
+- Canonical source-of-truth: [`../docs/governance/source-of-truth.md`](../docs/governance/source-of-truth.md)
+- Status: aligned 2026-11-24; existing architecture unchanged. Hono stays in `zolai-web`;
+  the Cloudflare Worker in `zolai-mcp-server` is legacy.
+
+### BACKEND/CORE ALIGNMENT RECORD — zolai-core
+
+- Framework: Python/FastAPI + Typer remain authoritative; `no @nestjs dependency found — do not add`.
+- Rust/Cargo: Cargo is Tauri native layer only (`../zolai-tauri/src-tauri/Cargo.toml`); no Rust service layer added.
+- No database migration, dependency edit, or new component was introduced by this alignment pass.
