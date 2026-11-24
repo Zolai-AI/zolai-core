@@ -143,10 +143,12 @@ def _require_autonomous(request: Request, autonomous: bool) -> bool:
             },
         )
     from ..agent.tools.registry import tool_tier_for_record
+    from . import rbac
 
     record: dict[str, Any] | None = getattr(request.state, "api_key", None)
     tier = tool_tier_for_record(record)
-    if tier != "admin":
+    tier_role = "anonymous" if tier == "public" else tier
+    if not rbac.has_role({"role": tier_role}, rbac.ROLE_ADMIN):
         raise HTTPException(
             status_code=403,
             detail={

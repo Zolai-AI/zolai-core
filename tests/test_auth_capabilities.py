@@ -130,6 +130,9 @@ class TestCapabilitiesContract:
             "can_chat_assistant",
             "can_run_agent",
             "can_read_agent",
+            "can_read_cost",
+            "can_read_observer",
+            "can_read_learning",
             "can_manage_users",
             "can_manage_api_keys",
             "can_manage_settings",
@@ -149,6 +152,9 @@ class TestCapabilitiesContract:
         assert body["scopes"] == ["dataset:read", "agent:read"]
         assert body["capabilities"]["can_read_agent"] is True
         assert body["capabilities"]["can_run_agent"] is False
+        assert body["capabilities"]["can_read_learning"] is True
+        assert body["capabilities"]["can_read_cost"] is False
+        assert body["capabilities"]["can_read_observer"] is False
         assert body["capabilities"]["can_manage_settings"] is False
         _assert_no_secret_leak(body)
 
@@ -159,6 +165,8 @@ class TestCapabilitiesContract:
         assert body["canonical_role"] == "admin"
         assert body["auth_source"] == "api_key"
         assert body["capabilities"]["can_manage_settings"] is True
+        assert body["capabilities"]["can_read_cost"] is True
+        assert body["capabilities"]["can_read_observer"] is True
         assert body["capabilities"]["can_manage_roles"] is False
         _assert_no_secret_leak(body)
 

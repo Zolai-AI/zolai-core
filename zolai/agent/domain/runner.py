@@ -58,7 +58,10 @@ def _autonomous_allowed(autonomous: bool, scope: str) -> tuple[bool, str]:
         return True, ""
     if not _autonomous_env_enabled():
         return False, "Autonomous execution is disabled; set ZOLAI_AGENT_AUTONOMOUS=1."
-    if str(scope or "").lower() != "admin":
+    from ...api import rbac
+
+    scope_role = "anonymous" if str(scope or "").lower() == "public" else str(scope or "").lower()
+    if not rbac.has_role({"role": scope_role}, rbac.ROLE_ADMIN):
         return False, "Autonomous execution requires admin scope."
     return True, ""
 
@@ -83,7 +86,11 @@ def _effective_allow(
         is_bound = bool(tb.get("bound")) and name in tier
         # Admin domain scope: allow bound admin-only registry tools unless an
         # explicit spec scope is denied by provided grants.
-        if not is_bound and bool(tb.get("bound")) and spec is not None and str(scope) == "admin":
+        from ...api import rbac
+
+        scope_role = "anonymous" if str(scope or "").lower() == "public" else str(scope or "").lower()
+        is_admin_scope = rbac.has_role({"role": scope_role}, rbac.ROLE_ADMIN)
+        if not is_bound and bool(tb.get("bound")) and spec is not None and is_admin_scope:
             # Domain admin runs are already admin-authorized; allow admin-only tools.
             # Honor explicit spec scopes only when they are granted; if caller is admin
             # but spec scope missing, allow for admin runtime operability.
@@ -91,7 +98,7 @@ def _effective_allow(
                 spec.scope is None
                 or granted_set is None
                 or spec.scope in granted_set
-                or "admin" in (granted_set or set())
+                or rbac.ROLE_ADMIN in (granted_set or set())
             )
             if spec.admin_only and spec_scope_ok:
                 is_bound = True

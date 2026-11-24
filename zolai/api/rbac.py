@@ -579,7 +579,12 @@ def _capability_auth_source(request: Request, record: dict[str, Any] | None) -> 
 
 
 def _derived_capabilities(role: str, scopes: list[str]) -> dict[str, bool]:
-    """Minimal server-authoritative capability booleans derived from role/scopes."""
+    """Minimal server-authoritative capability booleans derived from role/scopes.
+
+    Additive fields are conservative and derivation-only: no new enforcement is
+    invented here. cost/observer/learning read flags are admin-gated until the
+    frozen scope vocabulary is deliberately expanded.
+    """
     scope_set = set(scopes)
     is_admin = _RANK.get(role, 0) >= _RANK[ROLE_ADMIN]
     is_superadmin = _RANK.get(role, 0) >= _RANK[ROLE_SUPERADMIN]
@@ -588,6 +593,9 @@ def _derived_capabilities(role: str, scopes: list[str]) -> dict[str, bool]:
         "can_chat_assistant": True,
         "can_run_agent": auth.scope_allows(list(scope_set), "agent:run"),
         "can_read_agent": auth.scope_allows(list(scope_set), "agent:read"),
+        "can_read_cost": is_admin,
+        "can_read_observer": is_admin,
+        "can_read_learning": is_admin or auth.scope_allows(list(scope_set), "agent:read"),
         "can_manage_users": is_admin and auth.scope_allows(list(scope_set), "user:manage"),
         "can_manage_api_keys": is_admin and auth.scope_allows(list(scope_set), "apikey:manage"),
         "can_manage_settings": is_admin and auth.scope_allows(list(scope_set), "settings:write"),
