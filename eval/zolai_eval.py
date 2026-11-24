@@ -1212,11 +1212,11 @@ def _eval_paraphrase(case: EvalCase, rag: Any = None) -> EvalResult:
 def print_report(report: EvalReport):
     """Print evaluation report."""
     print(f"\n{'='*60}")
-    print(f"ZOLAI EVALUATION REPORT")
+    print("ZOLAI EVALUATION REPORT")
     print(f"{'='*60}")
     print(f"Total: {report.total} | Passed: {report.passed} | Failed: {report.failed}")
     print(f"Accuracy: {report.accuracy:.1%}")
-    print(f"\nBy Category:")
+    print("\nBy Category:")
     for cat, stats in sorted(report.by_category.items()):
         acc = stats['passed'] / stats['total'] if stats['total'] > 0 else 0
         print(f"  {cat:15} {stats['passed']:3}/{stats['total']:3} ({acc:.1%})")
