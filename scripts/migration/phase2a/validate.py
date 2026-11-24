@@ -111,9 +111,9 @@ def validate_table(cur, source: str, target: str, key_col: str, desc: str) -> di
 
     # Check version column exists and has values
     try:
-        version_count = cur.execute(f"""
+        cur.execute(f"""
             SELECT COUNT(*) FROM [{target}] WHERE version > 0
-        """).fetchone()[0]
+        """).fetchone()
     except Exception:
         pass
 
