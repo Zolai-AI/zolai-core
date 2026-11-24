@@ -345,7 +345,10 @@ def main():
     except Exception:
         print("⚠️  sha256() not available — will use Python hashing")
         # Fallback: monkey-patch sha256 SQL function via Python
-        _sha256 = lambda x: hashlib.sha256(x.encode("utf-8")).hexdigest()
+
+        def _sha256(x: str) -> str:
+            return hashlib.sha256(x.encode("utf-8")).hexdigest()
+
         conn.create_function("sha256", 1, _sha256)
         print("✅ Python SHA256 fallback registered\n")
 
