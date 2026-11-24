@@ -7,7 +7,7 @@ system (core / web / tauri / datasets / training / wiki). Read the six-file
 `context/` set at session start — it is the ground truth for **this repo only**.
 
 ## Shared Data
-- Corpora, datasets, and bulk artifacts live in the container shared folder at `../data` (relative to this repo). This is **not** committed to this repo — it is a shared, gitignored directory (6.3G) across all six repos. Small metadata pointer files may be tracked; large bulk data is not.
+- Corpora, datasets, and bulk artifacts live in the container shared folder at `../data` (relative to this repo). This is **not** committed to this repo — it is a shared, gitignored directory across the Zolai-AI org repos. Small metadata pointer files may be tracked; large bulk data is not.
 - See `../data/README.md` and `../data/DATA_INDEX.md` for data inventory.
 
 ## Scoping
