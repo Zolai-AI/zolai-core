@@ -8,7 +8,7 @@ Update a HuggingFace model card README.md with correct YAML frontmatter, usage c
 ## Prerequisites
 - `HF_TOKEN` in `config/env/.env`
 - `huggingface_hub` installed: `pip install huggingface_hub`
-- `PYTHONPATH=/home/peter/.local/lib/python3.12/site-packages`
+- `PYTHONPATH=$HOME/.local/lib/python3.12/site-packages`
 
 ## Steps
 
@@ -18,7 +18,7 @@ Update a HuggingFace model card README.md with correct YAML frontmatter, usage c
 ## Commands
 ```bash
 # Upload README.md to model repo
-PYTHONPATH=/home/peter/.local/lib/python3.12/site-packages \
+PYTHONPATH=$HOME/.local/lib/python3.12/site-packages \
 python3 -c "
 from huggingface_hub import HfApi
 HfApi().upload_file(

@@ -1,4 +1,7 @@
 #!/bin/bash
+# Resolve kaggle from PATH instead of one user's ~/.local/bin,
+# so the script runs on any machine or CI runner.
+KAGGLE="${KAGGLE_BIN:-$(command -v kaggle || echo "$HOME/.local/bin/kaggle")}"
 
 echo "╔════════════════════════════════════════════════════════════════════════════╗"
 echo "║                    KAGGLE DATASET UPLOAD - FINAL                          ║"
@@ -7,11 +10,11 @@ echo ""
 
 # Check Kaggle CLI
 echo "Checking Kaggle CLI..."
-/home/peter/.local/bin/kaggle --version
+"$KAGGLE" --version
 echo ""
 
 # Get username
-USERNAME=$(/home/peter/.local/bin/kaggle config view | grep username | cut -d' ' -f3)
+USERNAME=$("$KAGGLE" config view | grep username | cut -d' ' -f3)
 echo "Username: $USERNAME"
 echo ""
 
@@ -52,14 +55,14 @@ echo ""
 echo "Uploading dataset..."
 cd $DATASET_DIR
 
-/home/peter/.local/bin/kaggle datasets create -p . --dir-mode zip -q 2>&1
+"$KAGGLE" datasets create -p . --dir-mode zip -q 2>&1
 
 if [ $? -eq 0 ]; then
     echo "✅ Dataset created!"
     echo "URL: https://www.kaggle.com/datasets/$DATASET_SLUG"
 else
     echo "Trying to update existing dataset..."
-    /home/peter/.local/bin/kaggle datasets version -m "Updated training data" -q 2>&1
+    "$KAGGLE" datasets version -m "Updated training data" -q 2>&1
     if [ $? -eq 0 ]; then
         echo "✅ Dataset updated!"
     else

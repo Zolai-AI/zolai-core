@@ -276,7 +276,7 @@ class TestProvenanceEntry:
         prov = ProvenanceEntry(
             version="1.0",
             generated_at="2026-09-10T16:14:22Z",
-            workspace_root="/home/peter/Documents/Projects/zolai-ai",
+            workspace_root="/workspace",
             total_files=227,
             total_size_bytes=2687449749,
             files=[

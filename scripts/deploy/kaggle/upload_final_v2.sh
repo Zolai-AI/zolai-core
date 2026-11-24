@@ -1,4 +1,7 @@
 #!/bin/bash
+# Resolve kaggle from PATH instead of one user's ~/.local/bin,
+# so the script runs on any machine or CI runner.
+KAGGLE="${KAGGLE_BIN:-$(command -v kaggle || echo "$HOME/.local/bin/kaggle")}"
 
 # Kaggle credential comes from the environment only -- never hardcode secrets.
 if [ -z "${KAGGLE_API_TOKEN:-}" ]; then
@@ -18,7 +21,7 @@ echo ""
 # Update dataset
 echo "📦 Updating dataset..."
 cd kaggle_dataset
-/home/peter/.local/bin/kaggle datasets version -m "Updated with complete training data" 2>&1 | tail -3
+"$KAGGLE" datasets version -m "Updated with complete training data" 2>&1 | tail -3
 cd ..
 
 echo ""
@@ -47,7 +50,7 @@ METAEOF
 
 # Upload notebook
 cd kaggle_notebook_dir
-/home/peter/.local/bin/kaggle kernels push -p . 2>&1 | tail -5
+"$KAGGLE" kernels push -p . 2>&1 | tail -5
 cd ..
 
 echo ""

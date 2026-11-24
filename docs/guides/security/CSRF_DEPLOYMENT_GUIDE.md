@@ -44,7 +44,7 @@
 
 ### 1. Build
 ```bash
-cd /home/peter/Documents/Projects/zolai/website/zolai-project
+cd <PROJECTS>/zolai/website/zolai-project
 npm run build
 ```
 

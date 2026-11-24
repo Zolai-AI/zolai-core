@@ -512,7 +512,7 @@ this docs entry.
   failure, report JSON.
 
 ### Live run (2026-10-27 01:20, EXIT=0, ~2 min)
-Before → after on `/home/peter/Documents/Projects/zolai-ai/data/zolai.db`:
+Before → after on `<WORKSPACE>/data/zolai.db`:
 
 | table / metric | before | after |
 | --- | --- | --- |

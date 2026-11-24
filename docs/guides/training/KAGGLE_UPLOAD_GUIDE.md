@@ -26,7 +26,7 @@ chmod 600 ~/.kaggle/kaggle.json
 ### Option 1: Automatic (Recommended)
 
 ```bash
-cd /home/peter/Documents/Projects/zolai
+cd <PROJECTS>/zolai
 chmod +x upload_to_kaggle.sh
 ./upload_to_kaggle.sh
 ```

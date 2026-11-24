@@ -83,9 +83,9 @@ def _seed_run(engine, *, run_id="lr_20261028T000000Z_abcdef") -> str:
         status="OK",
         metrics={
             "artifact_status": "PUBLISHED",
-            "staging_ref": "/home/peter/secret-place/best.pkl",
-            "published_ref": "/home/peter/secret-place/pos_tagger_crf.pkl",
-            "location": "/home/peter/secret-place/notes.txt",
+            "staging_ref": "/srv/model-store/best.pkl",
+            "published_ref": "/srv/model-store/pos_tagger_crf.pkl",
+            "location": "/srv/model-store/notes.txt",
             "sha256": "a" * 64,
             "note": f"api_key={_FAKE_SECRET}",
         },

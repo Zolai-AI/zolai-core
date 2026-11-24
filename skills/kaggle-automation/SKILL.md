@@ -80,16 +80,16 @@ kaggle kernels push -p notebooks/zolai-qwen-training-v2/
 ### Cron Schedule (VPS)
 ```cron
 # Every 6 hours: collect new data
-0 */6 * * * /home/peter/.openclaw/scripts/kaggle-pipeline.sh --stage collect
+0 */6 * * * $HOME/.openclaw/scripts/kaggle-pipeline.sh --stage collect
 
 # Every 12 hours: upload + trigger clean
-0 */12 * * * /home/peter/.openclaw/scripts/kaggle-pipeline.sh --stage upload-clean
+0 */12 * * * $HOME/.openclaw/scripts/kaggle-pipeline.sh --stage upload-clean
 
 # Daily at 2am: download + merge
-0 2 * * * /home/peter/.openclaw/scripts/kaggle-pipeline.sh --stage download-merge
+0 2 * * * $HOME/.openclaw/scripts/kaggle-pipeline.sh --stage download-merge
 
 # Weekly on Sunday: full pipeline + train
-0 3 * * 0 /home/peter/.openclaw/scripts/kaggle-pipeline.sh --stage full
+0 3 * * 0 $HOME/.openclaw/scripts/kaggle-pipeline.sh --stage full
 ```
 
 ### OpenClaw Agent Trigger

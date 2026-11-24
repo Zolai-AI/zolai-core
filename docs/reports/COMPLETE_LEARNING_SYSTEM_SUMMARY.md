@@ -330,7 +330,7 @@ i = 1st person plural
 ✅ **OPERATIONAL** - Both systems complete  
 ✅ **READY FOR** - Model retraining, expanded validation, continuous learning  
 ✅ **COMPLIANCE** - 100% ZVS 2018 standard achieved  
-✅ **ARTIFACTS** - All saved to `/home/peter/Documents/Projects/zolai/`
+✅ **ARTIFACTS** - All saved to `<PROJECTS>/zolai/`
 
 ---
 

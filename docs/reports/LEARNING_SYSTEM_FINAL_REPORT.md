@@ -302,29 +302,29 @@ The system is ready for:
 ## Appendix: File Locations
 
 **Main Reports:**
-- `/home/peter/Documents/Projects/zolai/artifacts/wiki_audit_report.json`
-- `/home/peter/Documents/Projects/zolai/artifacts/local_translation_validation_report.json`
-- `/home/peter/Documents/Projects/zolai/artifacts/master_synthesis_report.json`
+- `<PROJECTS>/zolai/artifacts/wiki_audit_report.json`
+- `<PROJECTS>/zolai/artifacts/local_translation_validation_report.json`
+- `<PROJECTS>/zolai/artifacts/master_synthesis_report.json`
 
 **Updated Wiki Files:**
-- `/home/peter/Documents/Projects/zolai/wiki/zolai_system_prompt.txt`
-- `/home/peter/Documents/Projects/zolai/wiki/mistakes/common_mistakes.md`
-- `/home/peter/Documents/Projects/zolai/wiki/LEARNING_SUMMARY_2026_04_22.md`
+- `<PROJECTS>/zolai/wiki/zolai_system_prompt.txt`
+- `<PROJECTS>/zolai/wiki/mistakes/common_mistakes.md`
+- `<PROJECTS>/zolai/wiki/LEARNING_SUMMARY_2026_04_22.md`
 
 **New Wiki Files:**
-- `/home/peter/Documents/Projects/zolai/wiki/grammar/extracted_patterns.md`
-- `/home/peter/Documents/Projects/zolai/wiki/grammar/bible_verb_reference.md`
-- `/home/peter/Documents/Projects/zolai/wiki/grammar/bible_directional_reference.md`
-- `/home/peter/Documents/Projects/zolai/wiki/discussions/expert_panel_discussion_2026_04_22.md`
+- `<PROJECTS>/zolai/wiki/grammar/extracted_patterns.md`
+- `<PROJECTS>/zolai/wiki/grammar/bible_verb_reference.md`
+- `<PROJECTS>/zolai/wiki/grammar/bible_directional_reference.md`
+- `<PROJECTS>/zolai/wiki/discussions/expert_panel_discussion_2026_04_22.md`
 
 **Scripts:**
-- `/home/peter/Documents/Projects/zolai/scripts/grammar_pattern_extractor.py`
-- `/home/peter/Documents/Projects/zolai/scripts/bible_corpus_analyzer.py`
-- `/home/peter/Documents/Projects/zolai/scripts/comprehensive_wiki_audit.py`
-- `/home/peter/Documents/Projects/zolai/scripts/local_translation_validator.py`
-- `/home/peter/Documents/Projects/zolai/scripts/master_learning_synthesizer.py`
-- `/home/peter/Documents/Projects/zolai/scripts/learning_orchestrator.py`
-- `/home/peter/Documents/Projects/zolai/scripts/run_full_learning_system.sh`
+- `<PROJECTS>/zolai/scripts/grammar_pattern_extractor.py`
+- `<PROJECTS>/zolai/scripts/bible_corpus_analyzer.py`
+- `<PROJECTS>/zolai/scripts/comprehensive_wiki_audit.py`
+- `<PROJECTS>/zolai/scripts/local_translation_validator.py`
+- `<PROJECTS>/zolai/scripts/master_learning_synthesizer.py`
+- `<PROJECTS>/zolai/scripts/learning_orchestrator.py`
+- `<PROJECTS>/zolai/scripts/run_full_learning_system.sh`
 
 ---
 

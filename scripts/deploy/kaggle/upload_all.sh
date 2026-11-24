@@ -1,4 +1,7 @@
 #!/bin/bash
+# Resolve kaggle from PATH instead of one user's ~/.local/bin,
+# so the script runs on any machine or CI runner.
+KAGGLE="${KAGGLE_BIN:-$(command -v kaggle || echo "$HOME/.local/bin/kaggle")}"
 
 # Kaggle credential comes from the environment only -- never hardcode secrets.
 if [ -z "${KAGGLE_API_TOKEN:-}" ]; then
@@ -18,7 +21,7 @@ echo ""
 # Upload dataset
 echo "📦 Uploading dataset..."
 cd kaggle_dataset
-/home/peter/.local/bin/kaggle datasets create -p . --dir-mode zip 2>&1 | grep -E "successfully|created|error|Error"
+"$KAGGLE" datasets create -p . --dir-mode zip 2>&1 | grep -E "successfully|created|error|Error"
 cd ..
 
 echo ""
@@ -43,7 +46,7 @@ cat > kaggle_notebook_meta.json << 'METAEOF'
 METAEOF
 
 # Upload notebook
-/home/peter/.local/bin/kaggle kernels push -p . -k zolai-llm-finetuning-t4x2 2>&1 | grep -E "successfully|created|error|Error|Kernel"
+"$KAGGLE" kernels push -p . -k zolai-llm-finetuning-t4x2 2>&1 | grep -E "successfully|created|error|Error|Kernel"
 
 echo ""
 echo "════════════════════════════════════════════════════════════════════════════"

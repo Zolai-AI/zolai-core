@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -45,7 +46,23 @@ import time
 from pathlib import Path
 
 TOOLKIT_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_ROOT = TOOLKIT_ROOT.parent
 sys.path.insert(0, str(TOOLKIT_ROOT))
+
+
+def _data_root() -> Path:
+    """Shared ``data/`` dir, mirroring zolai/config.py.
+
+    The defaults used to be absolute ``/home/<user>/…`` paths: machine-specific,
+    broken for anyone else (and for CI), and a personal-path leak in a public repo.
+    """
+    for var in ("ZOLAI_DB_PATH", "ZOLAI_DATA_ROOT"):
+        val = os.environ.get(var, "").strip()
+        if val:
+            p = Path(val).expanduser()
+            return p.parent if var == "ZOLAI_DB_PATH" else p
+    workspace = WORKSPACE_ROOT / "data"
+    return workspace if workspace.is_dir() else TOOLKIT_ROOT / "data"
 
 from zolai.shared.clock import SQL_DEFAULT, SQL_NOW  # noqa: E402
 
@@ -208,13 +225,13 @@ def main() -> int:
     parser.add_argument(
         "--db",
         type=Path,
-        default=Path("/home/peter/Documents/Projects/zolai-ai/data/zolai.db"),
+        default=_data_root() / "zolai.db",
     )
     parser.add_argument("--apply", action="store_true", help="write (default: report only)")
     parser.add_argument(
         "--ledger",
         type=Path,
-        default=Path("/home/peter/Documents/Projects/zolai-ai/data/backups/ddl_default_rebuild.jsonl"),
+        default=_data_root() / "backups" / "ddl_default_rebuild.jsonl",
     )
     parser.add_argument("--table", action="append", help="limit to these tables (repeatable)")
     args = parser.parse_args()

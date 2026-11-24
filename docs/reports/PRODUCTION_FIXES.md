@@ -12,7 +12,7 @@ scripts/seed-public-content.ts(49,34): error TS2322
 
 **Fix:** Check what fields are missing in Post creation:
 ```bash
-cd /home/peter/Documents/Projects/zolai/website/zolai-project
+cd <PROJECTS>/zolai/website/zolai-project
 grep -A 10 "line 265" scripts/seed-new-content-2026.ts
 grep -A 10 "line 49" scripts/seed-public-content.ts
 ```
@@ -32,7 +32,7 @@ Error: Vitest cannot be imported in a CommonJS module using require()
 
 **Option A: Remove Vitest (Recommended)**
 ```bash
-cd /home/peter/Documents/Projects/zolai/website/zolai-project
+cd <PROJECTS>/zolai/website/zolai-project
 npm uninstall vitest @vitest/ui
 rm -rf integration/
 ```
@@ -290,7 +290,7 @@ After applying fixes, verify:
 
 ```bash
 # 1. TypeScript compiles
-cd /home/peter/Documents/Projects/zolai/website/zolai-project
+cd <PROJECTS>/zolai/website/zolai-project
 npx tsc --noEmit
 
 # 2. Build succeeds
@@ -333,7 +333,7 @@ Before deploying to production:
 ## 🚀 DEPLOYMENT COMMAND
 
 ```bash
-cd /home/peter/Documents/Projects/zolai/website/zolai-project
+cd <PROJECTS>/zolai/website/zolai-project
 export $(grep "TELEGRAM_BOT_TOKEN\|TELEGRAM_CHAT_ID" .env.production | xargs)
 bash deploy-ssh.sh
 ```

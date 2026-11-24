@@ -262,7 +262,7 @@ For questions or issues:
 ## 📋 File Manifest
 
 ```
-/home/peter/Documents/Projects/zolai/
+<PROJECTS>/zolai/
 ├── LEARNING_SYSTEM_FINAL_REPORT.md          (12 KB) ← START HERE
 ├── LEARNING_ARTIFACTS_INDEX.md              (15 KB) ← Complete index
 ├── README_LEARNING_SYSTEM.md                (This file)

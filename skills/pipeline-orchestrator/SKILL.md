@@ -52,7 +52,7 @@ bash scripts/deploy/kaggle-pipeline.sh status
 
 ## Cron Schedule (VPS)
 ```cron
-0 */6  * * *  bash /home/peter/Documents/Projects/zolai/scripts/deploy/kaggle-pipeline.sh collect
-0 */12 * * *  bash /home/peter/Documents/Projects/zolai/scripts/deploy/kaggle-pipeline.sh clean
-0 3    * * 0  bash /home/peter/Documents/Projects/zolai/scripts/deploy/kaggle-pipeline.sh full
+0 */6  * * *  bash $PROJECTS/zolai/scripts/deploy/kaggle-pipeline.sh collect
+0 */12 * * *  bash $PROJECTS/zolai/scripts/deploy/kaggle-pipeline.sh clean
+0 3    * * 0  bash $PROJECTS/zolai/scripts/deploy/kaggle-pipeline.sh full
 ```

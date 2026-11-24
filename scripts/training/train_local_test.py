@@ -3,6 +3,7 @@
 
 import json
 import os
+from pathlib import Path
 
 import torch
 from datasets import Dataset
@@ -25,9 +26,16 @@ BATCH_SIZE = 8
 MAX_LENGTH = 256
 
 # Load datasets
-TRAIN_FILE = str(Path(__file__).resolve().parent.parent.parent / 'data' / 'training' / 'llm_train.jsonl')
+# Training corpora live in the workspace `data/` dir (the same store zolai-core
+# reads), one level above this repo — three parents lands inside zolai-core/data,
+# which does not exist. ZOLAI_DATA_ROOT overrides for CI or another checkout.
+_DATA_ROOT = Path(os.environ.get("ZOLAI_DATA_ROOT")
+                  or Path(__file__).resolve().parents[2].parent / "data")
+TRAIN_FILE = str(os.environ.get("ZOLAI_TRAIN_FILE")
+                 or _DATA_ROOT / "training" / "llm_train.jsonl")
 
-VAL_FILE = str(Path(__file__).resolve().parent.parent.parent / 'data' / 'training' / 'llm_val.jsonl')
+VAL_FILE = str(os.environ.get("ZOLAI_VAL_FILE")
+                 or _DATA_ROOT / "training" / "llm_val.jsonl")
 def load_dataset(filepath, max_samples=10000):
     texts = []
     with open(filepath, "r") as f:

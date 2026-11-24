@@ -23,7 +23,7 @@
 ## 📁 Directory Structure
 
 ```
-/home/peter/Documents/Projects/zolai/
+<PROJECTS>/zolai/
 ├── LEARNING_SYSTEM_FINAL_REPORT.md          ← Main report (12KB)
 ├── LEARNING_ARTIFACTS_INDEX.md              ← This file
 ├── artifacts/
@@ -59,7 +59,7 @@
 ## 📄 Main Reports
 
 ### 1. LEARNING_SYSTEM_FINAL_REPORT.md (12 KB)
-**Location:** `/home/peter/Documents/Projects/zolai/LEARNING_SYSTEM_FINAL_REPORT.md`
+**Location:** `<PROJECTS>/zolai/LEARNING_SYSTEM_FINAL_REPORT.md`
 
 **Contents:**
 - Executive summary
@@ -83,7 +83,7 @@
 ---
 
 ### 2. artifacts/SYSTEM_STATUS.txt (4 KB)
-**Location:** `/home/peter/Documents/Projects/zolai/artifacts/SYSTEM_STATUS.txt`
+**Location:** `<PROJECTS>/zolai/artifacts/SYSTEM_STATUS.txt`
 
 **Contents:**
 - Quick execution summary
@@ -98,7 +98,7 @@
 ---
 
 ### 3. wiki/LEARNING_SUMMARY_2026_04_22.md (2 KB)
-**Location:** `/home/peter/Documents/Projects/zolai/wiki/LEARNING_SUMMARY_2026_04_22.md`
+**Location:** `<PROJECTS>/zolai/wiki/LEARNING_SUMMARY_2026_04_22.md`
 
 **Contents:**
 - Overview of learning system
@@ -117,7 +117,7 @@
 ## 📊 Detailed Reports (JSON)
 
 ### 1. wiki_audit_report.json
-**Location:** `/home/peter/Documents/Projects/zolai/artifacts/wiki_audit_report.json`
+**Location:** `<PROJECTS>/zolai/artifacts/wiki_audit_report.json`
 
 **Contents:**
 - Total errors found: 365
@@ -136,7 +136,7 @@
 ---
 
 ### 2. local_translation_validation_report.json
-**Location:** `/home/peter/Documents/Projects/zolai/artifacts/local_translation_validation_report.json`
+**Location:** `<PROJECTS>/zolai/artifacts/local_translation_validation_report.json`
 
 **Contents:**
 - Total tested: 10
@@ -158,7 +158,7 @@
 ---
 
 ### 3. master_synthesis_report.json
-**Location:** `/home/peter/Documents/Projects/zolai/artifacts/master_synthesis_report.json`
+**Location:** `<PROJECTS>/zolai/artifacts/master_synthesis_report.json`
 
 **Contents:**
 - Consolidated results from all phases
@@ -177,7 +177,7 @@
 ---
 
 ### 4. grammar_extraction_summary.json
-**Location:** `/home/peter/Documents/Projects/zolai/artifacts/grammar_extraction_summary.json`
+**Location:** `<PROJECTS>/zolai/artifacts/grammar_extraction_summary.json`
 
 **Contents:**
 - Verbs extracted: 0 (from structured sections)
@@ -190,7 +190,7 @@
 ---
 
 ### 5. bible_analysis_summary.json
-**Location:** `/home/peter/Documents/Projects/zolai/artifacts/bible_analysis_summary.json`
+**Location:** `<PROJECTS>/zolai/artifacts/bible_analysis_summary.json`
 
 **Contents:**
 - Verbs analyzed: 0 (from corpus)
@@ -205,7 +205,7 @@
 ## 📚 New Wiki Files
 
 ### 1. wiki/grammar/extracted_patterns.md
-**Location:** `/home/peter/Documents/Projects/zolai/wiki/grammar/extracted_patterns.md`
+**Location:** `<PROJECTS>/zolai/wiki/grammar/extracted_patterns.md`
 
 **Contents:**
 - Verb patterns (extracted from grammar books)
@@ -218,7 +218,7 @@
 ---
 
 ### 2. wiki/grammar/bible_verb_reference.md
-**Location:** `/home/peter/Documents/Projects/zolai/wiki/grammar/bible_verb_reference.md`
+**Location:** `<PROJECTS>/zolai/wiki/grammar/bible_verb_reference.md`
 
 **Contents:**
 - Verb usage patterns from Bible corpus
@@ -231,7 +231,7 @@
 ---
 
 ### 3. wiki/grammar/bible_directional_reference.md
-**Location:** `/home/peter/Documents/Projects/zolai/wiki/grammar/bible_directional_reference.md`
+**Location:** `<PROJECTS>/zolai/wiki/grammar/bible_directional_reference.md`
 
 **Contents:**
 - Directional particle usage from Bible corpus
@@ -244,7 +244,7 @@
 ---
 
 ### 4. wiki/discussions/expert_panel_discussion_2026_04_22.md
-**Location:** `/home/peter/Documents/Projects/zolai/wiki/discussions/expert_panel_discussion_2026_04_22.md`
+**Location:** `<PROJECTS>/zolai/wiki/discussions/expert_panel_discussion_2026_04_22.md`
 
 **Contents:**
 - 10 expert panel discussions

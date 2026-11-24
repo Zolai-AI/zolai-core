@@ -34,7 +34,7 @@ ssh zolai                          # interactive shell (SSH config alias)
 Host zolai
     HostName 13.115.84.100
     User ubuntu
-    IdentityFile /home/peter/Documents/Projects/zolai/config/ssh/aws-lightsail.pem
+    IdentityFile $PROJECTS/zolai/config/ssh/aws-lightsail.pem
     ServerAliveInterval 60
 ```
 
